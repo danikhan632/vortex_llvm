@@ -26,6 +26,7 @@ private:
   DenseSet<const Value *> uv_nodes_;
   const Function* function_;
   bool initialized_;
+  
 };
 
 }

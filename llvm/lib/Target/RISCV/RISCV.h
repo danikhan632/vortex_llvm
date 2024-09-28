@@ -18,6 +18,7 @@
 #include "llvm/Target/TargetMachine.h"
 
 namespace llvm {
+    
 class ModulePass;
 class FunctionPass;
 class InstructionSelector;

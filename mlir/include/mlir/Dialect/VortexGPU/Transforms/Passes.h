@@ -24,7 +24,7 @@ namespace vortex_gpu {
 #define GEN_PASS_DECL
 // #include "mlir/Dialect/VortexGPU/Transforms/Passes.h.inc"
 
-/// Pass to enable Armv9 Streaming SVE mode.
+
 std::unique_ptr<Pass> createEnableArmStreamingPass(
     const ArmStreamingMode = ArmStreamingMode::Streaming,
     const ArmZaMode = ArmZaMode::Disabled, bool onlyIfRequiredByOps = false);

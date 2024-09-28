@@ -1,5 +1,6 @@
 add_mlir_dialect(VortexGPU vortex_gpu VortexGPU)
 
+
 # Generate declarations and definitions of VortexGPU Ops
 set(LLVM_TARGET_DEFINITIONS VortexGPUOps.td)
 mlir_tablegen(VortexGPUOps.h.inc -gen-op-decls)

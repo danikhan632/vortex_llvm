@@ -24,6 +24,7 @@ using namespace mlir::vortex_gpu;
 // Tablegen Definitions
 //===----------------------------------------------------------------------===//
 
+
 #include "mlir/Dialect/VortexGPU/IR/VortexGPUDialect.cpp.inc"
 
 #include "mlir/Dialect/VortexGPU/IR/VortexGPUEnums.cpp.inc"

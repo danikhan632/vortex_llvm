@@ -36,6 +36,7 @@ class RISCVTTIImpl : public BasicTTIImplBase<RISCVTTIImpl> {
   const RISCVSubtarget *ST;
   const RISCVTargetLowering *TLI;
   vortex::DivergenceTracker divergence_tracker_;
+  
   bool hasBranchDivergence_;
 
   const RISCVSubtarget *getST() const { return ST; }

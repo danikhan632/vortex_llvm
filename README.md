@@ -42,3 +42,15 @@ chat](https://discord.gg/xS7Z362),
 
 The LLVM project has adopted a [code of conduct](https://llvm.org/docs/CodeOfConduct.html) for
 participants to all modes of communication within the project.
+
+
+
+cmake -G Ninja \
+      -DCMAKE_BUILD_TYPE=Debug \
+      -DLLVM_ENABLE_ASSERTIONS=ON \
+      -DLLVM_ENABLE_PROJECTS="mlir;llvm" \
+      -DLLVM_TARGETS_TO_BUILD="host;NVPTX;AMDGPU;RISCV" \
+      -DLLVM_ENABLE_DEBUG_INFO=FORCED \
+      -DLLVM_BUILD_LLVM_DYLIB=ON \
+      -DLLVM_LINK_LLVM_DYLIB=ON \
+      ../llvm

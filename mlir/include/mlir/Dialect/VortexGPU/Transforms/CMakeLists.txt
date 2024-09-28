@@ -6,3 +6,4 @@ add_public_tablegen_target(MLIRVortexGPUTransformsIncGen)
 add_dependencies(mlir-headers MLIRVortexGPUTransformsIncGen)
 
 add_mlir_doc(Passes VortexGPUPasses ./ -gen-pass-doc)
+

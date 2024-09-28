@@ -55,7 +55,7 @@ let TargetPrefix = "riscv" in {
   // names and semantics could change in the future.
 
   // @llvm.riscv.masked.atomicrmw.*.{i32,i64}.<p>(
-  //   ptr addr, ixlen oparg, ixlen mask, ixlenimm ordering)
+  //  ptr addr, ixlen oparg, ixlen mask, ixlenimm ordering)
   defm int_riscv_masked_atomicrmw_xchg : MaskedAtomicRMWFourArgIntrinsics;
   defm int_riscv_masked_atomicrmw_add : MaskedAtomicRMWFourArgIntrinsics;
   defm int_riscv_masked_atomicrmw_sub : MaskedAtomicRMWFourArgIntrinsics;
@@ -73,6 +73,7 @@ let TargetPrefix = "riscv" in {
   defm int_riscv_masked_cmpxchg : MaskedAtomicRMWFiveArgIntrinsics;
 
   // Vortex extension
+  
 
   def int_riscv_vx_uniform : Intrinsic<[llvm_any_ty], [llvm_any_ty], [IntrNoMem]>;
 
@@ -107,6 +108,11 @@ let TargetPrefix = "riscv" in {
     def _i32 : VortexD1S1IntrinsicsImpl<llvm_i32_ty>;
     def _i64 : VortexD1S1IntrinsicsImpl<llvm_i64_ty>;
   }
+  multiclass VortexWMMAIntrinsics {
+    def _i32 : VortexWMMAIntrinsicsImpl<llvm_i32_ty>;
+    def _i64 : VortexWMMAIntrinsicsImpl<llvm_i64_ty>;
+  }
+
 
   defm int_riscv_vx_tmask : VortexCSRIntrinsics;
   defm int_riscv_vx_tid : VortexCSRIntrinsics;
@@ -124,6 +130,24 @@ let TargetPrefix = "riscv" in {
   defm int_riscv_vx_join  : VortexD0S1Intrinsics;
   defm int_riscv_vx_mov   : VortexD1S1Intrinsics;
   defm int_riscv_vx_bar  : VortexD0S2Intrinsics;
+
+  // New WMMA intrinsic
+  defm int_riscv_vx_wmma : VortexWMMAIntrinsics;
+
+
+  // Define a new intrinsic class for instructions with two registers and an immediate (like local_sw)
+class VortexD0S2ImmIntrinsicsImpl<LLVMType itype>
+    : Intrinsic<[], [itype, itype, llvm_i32_ty], [IntrHasSideEffects, IntrConvergent]>;
+
+// Multiclass for `local_sw` instruction (both i32 and i64 variants)
+multiclass VortexD0S2ImmIntrinsics {
+    def _i32 : VortexD0S2ImmIntrinsicsImpl<llvm_i32_ty>;
+    def _i64 : VortexD0S2ImmIntrinsicsImpl<llvm_i64_ty>;
+}
+
+// Instantiate the new intrinsic `local_sw`
+defm int_riscv_local_sw : VortexD0S2ImmIntrinsics;
+
 
 } // TargetPrefix = "riscv"
 

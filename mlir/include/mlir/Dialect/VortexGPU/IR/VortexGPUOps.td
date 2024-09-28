@@ -7,7 +7,7 @@
 //===----------------------------------------------------------------------===//
 //
 // This file defines the VortexGPU dialect ops. It also defines custom attributes
-// and types that are used to define the Ops.
+// and types that are used to define the Ops
 //
 //===----------------------------------------------------------------------===//
 

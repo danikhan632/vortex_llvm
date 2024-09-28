@@ -28,16 +28,7 @@ def ArmStreamingMode : I32EnumAttr<"ArmStreamingMode", "Armv9 Streaming SVE mode
   let genSpecializedAttr = 0;
 }
 
-// https://arm-software.github.io/acle/main/acle.html#sme-attributes-relating-to-za
-// See also the LLVM definitions: https://llvm.org/docs/AArch64SME.html
-//
-// Various frontends (e.g. Flang) that build on top of this may restrict or
-// enforce how these attributes are used, both individually and in terms of
-// combinations that are allowed.
-//
-// The MLIR interface here does not make any attempt to perform any checking,
-// it is up to the higher level to ensure that these attributes are used in a
-// way that both makes sense and is legal according to the Arm architecture.
+
 def ArmZaMode : I32EnumAttr<"ArmZaMode", "Armv9 ZA storage mode",
     [
       I32EnumAttrCase<"Disabled", 0, "disabled">,

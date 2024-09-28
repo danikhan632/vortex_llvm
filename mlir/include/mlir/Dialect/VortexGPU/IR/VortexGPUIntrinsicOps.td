@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file contains definitions of the intrinsic Ops for the VortexGPU dialect.
+// This file contains definitions of the intrinsic Ops for the VortexGPU dialect
 //
 //===----------------------------------------------------------------------===//
 

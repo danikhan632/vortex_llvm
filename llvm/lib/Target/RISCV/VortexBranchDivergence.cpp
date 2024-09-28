@@ -368,6 +368,7 @@ FunctionPass *createVortexBranchDivergence2Pass(int PassMode) {
 
 }
 
+
 INITIALIZE_PASS_BEGIN(VortexBranchDivergence0, "vortex-branch-divergence-0",
                 "Vortex Branch Divergence Pre-Processing", false, false)
 INITIALIZE_PASS_DEPENDENCY(UniformityInfoWrapperPass)

@@ -41,6 +41,7 @@
 #include "llvm/Passes/PassBuilder.h"
 #include "VortexBranchDivergence.h"
 #include <optional>
+#include <iostream>
 using namespace llvm;
 
 static cl::opt<bool> EnableRedundantCopyElimination(
@@ -51,6 +52,7 @@ static cl::opt<bool> EnableRedundantCopyElimination(
 // 0: Disable Vortex Branch Divergence
 // 1: Enable Vortex Branch Divergence with only non-regional-only divergent branches structurized first
 // 2: Enable Vortex Branch Divergence with all divergent branches structurized first
+
 static cl::opt<int> VortexBranchDivergenceMode(
   "vortex-branch-divergence",
   cl::desc("Set Vortex Branch Divergence Mode"),
@@ -60,7 +62,7 @@ int gVortexBranchDivergenceMode = 0;
 static cl::opt<int> VortexKernelSchedulerMode(
   "vortex-kernel-scheduler",
   cl::desc("Set Vortex Kernel Scheduler Mode"),
-  cl::init(0));
+  cl::init(1));
 
 // FIXME: Unify control over GlobalMerge.
 static cl::opt<cl::boolOrDefault>
@@ -127,14 +129,17 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeRISCVTarget() {
   initializeRISCVPreLegalizerCombinerPass(*PR);
   initializeRISCVPostLegalizerCombinerPass(*PR);
   initializeKCFIPass(*PR);
+  std::cout<<"hey there" <<std::endl;
   if (VortexBranchDivergenceMode != 0) {
     initializeVortexBranchDivergence0Pass(*PR);
+
     initializeVortexBranchDivergence1Pass(*PR);
     initializeVortexBranchDivergence2Pass(*PR);
   }
-  if (VortexKernelSchedulerMode != 0) {
+
+  //  if (VortexKernelSchedulerMode != 0) {
     initializeVortexIntrinsicFuncLoweringPass(*PR);
-  }
+  //}
   initializeRISCVDeadRegisterDefinitionsPass(*PR);
   initializeRISCVMakeCompressibleOptPass(*PR);
   initializeRISCVGatherScatterLoweringPass(*PR);
@@ -187,6 +192,7 @@ RISCVTargetMachine::RISCVTargetMachine(const Target &T, const Triple &TT,
                         getEffectiveCodeModel(CM, CodeModel::Small), OL),
       TLOF(std::make_unique<RISCVELFTargetObjectFile>()) {
   initAsmInfo();
+  std::cout<<"yooooods" <<std::endl;
 
   // RISC-V supports the MachineOutliner.
   setMachineOutliner(true);
@@ -517,13 +523,14 @@ bool RISCVPassConfig::addPreISel() {
     addPass(createCFGSimplificationPass());
     addPass(createLoopSimplifyPass());
     addPass(createUnifyLoopExitsPass());
+    addPass(createVortexIntrinsicFuncLoweringPass());
     addPass(createVortexBranchDivergence0Pass());
     addPass(createStructurizeCFGPass(true, (VortexKernelSchedulerMode == 1)));
     addPass(createVortexBranchDivergence1Pass(VortexKernelSchedulerMode));
   }
-  if (VortexKernelSchedulerMode != 0) {
-    addPass(createVortexIntrinsicFuncLoweringPass());
-  }
+  // if (VortexKernelSchedulerMode != 0) {
+  //   addPass(createVortexIntrinsicFuncLoweringPass());
+  // }
   return false;
 }
 

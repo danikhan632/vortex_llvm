@@ -1,8 +1,13 @@
 #include "RISCV.h"
 #include "RISCVSubtarget.h"
 
-//#include "llvm-c/Core.h"
+// #include "llvm-c/Core.h"
 
+#include "RISCV.h"
+#include "RISCVSubtarget.h"
+#include "llvm/ADT/APInt.h"
+#include "llvm/CodeGen/TargetPassConfig.h"
+#include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
@@ -14,16 +19,13 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
 #include "llvm/IR/Value.h"
-
+#include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "RISCV.h"
-#include "RISCVSubtarget.h"
-#include "llvm/InitializePasses.h"
-#include "llvm/CodeGen/TargetPassConfig.h"
-#include "llvm/CodeGen/ValueTypes.h"
-#include "llvm/ADT/APInt.h"
+#include <iostream>
+#include <map>
+#include <string>
 
 #include <iostream>
 #include <set>
@@ -47,21 +49,21 @@ class VortexIntrinsicFuncLowering final : public ModulePass {
   bool runOnModule(Module &M) override;
   bool Modified;
 
-  public:
+public:
   static char ID;
   VortexIntrinsicFuncLowering();
 };
 
 namespace llvm {
 
-  void initializeVortexIntrinsicFuncLoweringPass(PassRegistry &);
-  ModulePass *createVortexIntrinsicFuncLoweringPass() {
-    return new VortexIntrinsicFuncLowering();
-  }
+void initializeVortexIntrinsicFuncLoweringPass(PassRegistry &);
+ModulePass *createVortexIntrinsicFuncLoweringPass() {
+  return new VortexIntrinsicFuncLowering();
+}
 } // End namespace llvm
 
 INITIALIZE_PASS(VortexIntrinsicFuncLowering, DEBUG_TYPE,
-    "Fix function bitcasts for AMDGPU", false, false)
+                "Fix function bitcasts for AMDGPU", false, false)
 
 char VortexIntrinsicFuncLowering::ID = 0;
 
@@ -69,30 +71,75 @@ VortexIntrinsicFuncLowering::VortexIntrinsicFuncLowering() : ModulePass(ID) {
   initializeVortexIntrinsicFuncLoweringPass(*PassRegistry::getPassRegistry());
 }
 
-int CheckFTarget(std::vector<StringRef> FTargets, StringRef fname) {
-  for (size_t i = 0; i < FTargets.size(); i++) {
-    if (FTargets[i].equals(fname)) {
-      return (i);
+void printColored(const std::string &text, const std::string &color) {
+  static const std::map<std::string, std::string> colorCodes = {
+      {"black", "\033[30m"},  {"red", "\033[31m"},  {"green", "\033[32m"},
+      {"yellow", "\033[33m"}, {"blue", "\033[34m"}, {"magenta", "\033[35m"},
+      {"cyan", "\033[36m"},   {"white", "\033[37m"}};
+
+  auto it = colorCodes.find(color);
+  std::cout << (it != colorCodes.end() ? it->second : "\033[0m") << text
+            << "\033[0m" << std::endl;
+}
+
+int CheckFTarget(
+    const std::vector<std::pair<std::string, std::string>> &FTargetsMap,
+    const std::string &fnameStr) {
+  for (size_t i = 0; i < FTargetsMap.size(); i++) {
+
+    std::string firstStr = FTargetsMap[i].first;
+    std::string secondStr = FTargetsMap[i].second;
+
+    printColored(fnameStr, "green"); // Green
+    printColored(firstStr, "red");   // Red
+    printColored(secondStr, "blue"); // Blue
+
+    bool equalsFirst = fnameStr == firstStr;
+    bool equalsSecond = fnameStr.find(secondStr) != std::string::npos;
+
+    std::cout << "Equals first: " << equalsFirst << std::endl;
+    std::cout << "Contains second: " << equalsSecond << std::endl;
+
+    if (equalsFirst || equalsSecond) {
+      std::cout << "Match found at index: " << i << std::endl;
+      return static_cast<int>(i);
     }
   }
+  std::cout << "No match found" << std::endl;
   return -1;
 }
 
 bool VortexIntrinsicFuncLowering::runOnModule(Module &M) {
   Modified = false;
+  llvm::errs() << "Printing LLVM Module:\n";
+  M.print(llvm::errs(), nullptr); // Print the entire module to stderr
   std::cerr << "VORTEX Intrinsic Func pass " << std::endl;
 
   std::set<llvm::Function *> DeclToRemove;
   std::set<llvm::Instruction *> CallToRemove;
   std::set<llvm::Instruction *> vxBarCallToRemove;
   std::vector<StringRef> FTargets = {
-    "vx_barrier",
-    "vx_num_threads", "vx_num_warps", "vx_num_cores",
-    "vx_thread_id", "vx_warp_id", "vx_core_id",
-    "vx_thread_mask", "vx_tmc"};
+      "vx_barrier",   "vx_num_threads", "vx_num_warps",
+      "vx_num_cores", "vx_thread_id",   "vx_warp_id",
+      "vx_core_id",   "vx_thread_mask", "vx_tmc",
+      "vx_wmma", "vx_local_sw" // New WMMA intrinsic
+  };
+  std::vector<std::pair<std::string, std::string>> FTargetsMap = {
+      {"vx_barrier", "llvm.riscv.vx.bar"},
+      {"vx_num_threads", "llvm.riscv.vx.nt"},
+      {"vx_num_warps", "llvm.riscv.vx.nw"},
+      {"vx_num_cores", "llvm.riscv.vx.nc"},
+      {"vx_thread_id", "llvm.riscv.vx.tid"},
+      {"vx_warp_id", "llvm.riscv.vx.wid"},
+      {"vx_core_id", "llvm.riscv.vx.cid"},
+      {"vx_thread_mask", "llvm.riscv.vx.tmask"},
+      {"vx_tmc", "llvm.riscv.vx.tmc"},
+      {"vx_wmma", "llvm.riscv.vx_wmma"},
+      {"local_sw", "llvm.riscv.vx_local_sw"}
 
-  //Type* SizeTTy_;
-  auto& Context = M.getContext();
+      };
+  // Type* SizeTTy_;
+  auto &Context = M.getContext();
 
   auto sizeTSize = M.getDataLayout().getPointerSizeInBits();
   /*switch (sizeTSize) {
@@ -112,8 +159,10 @@ bool VortexIntrinsicFuncLowering::runOnModule(Module &M) {
   Function *nt_func_;
   Function *nw_func_;
   Function *nc_func_;
-  Function* tmask_func_;
+  Function *tmask_func_;
   Function *tmc_func_;
+  Function *wmma_func_; // New function pointer for WMMA intrinsic
+Function *local_sw_; // New function pointer for WMMA intrinsi
 
   if (sizeTSize == 64) {
     bar_func_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_bar_i64);
@@ -125,6 +174,7 @@ bool VortexIntrinsicFuncLowering::runOnModule(Module &M) {
     nc_func_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_nc_i64);
     tmask_func_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_tmask_i64);
     tmc_func_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_tmc_i64);
+    wmma_func_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_wmma_i64);
   } else {
     assert(sizeTSize == 32);
     bar_func_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_bar_i32);
@@ -136,20 +186,22 @@ bool VortexIntrinsicFuncLowering::runOnModule(Module &M) {
     nc_func_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_nc_i32);
     tmask_func_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_tmask_i32);
     tmc_func_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_tmc_i32);
+    wmma_func_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_wmma_i32);
+      // local_sw_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_local_sw);
   }
 
-  // Find tharget vx intrinsic
+  // Find target vx intrinsic
   for (llvm::Module::iterator I = M.begin(), E = M.end(); I != E; ++I) {
     llvm::Function *F = &*I;
     if (F->isDeclaration()) {
-      int check = CheckFTarget(FTargets, F->getName());
+      int check = CheckFTarget(FTargetsMap, F->getName().str());
       if (check != -1)
         DeclToRemove.insert(F);
       continue;
     }
     for (Function::iterator I = F->begin(), E = F->end(); I != E; ++I) {
       for (BasicBlock::iterator BI = I->begin(), BE = I->end(); BI != BE;
-          ++BI) {
+           ++BI) {
         Instruction *Instr = dyn_cast<Instruction>(BI);
         if (!llvm::isa<CallInst>(Instr))
           continue;
@@ -158,8 +210,38 @@ bool VortexIntrinsicFuncLowering::runOnModule(Module &M) {
         if (Callee == nullptr)
           continue;
 
-        int check = CheckFTarget(FTargets, Callee->getName());
+        int check = CheckFTarget(FTargetsMap, Callee->getName().str());
+        std::cout << "\033[34m" << "VORTEX_LOWERING" << "\033[0m" << std::endl;
 
+        std::cout << "\033[34m" << check << "\033[0m" << std::endl;
+        printColored("hiii", "magenta");
+
+
+
+        if (check == 9) { // WMMA case
+          printColored("yooooooo", "magenta");
+          CallInst *WMMACall = dyn_cast<CallInst>(Instr);
+
+          // Collect all 12 arguments
+          std::vector<Value *> Args;
+          for (unsigned i = 0; i < 12; ++i) {
+            Args.push_back(WMMACall->getArgOperand(i));
+          }
+
+          // Create a new WMMA instruction using wmma_func_
+          CallInst *NewWMMACall = CallInst::Create(wmma_func_, Args, "", Instr);
+
+          // If the original call had a name, give the new call the same name
+          if (!Instr->getName().empty()) {
+            NewWMMACall->setName(Instr->getName());
+          }
+
+          // Replace all uses of the old instruction with the new one
+          Instr->replaceAllUsesWith(NewWMMACall);
+
+          // Remove the original intrinsic call
+          CallToRemove.insert(Instr);
+        }
         if (check == 0) {
           vxBarCallToRemove.insert(Instr);
 
@@ -205,10 +287,11 @@ bool VortexIntrinsicFuncLowering::runOnModule(Module &M) {
           Instr->replaceAllUsesWith(tmcinst);
           CallToRemove.insert(Instr);
         }
-      } // end of BB loop
-    }   // end of F loop
-  }     // end of M loop
 
+      } // end of BB loop
+    } // end of F loop
+  } // end of M loop
+  printColored("END_OF_LOOP", "yellow");
   // Insert vx_barrier(barCnt, warp_size)
   if (!vxBarCallToRemove.empty()) {
     int barCnt = 1;
@@ -217,7 +300,7 @@ bool VortexIntrinsicFuncLowering::runOnModule(Module &M) {
       CallInst *Callinst = dyn_cast<CallInst>(B);
       LLVMContext &context = M.getContext();
       auto barID =
-        llvm::ConstantInt::get(context, llvm::APInt(32, (barCnt++), false));
+          llvm::ConstantInt::get(context, llvm::APInt(32, (barCnt++), false));
       auto barCnt = Callinst->getArgOperand(1);
       // auto barCnt = llvm::ConstantInt::get(context, llvm::APInt(32, 4,
       // false));
@@ -239,7 +322,12 @@ bool VortexIntrinsicFuncLowering::runOnModule(Module &M) {
   }
 
   for (auto F : DeclToRemove) {
-    F->eraseFromParent();
+    if (F->use_empty()) {
+      F->eraseFromParent();
+    } else {
+      errs() << "Warning: Cannot remove declaration of " << F->getName()
+             << " because it still has uses.\n";
+    }
   }
   printIR(&M);
   return Modified;

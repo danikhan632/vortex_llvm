@@ -1,0 +1,41 @@
+/home/green/tools/llvm-vortex/bin/clang \
+  -march=rv32imaf -mabi=ilp32f -O3 -mcmodel=medany \
+  --sysroot=/home/green/tools/riscv32-gnu-toolchain/riscv32-unknown-elf \
+  --gcc-toolchain=/home/green/tools/riscv32-gnu-toolchain \
+  -fno-rtti -fno-exceptions -nostartfiles -nostdlib \
+  -fdata-sections -ffunction-sections \
+  -I/home/green/code/triton-vortex/vortex/build/hw \
+  -I/home/green/code/triton-vortex/vortex/kernel/include \
+  -DXLEN_32 -DNDEBUG \
+  -Xclang -target-feature -Xclang +vortex -Xclang -target-feature -Xclang +zicond \
+  -mllvm -disable-loop-idiom-all \
+  -DNUM_CLUSTERS=1 -DNUM_CORES=2 -DNUM_WARPS=4 -DNUM_THREADS=4 \
+  -S -emit-llvm \
+  kernel.cl -o kernel.ll
+
+
+
+  /home/green/tools/llvm-vortex/bin/llc \
+  -march=riscv32 \
+  -mattr=+m,+a,+f,+vortex,+zicond \
+  -mcpu=generic-rv32 \
+  -mtriple=riscv32-unknown-elf \
+  -filetype=asm \
+  -O3 \
+  kernel.ll -o kernel.s
+
+
+
+  /home/green/tools/llvm-vortex/bin/llvm-mc \
+  -triple=riscv32-unknown-elf \
+  -mattr=+m,+a,+f,+vortex,+zicond \
+  -filetype=obj \
+  kernel.s \
+  -o kernel.o
+
+
+/home/green/tools/llvm-vortex/bin/llvm-objdump \
+  -d \
+  -M no-aliases \
+  --mattr=+m,+a,+f,+vortex,+zicond \
+  kernel.o > kernel_compiled.s
