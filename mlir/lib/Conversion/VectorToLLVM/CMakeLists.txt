@@ -1,15 +1,46 @@
-add_llvm_library(MLIRVectorToLLVM
+add_mlir_conversion_library(MLIRVectorToLLVM
+  PARTIAL_SOURCES_INTENDED
   ConvertVectorToLLVM.cpp
 
   ADDITIONAL_HEADER_DIRS
   ${MLIR_MAIN_INCLUDE_DIR}/mlir/Conversion/VectorToLLVM
-)
-set(LIBS
-  MLIRLLVMIR
+
+  DEPENDS
+  MLIRConversionPassIncGen
+  intrinsics_gen
+
+  LINK_COMPONENTS
+  Core
+
+  LINK_LIBS PUBLIC
+  MLIRArithDialect
+  MLIRLLVMCommonConversion
+  MLIRLLVMDialect
+  MLIRMemRefDialect
+  MLIRTargetLLVMIRExport
   MLIRTransforms
-  LLVMCore
-  LLVMSupport
+  MLIRVectorDialect
+  MLIRVectorTransforms
   )
 
-add_dependencies(MLIRVectorToLLVM ${LIBS})
-target_link_libraries(MLIRVectorToLLVM ${LIBS})
+add_mlir_conversion_library(MLIRVectorToLLVMPass
+  PARTIAL_SOURCES_INTENDED
+
+  ConvertVectorToLLVMPass.cpp
+  ADDITIONAL_HEADER_DIRS
+  ${MLIR_MAIN_INCLUDE_DIR}/mlir/Conversion/VectorToLLVM
+
+  LINK_LIBS PUBLIC
+  MLIRVectorToLLVM
+
+  MLIRArmNeonDialect
+  MLIRArmSMEDialect
+  MLIRArmSMETransforms
+  MLIRArmSVEDialect
+  MLIRArmSVETransforms
+  MLIRVectorToArmSME
+  MLIRAMXDialect
+  MLIRAMXTransforms
+  MLIRX86VectorDialect
+  MLIRX86VectorTransforms
+)

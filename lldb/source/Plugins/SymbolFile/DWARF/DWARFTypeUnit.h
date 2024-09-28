@@ -6,17 +6,23 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SymbolFileDWARF_DWARFTypeUnit_h_
-#define SymbolFileDWARF_DWARFTypeUnit_h_
+#ifndef LLDB_SOURCE_PLUGINS_SYMBOLFILE_DWARF_DWARFTYPEUNIT_H
+#define LLDB_SOURCE_PLUGINS_SYMBOLFILE_DWARF_DWARFTYPEUNIT_H
 
 #include "DWARFUnit.h"
 #include "llvm/Support/Error.h"
 
+namespace llvm {
+class DWARFAbbreviationDeclarationSet;
+} // namespace llvm
+
+namespace lldb_private::plugin {
+namespace dwarf {
 class DWARFTypeUnit : public DWARFUnit {
 public:
   void BuildAddressRangeTable(DWARFDebugAranges *debug_aranges) override {}
 
-  void Dump(lldb_private::Stream *s) const override;
+  void Dump(Stream *s) const override;
 
   uint64_t GetTypeHash() { return m_header.GetTypeHash(); }
 
@@ -27,11 +33,13 @@ public:
 private:
   DWARFTypeUnit(SymbolFileDWARF &dwarf, lldb::user_id_t uid,
                 const DWARFUnitHeader &header,
-                const DWARFAbbreviationDeclarationSet &abbrevs,
+                const llvm::DWARFAbbreviationDeclarationSet &abbrevs,
                 DIERef::Section section, bool is_dwo)
       : DWARFUnit(dwarf, uid, header, abbrevs, section, is_dwo) {}
 
   friend class DWARFUnit;
 };
+} // namespace dwarf
+} // namespace lldb_private::plugin
 
-#endif // SymbolFileDWARF_DWARFTypeUnit_h_
+#endif // LLDB_SOURCE_PLUGINS_SYMBOLFILE_DWARF_DWARFTYPEUNIT_H

@@ -54,13 +54,14 @@ public:
     // Parse the extra command line args.
     // FIXME: This is very limited at the moment.
     for (StringRef Arg : Args) {
-      if (Arg.startswith("-db="))
+      if (Arg.starts_with("-db="))
         DB = Arg.substr(strlen("-db="));
-      else if (Arg.startswith("-input="))
+      else if (Arg.starts_with("-input="))
         Input = Arg.substr(strlen("-input="));
     }
 
-    std::string InputFile = CI.getFrontendOpts().Inputs[0].getFile();
+    std::string InputFile =
+        std::string(CI.getFrontendOpts().Inputs[0].getFile());
     auto CreateYamlIdx = [=]() -> std::unique_ptr<include_fixer::SymbolIndex> {
       llvm::ErrorOr<std::unique_ptr<include_fixer::YamlSymbolIndex>> SymbolIdx(
           nullptr);

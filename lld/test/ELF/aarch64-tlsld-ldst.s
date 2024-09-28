@@ -1,7 +1,7 @@
 // REQUIRES: aarch64
 // RUN: llvm-mc -triple=aarch64-linux-gnu -filetype=obj %s -o %t.o
 // RUN: ld.lld %t.o -o %t
-// RUN: llvm-objdump -d --no-show-raw-insn %t | FileCheck %s
+// RUN: llvm-objdump --no-print-imm-hex -d --no-show-raw-insn %t | FileCheck %s
 // RUN: llvm-readelf --symbols %t | FileCheck -check-prefix CHECK-SYMS %s
 
         .text
@@ -24,7 +24,7 @@ _start:  mrs x8, TPIDR_EL0
         add x8, x8, :tprel_hi12:var4
         ldrb w0, [x8, :tprel_lo12_nc:var4]
 
-// CHECK: _start:
+// CHECK: <_start>:
 // CHECK-NEXT:    210158:       mrs     x8, TPIDR_EL0
 // 0x0 + c10 = 0xc10       = tcb (16-bytes) + var0
 // CHECK-NEXT:    21015c:       add     x8, x8, #0, lsl #12

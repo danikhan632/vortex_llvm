@@ -1,4 +1,4 @@
-//===-------------- Implementation header for mmap function ------ *-C++-* ===//
+//===-- Implementation header for mmap function -----------------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -11,10 +11,10 @@
 
 #include <sys/mman.h> // For size_t and off_t
 
-namespace __llvm_libc {
+namespace LIBC_NAMESPACE {
 
 void *mmap(void *addr, size_t size, int prot, int flags, int fd, off_t offset);
 
-} // namespace __llvm_libc
+} // namespace LIBC_NAMESPACE
 
 #endif // LLVM_LIBC_SRC_SYS_MMAN_MMAP_H

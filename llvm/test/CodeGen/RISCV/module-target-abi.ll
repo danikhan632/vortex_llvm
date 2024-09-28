@@ -2,7 +2,7 @@
 ; RUN:   | FileCheck -check-prefix=DEFAULT %s
 ; RUN: llc -mtriple=riscv32 -target-abi ilp32 < %s 2>&1 \
 ; RUN:   | FileCheck -check-prefix=RV32IF-ILP32 %s
-; RUN: not llc -mtriple=riscv32 -target-abi ilp32f < %s 2>&1 \
+; RUN: not --crash llc -mtriple=riscv32 -target-abi ilp32f < %s 2>&1 \
 ; RUN:   | FileCheck -check-prefix=RV32IF-ILP32F %s
 ; RUN: llc -mtriple=riscv32 -filetype=obj < %s | llvm-readelf -h - | FileCheck -check-prefixes=FLAGS %s
 
@@ -12,9 +12,9 @@
 
 define float @foo(i32 %a) nounwind #0 {
 ; DEFAULT: # %bb.0:
-; DEFAULT: fmv.x.w a0, ft0
+; DEFAULT: fmv.x.w a0, fa5
 ; RV32IF-ILP32: # %bb.0:
-; RV32IF-ILP32: fmv.x.w a0, ft0
+; RV32IF-ILP32: fmv.x.w a0, fa5
   %conv = sitofp i32 %a to float
   ret float %conv
 }

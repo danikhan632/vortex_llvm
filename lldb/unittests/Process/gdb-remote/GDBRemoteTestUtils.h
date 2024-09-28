@@ -5,8 +5,8 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-#ifndef lldb_unittests_Process_gdb_remote_GDBRemoteTestUtils_h
-#define lldb_unittests_Process_gdb_remote_GDBRemoteTestUtils_h
+#ifndef LLDB_UNITTESTS_PROCESS_GDB_REMOTE_GDBREMOTETESTUTILS_H
+#define LLDB_UNITTESTS_PROCESS_GDB_REMOTE_GDBREMOTETESTUTILS_H
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
@@ -53,8 +53,7 @@ public:
 
 class MockServer : public GDBRemoteCommunicationServer {
 public:
-  MockServer()
-      : GDBRemoteCommunicationServer("mock-server", "mock-server.listener") {
+  MockServer() : GDBRemoteCommunicationServer() {
     m_send_acks = false;
     m_send_error_strings = true;
   }
@@ -65,8 +64,7 @@ public:
 
   PacketResult GetPacket(StringExtractorGDBRemote &response) {
     const bool sync_on_timeout = false;
-    return WaitForPacketNoLock(response, std::chrono::seconds(1),
-                               sync_on_timeout);
+    return ReadPacket(response, std::chrono::seconds(1), sync_on_timeout);
   }
 
   using GDBRemoteCommunicationServer::SendErrorResponse;
@@ -77,7 +75,7 @@ public:
 class MockServerWithMockConnection : public MockServer {
 public:
   MockServerWithMockConnection() : MockServer() {
-    SetConnection(new MockConnection(m_packets));
+    SetConnection(std::make_unique<MockConnection>(m_packets));
   }
 
   llvm::ArrayRef<std::string> GetPackets() { return m_packets; };
@@ -88,4 +86,4 @@ public:
 } // namespace process_gdb_remote
 } // namespace lldb_private
 
-#endif // lldb_unittests_Process_gdb_remote_GDBRemoteTestUtils_h
+#endif // LLDB_UNITTESTS_PROCESS_GDB_REMOTE_GDBREMOTETESTUTILS_H

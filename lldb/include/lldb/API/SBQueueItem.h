@@ -6,19 +6,21 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLDB_SBQueueItem_h_
-#define LLDB_SBQueueItem_h_
+#ifndef LLDB_API_SBQUEUEITEM_H
+#define LLDB_API_SBQUEUEITEM_H
 
 #include "lldb/API/SBAddress.h"
 #include "lldb/API/SBDefines.h"
+
+namespace lldb_private {
+class QueueImpl;
+}
 
 namespace lldb {
 
 class LLDB_API SBQueueItem {
 public:
   SBQueueItem();
-
-  SBQueueItem(const lldb::QueueItemSP &queue_item_sp);
 
   ~SBQueueItem();
 
@@ -36,9 +38,14 @@ public:
 
   void SetAddress(lldb::SBAddress addr);
 
-  void SetQueueItem(const lldb::QueueItemSP &queue_item_sp);
-
   SBThread GetExtendedBacktraceThread(const char *type);
+
+protected:
+  friend class lldb_private::QueueImpl;
+
+  SBQueueItem(const lldb::QueueItemSP &queue_item_sp);
+
+  void SetQueueItem(const lldb::QueueItemSP &queue_item_sp);
 
 private:
   lldb::QueueItemSP m_queue_item_sp;
@@ -46,4 +53,4 @@ private:
 
 } // namespace lldb
 
-#endif // LLDB_SBQueueItem_h_
+#endif // LLDB_API_SBQUEUEITEM_H

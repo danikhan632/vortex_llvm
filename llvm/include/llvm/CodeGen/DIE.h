@@ -10,8 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_LIB_CODEGEN_ASMPRINTER_DIE_H
-#define LLVM_LIB_CODEGEN_ASMPRINTER_DIE_H
+#ifndef LLVM_CODEGEN_DIE_H
+#define LLVM_CODEGEN_DIE_H
 
 #include "llvm/ADT/FoldingSet.h"
 #include "llvm/ADT/PointerIntPair.h"
@@ -115,6 +115,11 @@ public:
     Data.push_back(DIEAbbrevData(Attribute, Value));
   }
 
+  /// Adds another set of attribute information to the abbreviation.
+  void AddAttribute(const DIEAbbrevData &AbbrevData) {
+    Data.push_back(AbbrevData);
+  }
+
   /// Used to gather unique data for the abbreviation folding set.
   void Profile(FoldingSetNodeID &ID) const;
 
@@ -190,8 +195,8 @@ public:
   uint64_t getValue() const { return Integer; }
   void setValue(uint64_t Val) { Integer = Val; }
 
-  void EmitValue(const AsmPrinter *Asm, dwarf::Form Form) const;
-  unsigned SizeOf(const AsmPrinter *AP, dwarf::Form Form) const;
+  void emitValue(const AsmPrinter *Asm, dwarf::Form Form) const;
+  unsigned sizeOf(const dwarf::FormParams &FormParams, dwarf::Form Form) const;
 
   void print(raw_ostream &O) const;
 };
@@ -207,8 +212,8 @@ public:
   /// Get MCExpr.
   const MCExpr *getValue() const { return Expr; }
 
-  void EmitValue(const AsmPrinter *AP, dwarf::Form Form) const;
-  unsigned SizeOf(const AsmPrinter *AP, dwarf::Form Form) const;
+  void emitValue(const AsmPrinter *AP, dwarf::Form Form) const;
+  unsigned sizeOf(const dwarf::FormParams &FormParams, dwarf::Form Form) const;
 
   void print(raw_ostream &O) const;
 };
@@ -224,8 +229,8 @@ public:
   /// Get MCSymbol.
   const MCSymbol *getValue() const { return Label; }
 
-  void EmitValue(const AsmPrinter *AP, dwarf::Form Form) const;
-  unsigned SizeOf(const AsmPrinter *AP, dwarf::Form Form) const;
+  void emitValue(const AsmPrinter *AP, dwarf::Form Form) const;
+  unsigned sizeOf(const dwarf::FormParams &FormParams, dwarf::Form Form) const;
 
   void print(raw_ostream &O) const;
 };
@@ -242,11 +247,12 @@ public:
     : CU(TheCU), Index(Idx) {}
 
   /// EmitValue - Emit base type reference.
-  void EmitValue(const AsmPrinter *AP, dwarf::Form Form) const;
-  /// SizeOf - Determine size of the base type reference in bytes.
-  unsigned SizeOf(const AsmPrinter *AP, dwarf::Form Form) const;
+  void emitValue(const AsmPrinter *AP, dwarf::Form Form) const;
+  /// sizeOf - Determine size of the base type reference in bytes.
+  unsigned sizeOf(const dwarf::FormParams &, dwarf::Form) const;
 
   void print(raw_ostream &O) const;
+  uint64_t getIndex() const { return Index; }
 };
 
 //===--------------------------------------------------------------------===//
@@ -259,8 +265,8 @@ class DIEDelta {
 public:
   DIEDelta(const MCSymbol *Hi, const MCSymbol *Lo) : LabelHi(Hi), LabelLo(Lo) {}
 
-  void EmitValue(const AsmPrinter *AP, dwarf::Form Form) const;
-  unsigned SizeOf(const AsmPrinter *AP, dwarf::Form Form) const;
+  void emitValue(const AsmPrinter *AP, dwarf::Form Form) const;
+  unsigned sizeOf(const dwarf::FormParams &FormParams, dwarf::Form Form) const;
 
   void print(raw_ostream &O) const;
 };
@@ -278,8 +284,8 @@ public:
   /// Grab the string out of the object.
   StringRef getString() const { return S.getString(); }
 
-  void EmitValue(const AsmPrinter *AP, dwarf::Form Form) const;
-  unsigned SizeOf(const AsmPrinter *AP, dwarf::Form Form) const;
+  void emitValue(const AsmPrinter *AP, dwarf::Form Form) const;
+  unsigned sizeOf(const dwarf::FormParams &FormParams, dwarf::Form Form) const;
 
   void print(raw_ostream &O) const;
 };
@@ -300,8 +306,8 @@ public:
   /// Grab the string out of the object.
   StringRef getString() const { return S; }
 
-  void EmitValue(const AsmPrinter *AP, dwarf::Form Form) const;
-  unsigned SizeOf(const AsmPrinter *AP, dwarf::Form Form) const;
+  void emitValue(const AsmPrinter *AP, dwarf::Form Form) const;
+  unsigned sizeOf(const dwarf::FormParams &, dwarf::Form) const;
 
   void print(raw_ostream &O) const;
 };
@@ -319,8 +325,8 @@ public:
 
   DIE &getEntry() const { return *Entry; }
 
-  void EmitValue(const AsmPrinter *AP, dwarf::Form Form) const;
-  unsigned SizeOf(const AsmPrinter *AP, dwarf::Form Form) const;
+  void emitValue(const AsmPrinter *AP, dwarf::Form Form) const;
+  unsigned sizeOf(const dwarf::FormParams &FormParams, dwarf::Form Form) const;
 
   void print(raw_ostream &O) const;
 };
@@ -338,8 +344,24 @@ public:
   /// Grab the current index out.
   size_t getValue() const { return Index; }
 
-  void EmitValue(const AsmPrinter *AP, dwarf::Form Form) const;
-  unsigned SizeOf(const AsmPrinter *AP, dwarf::Form Form) const;
+  void emitValue(const AsmPrinter *AP, dwarf::Form Form) const;
+  unsigned sizeOf(const dwarf::FormParams &FormParams, dwarf::Form Form) const;
+
+  void print(raw_ostream &O) const;
+};
+
+//===--------------------------------------------------------------------===//
+/// A BaseTypeRef DIE.
+class DIEAddrOffset {
+  DIEInteger Addr;
+  DIEDelta Offset;
+
+public:
+  explicit DIEAddrOffset(uint64_t Idx, const MCSymbol *Hi, const MCSymbol *Lo)
+      : Addr(Idx), Offset(Hi, Lo) {}
+
+  void emitValue(const AsmPrinter *AP, dwarf::Form Form) const;
+  unsigned sizeOf(const dwarf::FormParams &FormParams, dwarf::Form Form) const;
 
   void print(raw_ostream &O) const;
 };
@@ -367,9 +389,10 @@ private:
   ///
   /// All values that aren't standard layout (or are larger than 8 bytes)
   /// should be stored by reference instead of by value.
-  using ValTy = AlignedCharArrayUnion<DIEInteger, DIEString, DIEExpr, DIELabel,
-                                      DIEDelta *, DIEEntry, DIEBlock *,
-                                      DIELoc *, DIELocList, DIEBaseTypeRef *>;
+  using ValTy =
+      AlignedCharArrayUnion<DIEInteger, DIEString, DIEExpr, DIELabel,
+                            DIEDelta *, DIEEntry, DIEBlock *, DIELoc *,
+                            DIELocList, DIEBaseTypeRef *, DIEAddrOffset *>;
 
   static_assert(sizeof(ValTy) <= sizeof(uint64_t) ||
                     sizeof(ValTy) <= sizeof(void *),
@@ -382,12 +405,12 @@ private:
     static_assert(std::is_standard_layout<T>::value ||
                       std::is_pointer<T>::value,
                   "Expected standard layout or pointer");
-    new (reinterpret_cast<void *>(Val.buffer)) T(V);
+    new (reinterpret_cast<void *>(&Val)) T(V);
   }
 
-  template <class T> T *get() { return reinterpret_cast<T *>(Val.buffer); }
+  template <class T> T *get() { return reinterpret_cast<T *>(&Val); }
   template <class T> const T *get() const {
-    return reinterpret_cast<const T *>(Val.buffer);
+    return reinterpret_cast<const T *>(&Val);
   }
   template <class T> void destruct() { get<T>()->~T(); }
 
@@ -441,6 +464,8 @@ public:
   }
 
   DIEValue &operator=(const DIEValue &X) {
+    if (this == &X)
+      return *this;
     destroyVal();
     Ty = X.Ty;
     Attribute = X.Attribute;
@@ -485,10 +510,10 @@ public:
 #include "llvm/CodeGen/DIEValue.def"
 
   /// Emit value via the Dwarf writer.
-  void EmitValue(const AsmPrinter *AP) const;
+  void emitValue(const AsmPrinter *AP) const;
 
   /// Return the size of a value in bytes.
-  unsigned SizeOf(const AsmPrinter *AP) const;
+  unsigned sizeOf(const dwarf::FormParams &FormParams) const;
 
   void print(raw_ostream &O) const;
   void dump() const;
@@ -541,6 +566,7 @@ public:
 
   void push_back(T &N) { IntrusiveBackListBase::push_back(N); }
   void push_front(T &N) { IntrusiveBackListBase::push_front(N); }
+
   T &back() { return *static_cast<T *>(Last); }
   const T &back() const { return *static_cast<T *>(Last); }
   T &front() {
@@ -551,11 +577,41 @@ public:
   }
 
   void takeNodes(IntrusiveBackList<T> &Other) {
-    for (auto &N : Other) {
-      N.Next.setPointerAndInt(&N, true);
-      push_back(N);
-    }
+    if (Other.empty())
+      return;
+
+    T *FirstNode = static_cast<T *>(Other.Last->Next.getPointer());
+    T *IterNode = FirstNode;
+    do {
+      // Keep a pointer to the node and increment the iterator.
+      T *TmpNode = IterNode;
+      IterNode = static_cast<T *>(IterNode->Next.getPointer());
+
+      // Unlink the node and push it back to this list.
+      TmpNode->Next.setPointerAndInt(TmpNode, true);
+      push_back(*TmpNode);
+    } while (IterNode != FirstNode);
+
     Other.Last = nullptr;
+  }
+
+  bool deleteNode(T &N) {
+    if (Last == &N) {
+      Last = Last->Next.getPointer();
+      Last->Next.setInt(true);
+      return true;
+    }
+
+    Node *cur = Last;
+    while (cur && cur->Next.getPointer()) {
+      if (cur->Next.getPointer() == &N) {
+        cur->Next.setPointer(cur->Next.getPointer()->Next.getPointer());
+        return true;
+      }
+      cur = cur->Next.getPointer();
+    }
+
+    return false;
   }
 
   class const_iterator;
@@ -578,7 +634,6 @@ public:
     T &operator*() const { return *static_cast<T *>(N); }
 
     bool operator==(const iterator &X) const { return N == X.N; }
-    bool operator!=(const iterator &X) const { return N != X.N; }
   };
 
   class const_iterator
@@ -601,7 +656,6 @@ public:
     const T &operator*() const { return *static_cast<const T *>(N); }
 
     bool operator==(const const_iterator &X) const { return N == X.N; }
-    bool operator!=(const const_iterator &X) const { return N != X.N; }
   };
 
   iterator begin() {
@@ -689,9 +743,62 @@ public:
   }
   template <class T>
   value_iterator addValue(BumpPtrAllocator &Alloc, dwarf::Attribute Attribute,
-                    dwarf::Form Form, T &&Value) {
+                          dwarf::Form Form, T &&Value) {
     return addValue(Alloc, DIEValue(Attribute, Form, std::forward<T>(Value)));
   }
+
+  /* zr33: add method here */
+  template <class T>
+  bool replaceValue(BumpPtrAllocator &Alloc, dwarf::Attribute Attribute,
+                    dwarf::Attribute NewAttribute, dwarf::Form Form,
+                    T &&NewValue) {
+    for (llvm::DIEValue &val : values()) {
+      if (val.getAttribute() == Attribute) {
+        val = *new (Alloc)
+                  DIEValue(NewAttribute, Form, std::forward<T>(NewValue));
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  template <class T>
+  bool replaceValue(BumpPtrAllocator &Alloc, dwarf::Attribute Attribute,
+                    dwarf::Form Form, T &&NewValue) {
+    for (llvm::DIEValue &val : values()) {
+      if (val.getAttribute() == Attribute) {
+        val = *new (Alloc) DIEValue(Attribute, Form, std::forward<T>(NewValue));
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  bool replaceValue(BumpPtrAllocator &Alloc, dwarf::Attribute Attribute,
+                    dwarf::Form Form, DIEValue &NewValue) {
+    for (llvm::DIEValue &val : values()) {
+      if (val.getAttribute() == Attribute) {
+        val = NewValue;
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  bool deleteValue(dwarf::Attribute Attribute) {
+
+    for (auto &node : List) {
+      if (node.V.getAttribute() == Attribute) {
+        return List.deleteNode(node);
+      }
+    }
+
+    return false;
+  }
+  /* end */
 
   /// Take ownership of the nodes in \p Other, and append them to the back of
   /// the list.
@@ -747,8 +854,16 @@ public:
   unsigned getAbbrevNumber() const { return AbbrevNumber; }
   dwarf::Tag getTag() const { return Tag; }
   /// Get the compile/type unit relative offset of this DIE.
-  unsigned getOffset() const { return Offset; }
-  unsigned getSize() const { return Size; }
+  unsigned getOffset() const {
+    // A real Offset can't be zero because the unit headers are at offset zero.
+    assert(Offset && "Offset being queried before it's been computed.");
+    return Offset;
+  }
+  unsigned getSize() const {
+    // A real Size can't be zero because it includes the non-empty abbrev code.
+    assert(Size && "Size being queried before it's been ocmputed.");
+    return Size;
+  }
   bool hasChildren() const { return ForceChildren || !Children.empty(); }
   void setForceChildren(bool B) { ForceChildren = B; }
 
@@ -777,7 +892,7 @@ public:
 
   /// Get the absolute offset within the .debug_info or .debug_types section
   /// for this DIE.
-  unsigned getDebugSectionOffset() const;
+  uint64_t getDebugSectionOffset() const;
 
   /// Compute the offset of this DIE and all its children.
   ///
@@ -790,12 +905,12 @@ public:
   /// properly refer to other DIE objects since all DIEs have calculated their
   /// offsets.
   ///
-  /// \param AP AsmPrinter to use when calculating sizes.
+  /// \param FormParams Used when calculating sizes.
   /// \param AbbrevSet the abbreviation used to unique DIE abbreviations.
   /// \param CUOffset the compile/type unit relative offset in bytes.
   /// \returns the offset for the DIE that follows this DIE within the
   /// current compile/type unit.
-  unsigned computeOffsetsAndAbbrevs(const AsmPrinter *AP,
+  unsigned computeOffsetsAndAbbrevs(const dwarf::FormParams &FormParams,
                                     DIEAbbrevSet &AbbrevSet, unsigned CUOffset);
 
   /// Climb up the parent chain to get the compile unit or type unit DIE that
@@ -851,16 +966,13 @@ class DIEUnit {
   DIE Die;
   /// The section this unit will be emitted in. This may or may not be set to
   /// a valid section depending on the client that is emitting DWARF.
-  MCSection *Section;
-  uint64_t Offset; /// .debug_info or .debug_types absolute section offset.
-  uint32_t Length; /// The length in bytes of all of the DIEs in this unit.
-  const uint16_t Version; /// The Dwarf version number for this unit.
-  const uint8_t AddrSize; /// The size in bytes of an address for this unit.
+  MCSection *Section = nullptr;
+  uint64_t Offset = 0; /// .debug_info or .debug_types absolute section offset.
 protected:
   virtual ~DIEUnit() = default;
 
 public:
-  DIEUnit(uint16_t Version, uint8_t AddrSize, dwarf::Tag UnitTag);
+  explicit DIEUnit(dwarf::Tag UnitTag);
   DIEUnit(const DIEUnit &RHS) = delete;
   DIEUnit(DIEUnit &&RHS) = delete;
   void operator=(const DIEUnit &RHS) = delete;
@@ -882,19 +994,14 @@ public:
   ///
   /// \returns Section pointer which can be NULL.
   MCSection *getSection() const { return Section; }
-  void setDebugSectionOffset(unsigned O) { Offset = O; }
-  unsigned getDebugSectionOffset() const { return Offset; }
-  void setLength(uint64_t L) { Length = L; }
-  uint64_t getLength() const { return Length; }
-  uint16_t getDwarfVersion() const { return Version; }
-  uint16_t getAddressSize() const { return AddrSize; }
+  void setDebugSectionOffset(uint64_t O) { Offset = O; }
+  uint64_t getDebugSectionOffset() const { return Offset; }
   DIE &getUnitDie() { return Die; }
   const DIE &getUnitDie() const { return Die; }
 };
 
 struct BasicDIEUnit final : DIEUnit {
-  BasicDIEUnit(uint16_t Version, uint8_t AddrSize, dwarf::Tag UnitTag)
-      : DIEUnit(Version, AddrSize, UnitTag) {}
+  explicit BasicDIEUnit(dwarf::Tag UnitTag) : DIEUnit(UnitTag) {}
 };
 
 //===--------------------------------------------------------------------===//
@@ -906,9 +1013,11 @@ class DIELoc : public DIEValueList {
 public:
   DIELoc() = default;
 
-  /// ComputeSize - Calculate the size of the location expression.
-  ///
-  unsigned ComputeSize(const AsmPrinter *AP) const;
+  /// Calculate the size of the location expression.
+  unsigned computeSize(const dwarf::FormParams &FormParams) const;
+
+  // TODO: move setSize() and Size to DIEValueList.
+  void setSize(unsigned size) { Size = size; }
 
   /// BestForm - Choose the best form for data.
   ///
@@ -925,8 +1034,8 @@ public:
     return dwarf::DW_FORM_block;
   }
 
-  void EmitValue(const AsmPrinter *Asm, dwarf::Form Form) const;
-  unsigned SizeOf(const AsmPrinter *AP, dwarf::Form Form) const;
+  void emitValue(const AsmPrinter *Asm, dwarf::Form Form) const;
+  unsigned sizeOf(const dwarf::FormParams &, dwarf::Form Form) const;
 
   void print(raw_ostream &O) const;
 };
@@ -940,9 +1049,11 @@ class DIEBlock : public DIEValueList {
 public:
   DIEBlock() = default;
 
-  /// ComputeSize - Calculate the size of the location expression.
-  ///
-  unsigned ComputeSize(const AsmPrinter *AP) const;
+  /// Calculate the size of the location expression.
+  unsigned computeSize(const dwarf::FormParams &FormParams) const;
+
+  // TODO: move setSize() and Size to DIEValueList.
+  void setSize(unsigned size) { Size = size; }
 
   /// BestForm - Choose the best form for data.
   ///
@@ -956,12 +1067,12 @@ public:
     return dwarf::DW_FORM_block;
   }
 
-  void EmitValue(const AsmPrinter *Asm, dwarf::Form Form) const;
-  unsigned SizeOf(const AsmPrinter *AP, dwarf::Form Form) const;
+  void emitValue(const AsmPrinter *Asm, dwarf::Form Form) const;
+  unsigned sizeOf(const dwarf::FormParams &, dwarf::Form Form) const;
 
   void print(raw_ostream &O) const;
 };
 
 } // end namespace llvm
 
-#endif // LLVM_LIB_CODEGEN_ASMPRINTER_DIE_H
+#endif // LLVM_CODEGEN_DIE_H

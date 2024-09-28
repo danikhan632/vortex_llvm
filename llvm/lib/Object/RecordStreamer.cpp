@@ -81,22 +81,17 @@ RecordStreamer::const_iterator RecordStreamer::begin() {
 
 RecordStreamer::const_iterator RecordStreamer::end() { return Symbols.end(); }
 
-void RecordStreamer::EmitInstruction(const MCInst &Inst,
-                                     const MCSubtargetInfo &STI) {
-  MCStreamer::EmitInstruction(Inst, STI);
-}
-
-void RecordStreamer::EmitLabel(MCSymbol *Symbol, SMLoc Loc) {
-  MCStreamer::EmitLabel(Symbol);
+void RecordStreamer::emitLabel(MCSymbol *Symbol, SMLoc Loc) {
+  MCStreamer::emitLabel(Symbol);
   markDefined(*Symbol);
 }
 
-void RecordStreamer::EmitAssignment(MCSymbol *Symbol, const MCExpr *Value) {
+void RecordStreamer::emitAssignment(MCSymbol *Symbol, const MCExpr *Value) {
   markDefined(*Symbol);
-  MCStreamer::EmitAssignment(Symbol, Value);
+  MCStreamer::emitAssignment(Symbol, Value);
 }
 
-bool RecordStreamer::EmitSymbolAttribute(MCSymbol *Symbol,
+bool RecordStreamer::emitSymbolAttribute(MCSymbol *Symbol,
                                          MCSymbolAttr Attribute) {
   if (Attribute == MCSA_Global || Attribute == MCSA_Weak)
     markGlobal(*Symbol, Attribute);
@@ -105,14 +100,14 @@ bool RecordStreamer::EmitSymbolAttribute(MCSymbol *Symbol,
   return true;
 }
 
-void RecordStreamer::EmitZerofill(MCSection *Section, MCSymbol *Symbol,
-                                  uint64_t Size, unsigned ByteAlignment,
+void RecordStreamer::emitZerofill(MCSection *Section, MCSymbol *Symbol,
+                                  uint64_t Size, Align ByteAlignment,
                                   SMLoc Loc) {
   markDefined(*Symbol);
 }
 
-void RecordStreamer::EmitCommonSymbol(MCSymbol *Symbol, uint64_t Size,
-                                      unsigned ByteAlignment) {
+void RecordStreamer::emitCommonSymbol(MCSymbol *Symbol, uint64_t Size,
+                                      Align ByteAlignment) {
   markDefined(*Symbol);
 }
 
@@ -123,9 +118,10 @@ RecordStreamer::State RecordStreamer::getSymbolState(const MCSymbol *Sym) {
   return SI->second;
 }
 
-void RecordStreamer::emitELFSymverDirective(StringRef AliasName,
-                                            const MCSymbol *Aliasee) {
-  SymverAliasMap[Aliasee].push_back(AliasName);
+void RecordStreamer::emitELFSymverDirective(const MCSymbol *OriginalSym,
+                                            StringRef Name,
+                                            bool KeepOriginalSym) {
+  SymverAliasMap[OriginalSym].push_back(Name);
 }
 
 iterator_range<RecordStreamer::const_symver_iterator>
@@ -210,7 +206,7 @@ void RecordStreamer::flushSymverDirectives() {
     for (auto AliasName : Symver.second) {
       std::pair<StringRef, StringRef> Split = AliasName.split("@@@");
       SmallString<128> NewName;
-      if (!Split.second.empty() && !Split.second.startswith("@")) {
+      if (!Split.second.empty() && !Split.second.starts_with("@")) {
         // Special processing for "@@@" according
         // https://sourceware.org/binutils/docs/as/Symver.html
         const char *Separator = IsDefined ? "@@" : "@";
@@ -224,9 +220,9 @@ void RecordStreamer::flushSymverDirectives() {
       if (IsDefined)
         markDefined(*Alias);
       // Don't use EmitAssignment override as it always marks alias as defined.
-      MCStreamer::EmitAssignment(Alias, Value);
+      MCStreamer::emitAssignment(Alias, Value);
       if (Attr != MCSA_Invalid)
-        EmitSymbolAttribute(Alias, Attr);
+        emitSymbolAttribute(Alias, Attr);
     }
   }
 }

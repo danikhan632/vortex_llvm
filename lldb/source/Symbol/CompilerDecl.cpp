@@ -1,4 +1,4 @@
-//===-- CompilerDecl.cpp ----------------------------------------*- C++ -*-===//
+//===-- CompilerDecl.cpp --------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -46,4 +46,9 @@ bool lldb_private::operator!=(const lldb_private::CompilerDecl &lhs,
                               const lldb_private::CompilerDecl &rhs) {
   return lhs.GetTypeSystem() != rhs.GetTypeSystem() ||
          lhs.GetOpaqueDecl() != rhs.GetOpaqueDecl();
+}
+
+std::vector<lldb_private::CompilerContext>
+CompilerDecl::GetCompilerContext() const {
+  return m_type_system->DeclGetCompilerContext(m_opaque_decl);
 }

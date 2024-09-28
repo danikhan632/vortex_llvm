@@ -16,9 +16,7 @@ using namespace clang::ast_matchers;
 using namespace clang::ast_matchers::internal;
 using namespace clang::tidy::matchers;
 
-namespace clang {
-namespace tidy {
-namespace performance {
+namespace clang::tidy::performance {
 
 namespace {
 
@@ -36,9 +34,6 @@ AST_MATCHER_P(CXXRecordDecl, hasBase, Matcher<QualType>, InnerMatcher) {
 } // namespace
 
 void TriviallyDestructibleCheck::registerMatchers(MatchFinder *Finder) {
-  if (!getLangOpts().CPlusPlus11)
-    return;
-
   Finder->addMatcher(
       cxxDestructorDecl(
           isDefaulted(),
@@ -77,6 +72,4 @@ void TriviallyDestructibleCheck::check(const MatchFinder::MatchResult &Result) {
        DiagnosticIDs::Note);
 }
 
-} // namespace performance
-} // namespace tidy
-} // namespace clang
+} // namespace clang::tidy::performance

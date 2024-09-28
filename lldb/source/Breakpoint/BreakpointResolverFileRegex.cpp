@@ -1,4 +1,4 @@
-//===-- BreakpointResolverFileRegex.cpp -------------------------*- C++-*-===//
+//===-- BreakpointResolverFileRegex.cpp -----------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -20,17 +20,14 @@ using namespace lldb_private;
 
 // BreakpointResolverFileRegex:
 BreakpointResolverFileRegex::BreakpointResolverFileRegex(
-    Breakpoint *bkpt, RegularExpression regex,
+    const lldb::BreakpointSP &bkpt, RegularExpression regex,
     const std::unordered_set<std::string> &func_names, bool exact_match)
     : BreakpointResolver(bkpt, BreakpointResolver::FileRegexResolver),
       m_regex(std::move(regex)), m_exact_match(exact_match),
       m_function_names(func_names) {}
 
-BreakpointResolverFileRegex::~BreakpointResolverFileRegex() {}
-
-BreakpointResolver *BreakpointResolverFileRegex::CreateFromStructuredData(
-    Breakpoint *bkpt, const StructuredData::Dictionary &options_dict,
-    Status &error) {
+BreakpointResolverSP BreakpointResolverFileRegex::CreateFromStructuredData(
+    const StructuredData::Dictionary &options_dict, Status &error) {
   bool success;
 
   llvm::StringRef regex_string;
@@ -58,19 +55,19 @@ BreakpointResolver *BreakpointResolverFileRegex::CreateFromStructuredData(
   if (success && names_array) {
     size_t num_names = names_array->GetSize();
     for (size_t i = 0; i < num_names; i++) {
-      llvm::StringRef name;
-      success = names_array->GetItemAtIndexAsString(i, name);
-      if (!success) {
+      std::optional<llvm::StringRef> maybe_name =
+          names_array->GetItemAtIndexAsString(i);
+      if (!maybe_name) {
         error.SetErrorStringWithFormat(
             "BRFR::CFSD: Malformed element %zu in the names array.", i);
         return nullptr;
       }
-      names_set.insert(name);
+      names_set.insert(std::string(*maybe_name));
     }
   }
 
-  return new BreakpointResolverFileRegex(bkpt, std::move(regex), names_set,
-                                         exact_match);
+  return std::make_shared<BreakpointResolverFileRegex>(
+      nullptr, std::move(regex), names_set, exact_match);
 }
 
 StructuredData::ObjectSP
@@ -97,7 +94,6 @@ BreakpointResolverFileRegex::SerializeToStructuredData() {
 Searcher::CallbackReturn BreakpointResolverFileRegex::SearchCallback(
     SearchFilter &filter, SymbolContext &context, Address *addr) {
 
-  assert(m_breakpoint != nullptr);
   if (!context.target_sp)
     return eCallbackReturnContinue;
 
@@ -110,10 +106,11 @@ Searcher::CallbackReturn BreakpointResolverFileRegex::SearchCallback(
   uint32_t num_matches = line_matches.size();
   for (uint32_t i = 0; i < num_matches; i++) {
     SymbolContextList sc_list;
-    const bool search_inlines = false;
-
-    cu->ResolveSymbolContext(cu_file_spec, line_matches[i], search_inlines,
-                             m_exact_match, eSymbolContextEverything, sc_list);
+    // TODO: Handle SourceLocationSpec column information
+    SourceLocationSpec location_spec(cu_file_spec, line_matches[i],
+                                     /*column=*/std::nullopt,
+                                     /*check_inlines=*/false, m_exact_match);
+    cu->ResolveSymbolContext(location_spec, eSymbolContextEverything, sc_list);
     // Find all the function names:
     if (!m_function_names.empty()) {
       std::vector<size_t> sc_to_remove;
@@ -144,7 +141,6 @@ Searcher::CallbackReturn BreakpointResolverFileRegex::SearchCallback(
     BreakpointResolver::SetSCMatchesByLine(filter, sc_list, skip_prologue,
                                            m_regex.GetText());
   }
-  assert(m_breakpoint != nullptr);
 
   return Searcher::eCallbackReturnContinue;
 }
@@ -161,9 +157,9 @@ void BreakpointResolverFileRegex::GetDescription(Stream *s) {
 void BreakpointResolverFileRegex::Dump(Stream *s) const {}
 
 lldb::BreakpointResolverSP
-BreakpointResolverFileRegex::CopyForBreakpoint(Breakpoint &breakpoint) {
+BreakpointResolverFileRegex::CopyForBreakpoint(BreakpointSP &breakpoint) {
   lldb::BreakpointResolverSP ret_sp(new BreakpointResolverFileRegex(
-      &breakpoint, m_regex, m_function_names, m_exact_match));
+      breakpoint, m_regex, m_function_names, m_exact_match));
   return ret_sp;
 }
 

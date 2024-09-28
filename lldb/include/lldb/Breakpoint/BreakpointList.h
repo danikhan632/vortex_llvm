@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_BreakpointList_h_
-#define liblldb_BreakpointList_h_
+#ifndef LLDB_BREAKPOINT_BREAKPOINTLIST_H
+#define LLDB_BREAKPOINT_BREAKPOINTLIST_H
 
 #include <list>
 #include <mutex>
@@ -138,6 +138,9 @@ public:
 
   void ClearAllBreakpointSites();
 
+  /// Resets the hit count of all breakpoints.
+  void ResetHitCounts();
+
   /// Sets the passed in Locker to hold the Breakpoint List mutex.
   ///
   /// \param[in] lock
@@ -168,9 +171,10 @@ public:
   }
 
 private:
-  DISALLOW_COPY_AND_ASSIGN(BreakpointList);
+  BreakpointList(const BreakpointList &) = delete;
+  const BreakpointList &operator=(const BreakpointList &) = delete;
 };
 
 } // namespace lldb_private
 
-#endif // liblldb_BreakpointList_h_
+#endif // LLDB_BREAKPOINT_BREAKPOINTLIST_H

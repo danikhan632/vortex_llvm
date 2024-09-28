@@ -49,10 +49,10 @@ reg_obj:
 
 # CHECK-LABEL: Disassembly of section .text:
 # CHECK-EMPTY:
-# CHECK-NEXT: test:
+# CHECK-NEXT: <test>:
 # CHECK-NEXT: jr	$25
 # CHECK-NEXT: nop
 # CHECK-NEXT: jr	$25
 # CHECK-NEXT: nop
-# CHECK-NEXT: b	8 <untyped>
+# CHECK-NEXT: b	{{.*}} <untyped>
 # CHECK-NEXT: nop

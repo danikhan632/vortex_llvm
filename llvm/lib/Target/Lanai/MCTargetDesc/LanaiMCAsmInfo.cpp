@@ -12,7 +12,7 @@
 
 #include "LanaiMCAsmInfo.h"
 
-#include "llvm/ADT/Triple.h"
+#include "llvm/TargetParser/Triple.h"
 
 using namespace llvm;
 
@@ -27,9 +27,6 @@ LanaiMCAsmInfo::LanaiMCAsmInfo(const Triple & /*TheTriple*/,
 
   // Lanai assembly requires ".section" before ".bss"
   UsesELFSectionDirectiveForBSS = true;
-
-  // Use the integrated assembler instead of system one.
-  UseIntegratedAssembler = true;
 
   // Use '!' as comment string to correspond with old toolchain.
   CommentString = "!";

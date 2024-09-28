@@ -147,7 +147,7 @@
 // handleNewPreprocessorExit function handles cleaning up with respect
 // to the preprocessing instance.
 //
-// The PreprocessorCallbacks object uses an overidden FileChanged callback
+// The PreprocessorCallbacks object uses an overridden FileChanged callback
 // to determine when a header is entered and exited (including exiting the
 // header during #include directives). It calls PreprocessorTracker's
 // handleHeaderEntry and handleHeaderExit functions upon entering and
@@ -174,7 +174,7 @@
 // MacroExpansionTracker object, one that matches the macro expanded value
 // and the macro definition location. If a matching MacroExpansionInstance
 // object is found, it just adds the current HeaderInclusionPath object to
-// it. If not found, it creates and stores a new MacroExpantionInstance
+// it. If not found, it creates and stores a new MacroExpansionInstance
 // object. The addMacroExpansionInstance function calls a couple of helper
 // functions to get the pre-formatted location and source line strings for
 // the macro reference and the macro definition stored as string handles.
@@ -243,19 +243,19 @@
 //
 //===--------------------------------------------------------------------===//
 
-#include "clang/Lex/LexDiagnostic.h"
 #include "PreprocessorTracker.h"
+#include "ModularizeUtilities.h"
+#include "clang/Lex/LexDiagnostic.h"
 #include "clang/Lex/MacroArgs.h"
 #include "clang/Lex/PPCallbacks.h"
 #include "llvm/ADT/SmallSet.h"
-#include "llvm/Support/StringPool.h"
+#include "llvm/ADT/StringSet.h"
 #include "llvm/Support/raw_ostream.h"
-#include "ModularizeUtilities.h"
 
 namespace Modularize {
 
 // Some handle types
-typedef llvm::PooledStringPtr StringHandle;
+typedef llvm::StringRef StringHandle;
 
 typedef int HeaderHandle;
 const HeaderHandle HeaderHandleInvalid = -1;
@@ -312,10 +312,10 @@ static std::string getSourceString(clang::Preprocessor &PP,
 // Retrieve source line from file image given a location.
 static std::string getSourceLine(clang::Preprocessor &PP,
                                  clang::SourceLocation Loc) {
-  const llvm::MemoryBuffer *MemBuffer =
-      PP.getSourceManager().getBuffer(PP.getSourceManager().getFileID(Loc));
-  const char *Buffer = MemBuffer->getBufferStart();
-  const char *BufferEnd = MemBuffer->getBufferEnd();
+  llvm::MemoryBufferRef MemBuffer = PP.getSourceManager().getBufferOrFake(
+      PP.getSourceManager().getFileID(Loc));
+  const char *Buffer = MemBuffer.getBufferStart();
+  const char *BufferEnd = MemBuffer.getBufferEnd();
   const char *BeginPtr = PP.getSourceManager().getCharacterData(Loc);
   const char *EndPtr = BeginPtr;
   while (BeginPtr > Buffer) {
@@ -338,9 +338,10 @@ static std::string getSourceLine(clang::Preprocessor &PP,
 // Retrieve source line from file image given a file ID and line number.
 static std::string getSourceLine(clang::Preprocessor &PP, clang::FileID FileID,
                                  int Line) {
-  const llvm::MemoryBuffer *MemBuffer = PP.getSourceManager().getBuffer(FileID);
-  const char *Buffer = MemBuffer->getBufferStart();
-  const char *BufferEnd = MemBuffer->getBufferEnd();
+  llvm::MemoryBufferRef MemBuffer =
+      PP.getSourceManager().getBufferOrFake(FileID);
+  const char *Buffer = MemBuffer.getBufferStart();
+  const char *BufferEnd = MemBuffer.getBufferEnd();
   const char *BeginPtr = Buffer;
   const char *EndPtr = BufferEnd;
   int LineCounter = 1;
@@ -369,7 +370,7 @@ static std::string getSourceLine(clang::Preprocessor &PP, clang::FileID FileID,
 }
 
 // Get the string for the Unexpanded macro instance.
-// The soureRange is expected to end at the last token
+// The sourceRange is expected to end at the last token
 // for the macro instance, which in the case of a function-style
 // macro will be a ')', but for an object-style macro, it
 // will be the macro name itself.
@@ -462,19 +463,6 @@ const char *
 ConditionValueKindStrings[] = {
   "(not evaluated)", "false", "true"
 };
-
-bool operator<(const StringHandle &H1, const StringHandle &H2) {
-  const char *S1 = (H1 ? *H1 : "");
-  const char *S2 = (H2 ? *H2 : "");
-  int Diff = strcmp(S1, S2);
-  return Diff < 0;
-}
-bool operator>(const StringHandle &H1, const StringHandle &H2) {
-  const char *S1 = (H1 ? *H1 : "");
-  const char *S2 = (H2 ? *H2 : "");
-  int Diff = strcmp(S1, S2);
-  return Diff > 0;
-}
 
 // Preprocessor item key.
 //
@@ -746,7 +734,7 @@ public:
                           const clang::Token &IncludeTok,
                           llvm::StringRef FileName, bool IsAngled,
                           clang::CharSourceRange FilenameRange,
-                          const clang::FileEntry *File,
+                          clang::OptionalFileEntryRef File,
                           llvm::StringRef SearchPath,
                           llvm::StringRef RelativePath,
                           const clang::Module *Imported,
@@ -895,7 +883,7 @@ public:
   // Handle entering a header source file.
   void handleHeaderEntry(clang::Preprocessor &PP, llvm::StringRef HeaderPath) {
     // Ignore <built-in> and <command-line> to reduce message clutter.
-    if (HeaderPath.startswith("<"))
+    if (HeaderPath.starts_with("<"))
       return;
     HeaderHandle H = addHeader(HeaderPath);
     if (H != getCurrentHeaderHandle())
@@ -908,7 +896,7 @@ public:
   // Handle exiting a header source file.
   void handleHeaderExit(llvm::StringRef HeaderPath) {
     // Ignore <built-in> and <command-line> to reduce message clutter.
-    if (HeaderPath.startswith("<"))
+    if (HeaderPath.starts_with("<"))
       return;
     HeaderHandle H = findHeaderHandle(HeaderPath);
     HeaderHandle TH;
@@ -922,7 +910,9 @@ public:
   }
 
   // Lookup/add string.
-  StringHandle addString(llvm::StringRef Str) { return Strings.intern(Str); }
+  StringHandle addString(llvm::StringRef Str) {
+    return Strings.insert(Str).first->first();
+  }
 
   // Convert to a canonical path.
   std::string getCanonicalPath(llvm::StringRef path) const {
@@ -950,7 +940,7 @@ public:
     HeaderHandle H = 0;
     for (auto I = HeaderPaths.begin(), E = HeaderPaths.end(); I != E;
          ++I, ++H) {
-      if (**I == CanonicalPath)
+      if (*I == CanonicalPath)
         return H;
     }
     return HeaderHandleInvalid;
@@ -997,11 +987,7 @@ public:
 
   // Check for presence of header handle in the header stack.
   bool isHeaderHandleInStack(HeaderHandle H) const {
-    for (auto I = HeaderStack.begin(), E = HeaderStack.end(); I != E; ++I) {
-      if (*I == H)
-        return true;
-    }
-    return false;
+    return llvm::is_contained(HeaderStack, H);
   }
 
   // Get the handle of a header inclusion path entry.
@@ -1143,10 +1129,10 @@ public:
       // Tell caller we found one or more errors.
       ReturnValue = true;
       // Start the error message.
-      OS << *MacroExpTracker.InstanceSourceLine;
+      OS << MacroExpTracker.InstanceSourceLine;
       if (ItemKey.Column > 0)
         OS << std::string(ItemKey.Column - 1, ' ') << "^\n";
-      OS << "error: Macro instance '" << *MacroExpTracker.MacroUnexpanded
+      OS << "error: Macro instance '" << MacroExpTracker.MacroUnexpanded
          << "' has different values in this header, depending on how it was "
             "included.\n";
       // Walk all the instances.
@@ -1154,8 +1140,8 @@ public:
                 EMT = MacroExpTracker.MacroExpansionInstances.end();
            IMT != EMT; ++IMT) {
         MacroExpansionInstance &MacroInfo = *IMT;
-        OS << "  '" << *MacroExpTracker.MacroUnexpanded << "' expanded to: '"
-           << *MacroInfo.MacroExpanded
+        OS << "  '" << MacroExpTracker.MacroUnexpanded << "' expanded to: '"
+           << MacroInfo.MacroExpanded
            << "' with respect to these inclusion paths:\n";
         // Walk all the inclusion path hierarchies.
         for (auto IIP = MacroInfo.InclusionPathHandles.begin(),
@@ -1165,7 +1151,7 @@ public:
           auto Count = (int)ip.size();
           for (int Index = 0; Index < Count; ++Index) {
             HeaderHandle H = ip[Index];
-            OS << std::string((Index * 2) + 4, ' ') << *getHeaderFilePath(H)
+            OS << std::string((Index * 2) + 4, ' ') << getHeaderFilePath(H)
                << "\n";
           }
         }
@@ -1173,7 +1159,7 @@ public:
         // instance location.
         // If there is a definition...
         if (MacroInfo.DefinitionLocation.Line != ItemKey.Line) {
-          OS << *MacroInfo.DefinitionSourceLine;
+          OS << MacroInfo.DefinitionSourceLine;
           if (MacroInfo.DefinitionLocation.Column > 0)
             OS << std::string(MacroInfo.DefinitionLocation.Column - 1, ' ')
                << "^\n";
@@ -1201,13 +1187,13 @@ public:
       // Tell caller we found one or more errors.
       ReturnValue = true;
       // Start the error message.
-      OS << *HeaderPaths[ItemKey.File] << ":" << ItemKey.Line << ":"
+      OS << HeaderPaths[ItemKey.File] << ":" << ItemKey.Line << ":"
          << ItemKey.Column << "\n";
       OS << "#" << getDirectiveSpelling(CondTracker.DirectiveKind) << " "
-         << *CondTracker.ConditionUnexpanded << "\n";
+         << CondTracker.ConditionUnexpanded << "\n";
       OS << "^\n";
       OS << "error: Conditional expression instance '"
-         << *CondTracker.ConditionUnexpanded
+         << CondTracker.ConditionUnexpanded
          << "' has different values in this header, depending on how it was "
             "included.\n";
       // Walk all the instances.
@@ -1215,7 +1201,7 @@ public:
                 EMT = CondTracker.ConditionalExpansionInstances.end();
            IMT != EMT; ++IMT) {
         ConditionalExpansionInstance &MacroInfo = *IMT;
-        OS << "  '" << *CondTracker.ConditionUnexpanded << "' expanded to: '"
+        OS << "  '" << CondTracker.ConditionUnexpanded << "' expanded to: '"
            << ConditionValueKindStrings[MacroInfo.ConditionValue]
            << "' with respect to these inclusion paths:\n";
         // Walk all the inclusion path hierarchies.
@@ -1226,7 +1212,7 @@ public:
           auto Count = (int)ip.size();
           for (int Index = 0; Index < Count; ++Index) {
             HeaderHandle H = ip[Index];
-            OS << std::string((Index * 2) + 4, ' ') << *getHeaderFilePath(H)
+            OS << std::string((Index * 2) + 4, ' ') << getHeaderFilePath(H)
                << "\n";
           }
         }
@@ -1255,7 +1241,7 @@ private:
   llvm::SmallVector<std::string, 32> HeaderList;
   // Only do extern, namespace check for headers in HeaderList.
   bool BlockCheckHeaderListOnly;
-  llvm::StringPool Strings;
+  llvm::StringSet<> Strings;
   std::vector<StringHandle> HeaderPaths;
   std::vector<HeaderHandle> HeaderStack;
   std::vector<HeaderInclusionPath> InclusionPaths;
@@ -1287,7 +1273,7 @@ PreprocessorTracker *PreprocessorTracker::create(
 void PreprocessorCallbacks::InclusionDirective(
     clang::SourceLocation HashLoc, const clang::Token &IncludeTok,
     llvm::StringRef FileName, bool IsAngled,
-    clang::CharSourceRange FilenameRange, const clang::FileEntry *File,
+    clang::CharSourceRange FilenameRange, clang::OptionalFileEntryRef File,
     llvm::StringRef SearchPath, llvm::StringRef RelativePath,
     const clang::Module *Imported, clang::SrcMgr::CharacteristicKind FileType) {
   int DirectiveLine, DirectiveColumn;
@@ -1306,8 +1292,8 @@ void PreprocessorCallbacks::FileChanged(
     PPTracker.handleHeaderEntry(PP, getSourceLocationFile(PP, Loc));
     break;
   case ExitFile: {
-    const clang::FileEntry *F =
-        PP.getSourceManager().getFileEntryForID(PrevFID);
+    clang::OptionalFileEntryRef F =
+        PP.getSourceManager().getFileEntryRefForID(PrevFID);
     if (F)
       PPTracker.handleHeaderExit(F->getName());
   } break;

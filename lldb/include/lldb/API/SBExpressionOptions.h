@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLDB_SBExpressionOptions_h_
-#define LLDB_SBExpressionOptions_h_
+#ifndef LLDB_API_SBEXPRESSIONOPTIONS_H
+#define LLDB_API_SBEXPRESSIONOPTIONS_H
 
 #include "lldb/API/SBDefines.h"
 
@@ -68,7 +68,9 @@ public:
 
   void SetLanguage(lldb::LanguageType language);
 
+#ifndef SWIG
   void SetCancelCallback(lldb::ExpressionCancelCallback callback, void *baton);
+#endif
 
   bool GetGenerateDebugInfo();
 
@@ -85,6 +87,10 @@ public:
   void SetAutoApplyFixIts(bool b = true);
 
   bool GetAutoApplyFixIts();
+
+  void SetRetriesWithFixIts(uint64_t retries);
+
+  uint64_t GetRetriesWithFixIts();
 
   bool GetTopLevel();
 
@@ -112,4 +118,4 @@ private:
 
 } // namespace lldb
 
-#endif // LLDB_SBExpressionOptions_h_
+#endif // LLDB_API_SBEXPRESSIONOPTIONS_H

@@ -7,9 +7,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef lldb_ValueObjectPrinter_h_
-#define lldb_ValueObjectPrinter_h_
-
+#ifndef LLDB_DATAFORMATTERS_VALUEOBJECTPRINTER_H
+#define LLDB_DATAFORMATTERS_VALUEOBJECTPRINTER_H
 
 #include "lldb/lldb-private.h"
 #include "lldb/lldb-public.h"
@@ -28,7 +27,7 @@ public:
   ValueObjectPrinter(ValueObject *valobj, Stream *s,
                      const DumpValueObjectOptions &options);
 
-  ~ValueObjectPrinter() {}
+  ~ValueObjectPrinter() = default;
 
   bool PrintValueObject();
 
@@ -58,7 +57,7 @@ protected:
 
   const char *GetDescriptionForDisplay();
 
-  const char *GetRootNameForDisplay(const char *if_fail = nullptr);
+  const char *GetRootNameForDisplay();
 
   bool ShouldPrintValueObject();
 
@@ -92,14 +91,13 @@ protected:
   bool PrintObjectDescriptionIfNeeded(bool value_printed, bool summary_printed);
 
   bool
-  ShouldPrintChildren(bool is_failed_description,
-                      DumpValueObjectOptions::PointerDepth &curr_ptr_depth);
+  ShouldPrintChildren(DumpValueObjectOptions::PointerDepth &curr_ptr_depth);
 
   bool ShouldExpandEmptyAggregates();
 
   ValueObject *GetValueObjectForChildrenGeneration();
 
-  void PrintChildrenPreamble();
+  void PrintChildrenPreamble(bool value_printed, bool summary_printed);
 
   void PrintChildrenPostamble(bool print_dotdotdot);
 
@@ -118,7 +116,11 @@ protected:
 
   bool PrintChildrenOneLiner(bool hide_names);
 
+  bool HasReachedMaximumDepth();
+
 private:
+  bool ShouldShowName() const;
+
   ValueObject *m_orig_valobj;
   ValueObject *m_valobj;
   Stream *m_stream;
@@ -142,9 +144,10 @@ private:
 
   friend struct StringSummaryFormat;
 
-  DISALLOW_COPY_AND_ASSIGN(ValueObjectPrinter);
+  ValueObjectPrinter(const ValueObjectPrinter &) = delete;
+  const ValueObjectPrinter &operator=(const ValueObjectPrinter &) = delete;
 };
 
 } // namespace lldb_private
 
-#endif // lldb_ValueObjectPrinter_h_
+#endif // LLDB_DATAFORMATTERS_VALUEOBJECTPRINTER_H

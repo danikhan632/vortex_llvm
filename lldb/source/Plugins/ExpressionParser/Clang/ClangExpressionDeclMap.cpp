@@ -1,4 +1,4 @@
-//===-- ClangExpressionDeclMap.cpp -----------------------------*- C++ -*-===//
+//===-- ClangExpressionDeclMap.cpp ----------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -9,17 +9,21 @@
 #include "ClangExpressionDeclMap.h"
 
 #include "ClangASTSource.h"
+#include "ClangExpressionUtil.h"
+#include "ClangExpressionVariable.h"
 #include "ClangModulesDeclVendor.h"
 #include "ClangPersistentVariables.h"
+#include "ClangUtil.h"
 
+#include "NameSearchContext.h"
+#include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 #include "lldb/Core/Address.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/ModuleSpec.h"
 #include "lldb/Core/ValueObjectConstResult.h"
 #include "lldb/Core/ValueObjectVariable.h"
+#include "lldb/Expression/DiagnosticManager.h"
 #include "lldb/Expression/Materializer.h"
-#include "lldb/Symbol/ClangASTContext.h"
-#include "lldb/Symbol/ClangUtil.h"
 #include "lldb/Symbol/CompileUnit.h"
 #include "lldb/Symbol/CompilerDecl.h"
 #include "lldb/Symbol/CompilerDeclContext.h"
@@ -39,9 +43,11 @@
 #include "lldb/Target/Target.h"
 #include "lldb/Target/Thread.h"
 #include "lldb/Utility/Endian.h"
+#include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
 #include "lldb/Utility/RegisterValue.h"
 #include "lldb/Utility/Status.h"
+#include "lldb/lldb-private-types.h"
 #include "lldb/lldb-private.h"
 #include "clang/AST/ASTConsumer.h"
 #include "clang/AST/ASTContext.h"
@@ -58,15 +64,30 @@ using namespace lldb;
 using namespace lldb_private;
 using namespace clang;
 
+static const char *g_lldb_local_vars_namespace_cstr = "$__lldb_local_vars";
+
 namespace {
-const char *g_lldb_local_vars_namespace_cstr = "$__lldb_local_vars";
-} // anonymous namespace
+/// A lambda is represented by Clang as an artifical class whose
+/// members are the lambda captures. If we capture a 'this' pointer,
+/// the artifical class will contain a member variable named 'this'.
+/// The function returns a ValueObject for the captured 'this' if such
+/// member exists. If no 'this' was captured, return a nullptr.
+lldb::ValueObjectSP GetCapturedThisValueObject(StackFrame *frame) {
+  assert(frame);
+
+  if (auto thisValSP = frame->FindVariable(ConstString("this")))
+    if (auto thisThisValSP = thisValSP->GetChildMemberWithName("this"))
+      return thisThisValSP;
+
+  return nullptr;
+}
+} // namespace
 
 ClangExpressionDeclMap::ClangExpressionDeclMap(
     bool keep_result_in_memory,
     Materializer::PersistentVariableDelegate *result_delegate,
-    const lldb::TargetSP &target, const lldb::ClangASTImporterSP &importer,
-    ValueObject *ctx_obj)
+    const lldb::TargetSP &target,
+    const std::shared_ptr<ClangASTImporter> &importer, ValueObject *ctx_obj)
     : ClangASTSource(target, importer), m_found_entities(), m_struct_members(),
       m_keep_result_in_memory(keep_result_in_memory),
       m_result_delegate(result_delegate), m_ctx_obj(ctx_obj), m_parser_vars(),
@@ -109,7 +130,7 @@ bool ClangExpressionDeclMap::WillParse(ExecutionContext &exe_ctx,
     m_parser_vars->m_persistent_vars = llvm::cast<ClangPersistentVariables>(
         target->GetPersistentExpressionStateForLanguage(eLanguageTypeC));
 
-    if (!ClangASTContext::GetScratch(*target))
+    if (!ScratchTypeSystemClang::GetForTarget(*target))
       return false;
   }
 
@@ -123,6 +144,12 @@ void ClangExpressionDeclMap::InstallCodeGenerator(
     clang::ASTConsumer *code_gen) {
   assert(m_parser_vars);
   m_parser_vars->m_code_gen = code_gen;
+}
+
+void ClangExpressionDeclMap::InstallDiagnosticManager(
+    DiagnosticManager &diag_manager) {
+  assert(m_parser_vars);
+  m_parser_vars->m_diagnostics = &diag_manager;
 }
 
 void ClangExpressionDeclMap::DidParse() {
@@ -174,19 +201,15 @@ ClangExpressionDeclMap::TargetInfo ClangExpressionDeclMap::GetTargetInfo() {
   return ret;
 }
 
-TypeFromUser ClangExpressionDeclMap::DeportType(ClangASTContext &target,
-                                                ClangASTContext &source,
+TypeFromUser ClangExpressionDeclMap::DeportType(TypeSystemClang &target,
+                                                TypeSystemClang &source,
                                                 TypeFromParser parser_type) {
-  assert(&target == ClangASTContext::GetScratch(*m_target));
-  assert((TypeSystem *)&source == parser_type.GetTypeSystem());
+  assert(&target == GetScratchContext(*m_target).get());
+  assert((TypeSystem *)&source ==
+         parser_type.GetTypeSystem().GetSharedPointer().get());
   assert(&source.getASTContext() == m_ast_context);
 
-  if (m_ast_importer_sp) {
-    return TypeFromUser(m_ast_importer_sp->DeportType(target, parser_type));
-  } else {
-    lldbassert(0 && "No mechanism for deporting a type!");
-    return TypeFromUser();
-  }
+  return TypeFromUser(m_ast_importer_sp->DeportType(target, parser_type));
 }
 
 bool ClangExpressionDeclMap::AddPersistentVariable(const NamedDecl *decl,
@@ -195,11 +218,20 @@ bool ClangExpressionDeclMap::AddPersistentVariable(const NamedDecl *decl,
                                                    bool is_result,
                                                    bool is_lvalue) {
   assert(m_parser_vars.get());
-
-  ClangASTContext *ast =
-      llvm::dyn_cast_or_null<ClangASTContext>(parser_type.GetTypeSystem());
+  auto ast = parser_type.GetTypeSystem().dyn_cast_or_null<TypeSystemClang>();
   if (ast == nullptr)
     return false;
+
+  // Check if we already declared a persistent variable with the same name.
+  if (lldb::ExpressionVariableSP conflicting_var =
+          m_parser_vars->m_persistent_vars->GetVariable(name)) {
+    std::string msg = llvm::formatv("redefinition of persistent variable '{0}'",
+                                    name).str();
+    m_parser_vars->m_diagnostics->AddDiagnostic(
+        msg, DiagnosticSeverity::eDiagnosticSeverityError,
+        DiagnosticOrigin::eDiagnosticOriginLLDB);
+    return false;
+  }
 
   if (m_parser_vars->m_materializer && is_result) {
     Status err;
@@ -209,7 +241,7 @@ bool ClangExpressionDeclMap::AddPersistentVariable(const NamedDecl *decl,
     if (target == nullptr)
       return false;
 
-    auto *clang_ast_context = ClangASTContext::GetScratch(*target);
+    auto clang_ast_context = GetScratchContext(*target);
     if (!clang_ast_context)
       return false;
 
@@ -231,7 +263,6 @@ bool ClangExpressionDeclMap::AddPersistentVariable(const NamedDecl *decl,
         var->GetParserVars(GetParserID());
 
     parser_vars->m_named_decl = decl;
-    parser_vars->m_parser_type = parser_type;
 
     var->EnableJITVars(GetParserID());
 
@@ -242,20 +273,20 @@ bool ClangExpressionDeclMap::AddPersistentVariable(const NamedDecl *decl,
     return true;
   }
 
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
+  Log *log = GetLog(LLDBLog::Expressions);
   ExecutionContext &exe_ctx = m_parser_vars->m_exe_ctx;
   Target *target = exe_ctx.GetTargetPtr();
   if (target == nullptr)
     return false;
 
-  ClangASTContext *context = ClangASTContext::GetScratch(*target);
+  auto context = GetScratchContext(*target);
   if (!context)
     return false;
 
   TypeFromUser user_type = DeportType(*context, *ast, parser_type);
 
   if (!user_type.GetOpaqueQualType()) {
-    LLDB_LOGF(log, "Persistent variable's type wasn't copied successfully");
+    LLDB_LOG(log, "Persistent variable's type wasn't copied successfully");
     return false;
   }
 
@@ -297,7 +328,7 @@ bool ClangExpressionDeclMap::AddPersistentVariable(const NamedDecl *decl,
     var->m_flags |= ClangExpressionVariable::EVKeepInTarget;
   }
 
-  LLDB_LOGF(log, "Created persistent variable with flags 0x%hx", var->m_flags);
+  LLDB_LOG(log, "Created persistent variable with flags {0:x}", var->m_flags);
 
   var->EnableParserVars(GetParserID());
 
@@ -305,7 +336,6 @@ bool ClangExpressionDeclMap::AddPersistentVariable(const NamedDecl *decl,
       var->GetParserVars(GetParserID());
 
   parser_vars->m_named_decl = decl;
-  parser_vars->m_parser_type = parser_type;
 
   return true;
 }
@@ -319,7 +349,7 @@ bool ClangExpressionDeclMap::AddValueToStruct(const NamedDecl *decl,
 
   bool is_persistent_variable = false;
 
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
+  Log *log = GetLog(LLDBLog::Expressions);
 
   m_struct_vars->m_struct_laid_out = false;
 
@@ -339,9 +369,8 @@ bool ClangExpressionDeclMap::AddValueToStruct(const NamedDecl *decl,
   if (!var)
     return false;
 
-  LLDB_LOGF(log, "Adding value for (NamedDecl*)%p [%s - %s] to the structure",
-            static_cast<const void *>(decl), name.GetCString(),
-            var->GetName().GetCString());
+  LLDB_LOG(log, "Adding value for (NamedDecl*){0} [{1} - {2}] to the structure",
+           decl, name, var->GetName());
 
   // We know entity->m_parser_vars is valid because we used a parser variable
   // to find it
@@ -355,8 +384,7 @@ bool ClangExpressionDeclMap::AddValueToStruct(const NamedDecl *decl,
           llvm::cast<ClangExpressionVariable>(var)->GetJITVars(GetParserID())) {
     // We already laid this out; do not touch
 
-    LLDB_LOGF(log, "Already placed at 0x%llx",
-              (unsigned long long)jit_vars->m_offset);
+    LLDB_LOG(log, "Already placed at {0:x}", jit_vars->m_offset);
   }
 
   llvm::cast<ClangExpressionVariable>(var)->EnableJITVars(GetParserID());
@@ -386,12 +414,16 @@ bool ClangExpressionDeclMap::AddValueToStruct(const NamedDecl *decl,
       else if (parser_vars->m_lldb_var)
         offset = m_parser_vars->m_materializer->AddVariable(
             parser_vars->m_lldb_var, err);
+      else if (parser_vars->m_lldb_valobj_provider) {
+        offset = m_parser_vars->m_materializer->AddValueObject(
+            name, parser_vars->m_lldb_valobj_provider, err);
+      }
     }
 
     if (!err.Success())
       return false;
 
-    LLDB_LOGF(log, "Placed at 0x%llx", (unsigned long long)offset);
+    LLDB_LOG(log, "Placed at {0:x}", offset);
 
     jit_vars->m_offset =
         offset; // TODO DoStructLayout() should not change this.
@@ -498,15 +530,11 @@ addr_t ClangExpressionDeclMap::GetSymbolAddress(Target &target,
   else
     target.GetImages().FindSymbolsWithNameAndType(name, symbol_type, sc_list);
 
-  const uint32_t num_matches = sc_list.GetSize();
   addr_t symbol_load_addr = LLDB_INVALID_ADDRESS;
 
-  for (uint32_t i = 0;
-       i < num_matches &&
-       (symbol_load_addr == 0 || symbol_load_addr == LLDB_INVALID_ADDRESS);
-       i++) {
-    SymbolContext sym_ctx;
-    sc_list.GetContextAtIndex(i, sym_ctx);
+  for (const SymbolContext &sym_ctx : sc_list) {
+    if (symbol_load_addr != 0 && symbol_load_addr != LLDB_INVALID_ADDRESS)
+      break;
 
     const Address sym_address = sym_ctx.symbol->GetAddress();
 
@@ -534,7 +562,7 @@ addr_t ClangExpressionDeclMap::GetSymbolAddress(Target &target,
           reexport_module_sp =
               target.GetImages().FindFirstModule(reexport_module_spec);
           if (!reexport_module_sp) {
-            reexport_module_spec.GetPlatformFileSpec().GetDirectory().Clear();
+            reexport_module_spec.GetPlatformFileSpec().ClearDirectory();
             reexport_module_sp =
                 target.GetImages().FindFirstModule(reexport_module_spec);
           }
@@ -600,7 +628,7 @@ addr_t ClangExpressionDeclMap::GetSymbolAddress(ConstString name,
 
 lldb::VariableSP ClangExpressionDeclMap::FindGlobalVariable(
     Target &target, ModuleSP &module, ConstString name,
-    CompilerDeclContext *namespace_decl) {
+    const CompilerDeclContext &namespace_decl) {
   VariableList vars;
 
   if (module && namespace_decl)
@@ -613,7 +641,7 @@ lldb::VariableSP ClangExpressionDeclMap::FindGlobalVariable(
   return vars.GetVariableAtIndex(0);
 }
 
-ClangASTContext *ClangExpressionDeclMap::GetClangASTContext() {
+TypeSystemClang *ClangExpressionDeclMap::GetTypeSystemClang() {
   StackFrame *frame = m_parser_vars->m_exe_ctx.GetFramePtr();
   if (frame == nullptr)
     return nullptr;
@@ -627,7 +655,7 @@ ClangASTContext *ClangExpressionDeclMap::GetClangASTContext() {
   if (!frame_decl_context)
     return nullptr;
 
-  return llvm::dyn_cast_or_null<ClangASTContext>(
+  return llvm::dyn_cast_or_null<TypeSystemClang>(
       frame_decl_context.GetTypeSystem());
 }
 
@@ -639,36 +667,25 @@ void ClangExpressionDeclMap::FindExternalVisibleDecls(
 
   const ConstString name(context.m_decl_name.getAsString().c_str());
 
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
-
-  if (GetImportInProgress()) {
-    if (log && log->GetVerbose())
-      LLDB_LOGF(log, "Ignoring a query during an import");
-    return;
-  }
-
-  static unsigned int invocation_id = 0;
-  unsigned int current_id = invocation_id++;
+  Log *log = GetLog(LLDBLog::Expressions);
 
   if (log) {
     if (!context.m_decl_context)
-      LLDB_LOGF(log,
-                "ClangExpressionDeclMap::FindExternalVisibleDecls[%u] for "
-                "'%s' in a NULL DeclContext",
-                current_id, name.GetCString());
+      LLDB_LOG(log,
+               "ClangExpressionDeclMap::FindExternalVisibleDecls for "
+               "'{0}' in a NULL DeclContext",
+               name);
     else if (const NamedDecl *context_named_decl =
                  dyn_cast<NamedDecl>(context.m_decl_context))
-      LLDB_LOGF(log,
-                "ClangExpressionDeclMap::FindExternalVisibleDecls[%u] for "
-                "'%s' in '%s'",
-                current_id, name.GetCString(),
-                context_named_decl->getNameAsString().c_str());
+      LLDB_LOG(log,
+               "ClangExpressionDeclMap::FindExternalVisibleDecls for "
+               "'{0}' in '{1}'",
+               name, context_named_decl->getNameAsString());
     else
-      LLDB_LOGF(log,
-                "ClangExpressionDeclMap::FindExternalVisibleDecls[%u] for "
-                "'%s' in a '%s'",
-                current_id, name.GetCString(),
-                context.m_decl_context->getDeclKindName());
+      LLDB_LOG(log,
+               "ClangExpressionDeclMap::FindExternalVisibleDecls for "
+               "'{0}' in a '{1}'",
+               name, context.m_decl_context->getDeclKindName());
   }
 
   if (const NamespaceDecl *namespace_context =
@@ -678,42 +695,31 @@ void ClangExpressionDeclMap::FindExternalVisibleDecls(
       CompilerDeclContext compiler_decl_ctx =
           m_clang_ast_context->CreateDeclContext(
               const_cast<clang::DeclContext *>(context.m_decl_context));
-      FindExternalVisibleDecls(context, lldb::ModuleSP(), compiler_decl_ctx,
-                               current_id);
+      FindExternalVisibleDecls(context, lldb::ModuleSP(), compiler_decl_ctx);
       return;
     }
 
     ClangASTImporter::NamespaceMapSP namespace_map =
-        m_ast_importer_sp
-            ? m_ast_importer_sp->GetNamespaceMap(namespace_context)
-            : ClangASTImporter::NamespaceMapSP();
+        m_ast_importer_sp->GetNamespaceMap(namespace_context);
 
     if (!namespace_map)
       return;
 
-    if (log && log->GetVerbose())
-      log->Printf("  CEDM::FEVD[%u] Inspecting (NamespaceMap*)%p (%d entries)",
-                  current_id, static_cast<void *>(namespace_map.get()),
-                  (int)namespace_map->size());
+    LLDB_LOGV(log, "  CEDM::FEVD Inspecting (NamespaceMap*){0:x} ({1} entries)",
+              namespace_map.get(), namespace_map->size());
 
-    for (ClangASTImporter::NamespaceMap::iterator i = namespace_map->begin(),
-                                                  e = namespace_map->end();
-         i != e; ++i) {
-      if (log)
-        log->Printf("  CEDM::FEVD[%u] Searching namespace %s in module %s",
-                    current_id, i->second.GetName().AsCString(),
-                    i->first->GetFileSpec().GetFilename().GetCString());
+    for (ClangASTImporter::NamespaceMapItem &n : *namespace_map) {
+      LLDB_LOG(log, "  CEDM::FEVD Searching namespace {0} in module {1}",
+               n.second.GetName(), n.first->GetFileSpec().GetFilename());
 
-      FindExternalVisibleDecls(context, i->first, i->second, current_id);
+      FindExternalVisibleDecls(context, n.first, n.second);
     }
   } else if (isa<TranslationUnitDecl>(context.m_decl_context)) {
     CompilerDeclContext namespace_decl;
 
-    if (log)
-      log->Printf("  CEDM::FEVD[%u] Searching the root namespace", current_id);
+    LLDB_LOG(log, "  CEDM::FEVD Searching the root namespace");
 
-    FindExternalVisibleDecls(context, lldb::ModuleSP(), namespace_decl,
-                             current_id);
+    FindExternalVisibleDecls(context, lldb::ModuleSP(), namespace_decl);
   }
 
   ClangASTSource::FindExternalVisibleDecls(context);
@@ -734,7 +740,7 @@ clang::NamedDecl *ClangExpressionDeclMap::GetPersistentDecl(ConstString name) {
   if (!target)
     return nullptr;
 
-  ClangASTContext::GetScratch(*target);
+  ScratchTypeSystemClang::GetForTarget(*target);
 
   if (!m_parser_vars->m_persistent_vars)
     return nullptr;
@@ -742,9 +748,8 @@ clang::NamedDecl *ClangExpressionDeclMap::GetPersistentDecl(ConstString name) {
 }
 
 void ClangExpressionDeclMap::SearchPersistenDecls(NameSearchContext &context,
-                                                  const ConstString name,
-                                                  unsigned int current_id) {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
+                                                  const ConstString name) {
+  Log *log = GetLog(LLDBLog::Expressions);
 
   NamedDecl *persistent_decl = GetPersistentDecl(name);
 
@@ -766,15 +771,13 @@ void ClangExpressionDeclMap::SearchPersistenDecls(NameSearchContext &context,
     MaybeRegisterFunctionBody(parser_function_decl);
   }
 
-  LLDB_LOGF(log, "  CEDM::FEVD[%u] Found persistent decl %s", current_id,
-            name.GetCString());
+  LLDB_LOG(log, "  CEDM::FEVD Found persistent decl {0}", name);
 
   context.AddNamedDecl(parser_named_decl);
 }
 
-void ClangExpressionDeclMap::LookUpLldbClass(NameSearchContext &context,
-                                             unsigned int current_id) {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
+void ClangExpressionDeclMap::LookUpLldbClass(NameSearchContext &context) {
+  Log *log = GetLog(LLDBLog::Expressions);
 
   StackFrame *frame = m_parser_vars->m_exe_ctx.GetFramePtr();
   SymbolContext sym_ctx;
@@ -788,12 +791,7 @@ void ClangExpressionDeclMap::LookUpLldbClass(NameSearchContext &context,
     if (!ctx_obj_ptr || status.Fail())
       return;
 
-    AddThisType(context, TypeFromUser(m_ctx_obj->GetCompilerType()),
-                current_id);
-
-    m_struct_vars->m_object_pointer_type =
-        TypeFromUser(ctx_obj_ptr->GetCompilerType());
-
+    AddContextClassType(context, TypeFromUser(m_ctx_obj->GetCompilerType()));
     return;
   }
 
@@ -814,32 +812,43 @@ void ClangExpressionDeclMap::LookUpLldbClass(NameSearchContext &context,
     return;
 
   clang::CXXMethodDecl *method_decl =
-      ClangASTContext::DeclContextGetAsCXXMethodDecl(function_decl_ctx);
+      TypeSystemClang::DeclContextGetAsCXXMethodDecl(function_decl_ctx);
 
   if (method_decl) {
+    if (auto capturedThis = GetCapturedThisValueObject(frame)) {
+      // We're inside a lambda and we captured a 'this'.
+      // Import the outer class's AST instead of the
+      // (unnamed) lambda structure AST so unqualified
+      // member lookups are understood by the Clang parser.
+      //
+      // If we're in a lambda which didn't capture 'this',
+      // $__lldb_class will correspond to the lambda closure
+      // AST and references to captures will resolve like
+      // regular member varaiable accesses do.
+      TypeFromUser pointee_type =
+          capturedThis->GetCompilerType().GetPointeeType();
+
+      LLDB_LOG(log,
+               "  CEDM::FEVD Adding captured type ({0} for"
+               " $__lldb_class: {1}",
+               capturedThis->GetTypeName(), capturedThis->GetName());
+
+      AddContextClassType(context, pointee_type);
+      return;
+    }
+
     clang::CXXRecordDecl *class_decl = method_decl->getParent();
 
     QualType class_qual_type(class_decl->getTypeForDecl(), 0);
 
-    TypeFromUser class_user_type(class_qual_type.getAsOpaquePtr(),
-                                 function_decl_ctx.GetTypeSystem());
+    TypeFromUser class_user_type(
+        class_qual_type.getAsOpaquePtr(),
+        function_decl_ctx.GetTypeSystem()->weak_from_this());
 
-    LLDB_LOG(log, "  CEDM::FEVD[{0}] Adding type for $__lldb_class: {1}",
-             current_id, class_qual_type.getAsString());
+    LLDB_LOG(log, "  CEDM::FEVD Adding type for $__lldb_class: {0}",
+             class_qual_type.getAsString());
 
-    AddThisType(context, class_user_type, current_id);
-
-    if (method_decl->isInstance()) {
-      // self is a pointer to the object
-
-      QualType class_pointer_type =
-          method_decl->getASTContext().getPointerType(class_qual_type);
-
-      TypeFromUser self_user_type(class_pointer_type.getAsOpaquePtr(),
-                                  function_decl_ctx.GetTypeSystem());
-
-      m_struct_vars->m_object_pointer_type = self_user_type;
-    }
+    AddContextClassType(context, class_user_type);
     return;
   }
 
@@ -852,7 +861,7 @@ void ClangExpressionDeclMap::LookUpLldbClass(NameSearchContext &context,
   // emit DW_AT_object_pointer
   // for C++ so it hasn't actually been tested.
 
-  VariableList *vars = frame->GetVariableList(false);
+  VariableList *vars = frame->GetVariableList(false, nullptr);
 
   lldb::VariableSP this_var = vars->FindVariable(ConstString("this"));
 
@@ -866,18 +875,15 @@ void ClangExpressionDeclMap::LookUpLldbClass(NameSearchContext &context,
     TypeFromUser pointee_type =
         this_type->GetForwardCompilerType().GetPointeeType();
 
-    LLDB_LOG(log, "  FEVD[{0}] Adding type for $__lldb_class: {1}", current_id,
+    LLDB_LOG(log, "  FEVD Adding type for $__lldb_class: {0}",
              ClangUtil::GetQualType(pointee_type).getAsString());
 
-    AddThisType(context, pointee_type, current_id);
-    TypeFromUser this_user_type(this_type->GetFullCompilerType());
-    m_struct_vars->m_object_pointer_type = this_user_type;
+    AddContextClassType(context, pointee_type);
   }
 }
 
-void ClangExpressionDeclMap::LookUpLldbObjCClass(NameSearchContext &context,
-                                                 unsigned int current_id) {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
+void ClangExpressionDeclMap::LookUpLldbObjCClass(NameSearchContext &context) {
+  Log *log = GetLog(LLDBLog::Expressions);
 
   StackFrame *frame = m_parser_vars->m_exe_ctx.GetFramePtr();
 
@@ -887,11 +893,7 @@ void ClangExpressionDeclMap::LookUpLldbObjCClass(NameSearchContext &context,
     if (!ctx_obj_ptr || status.Fail())
       return;
 
-    AddOneType(context, TypeFromUser(m_ctx_obj->GetCompilerType()), current_id);
-
-    m_struct_vars->m_object_pointer_type =
-        TypeFromUser(ctx_obj_ptr->GetCompilerType());
-
+    AddOneType(context, TypeFromUser(m_ctx_obj->GetCompilerType()));
     return;
   }
 
@@ -915,7 +917,7 @@ void ClangExpressionDeclMap::LookUpLldbObjCClass(NameSearchContext &context,
     return;
 
   clang::ObjCMethodDecl *method_decl =
-      ClangASTContext::DeclContextGetAsObjCMethodDecl(function_decl_ctx);
+      TypeSystemClang::DeclContextGetAsObjCMethodDecl(function_decl_ctx);
 
   if (method_decl) {
     ObjCInterfaceDecl *self_interface = method_decl->getClassInterface();
@@ -929,35 +931,14 @@ void ClangExpressionDeclMap::LookUpLldbObjCClass(NameSearchContext &context,
       return; // This is unlikely, but we have seen crashes where this
               // occurred
 
-    TypeFromUser class_user_type(QualType(interface_type, 0).getAsOpaquePtr(),
-                                 function_decl_ctx.GetTypeSystem());
+    TypeFromUser class_user_type(
+        QualType(interface_type, 0).getAsOpaquePtr(),
+        function_decl_ctx.GetTypeSystem()->weak_from_this());
 
     LLDB_LOG(log, "  FEVD[{0}] Adding type for $__lldb_objc_class: {1}",
-             current_id, ClangUtil::ToString(interface_type));
+             ClangUtil::ToString(interface_type));
 
-    AddOneType(context, class_user_type, current_id);
-
-    if (method_decl->isInstanceMethod()) {
-      // self is a pointer to the object
-
-      QualType class_pointer_type =
-          method_decl->getASTContext().getObjCObjectPointerType(
-              QualType(interface_type, 0));
-
-      TypeFromUser self_user_type(class_pointer_type.getAsOpaquePtr(),
-                                  function_decl_ctx.GetTypeSystem());
-
-      m_struct_vars->m_object_pointer_type = self_user_type;
-    } else {
-      // self is a Class pointer
-      QualType class_type = method_decl->getASTContext().getObjCClassType();
-
-      TypeFromUser self_user_type(class_type.getAsOpaquePtr(),
-                                  function_decl_ctx.GetTypeSystem());
-
-      m_struct_vars->m_object_pointer_type = self_user_type;
-    }
-
+    AddOneType(context, class_user_type);
     return;
   }
   // This branch will get hit if we are executing code in the context of
@@ -966,7 +947,7 @@ void ClangExpressionDeclMap::LookUpLldbObjCClass(NameSearchContext &context,
   // In that case, just look up the "self" variable in the current scope
   // and use its type.
 
-  VariableList *vars = frame->GetVariableList(false);
+  VariableList *vars = frame->GetVariableList(false, nullptr);
 
   lldb::VariableSP self_var = vars->FindVariable(ConstString("self"));
 
@@ -984,10 +965,10 @@ void ClangExpressionDeclMap::LookUpLldbObjCClass(NameSearchContext &context,
 
   CompilerType self_clang_type = self_type->GetFullCompilerType();
 
-  if (ClangASTContext::IsObjCClassType(self_clang_type)) {
+  if (TypeSystemClang::IsObjCClassType(self_clang_type)) {
     return;
   }
-  if (!ClangASTContext::IsObjCObjectPointerType(self_clang_type))
+  if (!TypeSystemClang::IsObjCObjectPointerType(self_clang_type))
     return;
   self_clang_type = self_clang_type.GetPointeeType();
 
@@ -995,15 +976,11 @@ void ClangExpressionDeclMap::LookUpLldbObjCClass(NameSearchContext &context,
     return;
 
   LLDB_LOG(log, "  FEVD[{0}] Adding type for $__lldb_objc_class: {1}",
-           current_id, ClangUtil::ToString(self_type->GetFullCompilerType()));
+           ClangUtil::ToString(self_type->GetFullCompilerType()));
 
   TypeFromUser class_user_type(self_clang_type);
 
-  AddOneType(context, class_user_type, current_id);
-
-  TypeFromUser self_user_type(self_type->GetFullCompilerType());
-
-  m_struct_vars->m_object_pointer_type = self_user_type;
+  AddOneType(context, class_user_type);
 }
 
 void ClangExpressionDeclMap::LookupLocalVarNamespace(
@@ -1015,31 +992,32 @@ void ClangExpressionDeclMap::LookupLocalVarNamespace(
   if (!frame_decl_context)
     return;
 
-  ClangASTContext *frame_ast = llvm::dyn_cast_or_null<ClangASTContext>(
+  TypeSystemClang *frame_ast = llvm::dyn_cast_or_null<TypeSystemClang>(
       frame_decl_context.GetTypeSystem());
   if (!frame_ast)
     return;
 
   clang::NamespaceDecl *namespace_decl =
       m_clang_ast_context->GetUniqueNamespaceDeclaration(
-          g_lldb_local_vars_namespace_cstr, nullptr);
+          g_lldb_local_vars_namespace_cstr, nullptr, OptionalClangModuleID());
   if (!namespace_decl)
     return;
 
   name_context.AddNamedDecl(namespace_decl);
   clang::DeclContext *ctxt = clang::Decl::castToDeclContext(namespace_decl);
   ctxt->setHasExternalVisibleStorage(true);
-  name_context.m_found.local_vars_nsp = true;
+  name_context.m_found_local_vars_nsp = true;
 }
 
 void ClangExpressionDeclMap::LookupInModulesDeclVendor(
-    NameSearchContext &context, ConstString name, unsigned current_id) {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
+    NameSearchContext &context, ConstString name) {
+  Log *log = GetLog(LLDBLog::Expressions);
 
   if (!m_target)
     return;
 
-  auto *modules_decl_vendor = m_target->GetClangModulesDeclVendor();
+  std::shared_ptr<ClangModulesDeclVendor> modules_decl_vendor =
+      GetClangModulesDeclVendor();
   if (!modules_decl_vendor)
     return;
 
@@ -1054,16 +1032,14 @@ void ClangExpressionDeclMap::LookupInModulesDeclVendor(
   clang::NamedDecl *const decl_from_modules = decls[0];
 
   LLDB_LOG(log,
-           "  CAS::FEVD[{0}] Matching decl found for "
-           "\"{1}\" in the modules",
-           current_id, name);
+           "  CAS::FEVD Matching decl found for "
+           "\"{0}\" in the modules",
+           name);
 
   clang::Decl *copied_decl = CopyDecl(decl_from_modules);
   if (!copied_decl) {
-    LLDB_LOG(log,
-             "  CAS::FEVD[{0}] - Couldn't export a "
-             "declaration from the modules",
-             current_id);
+    LLDB_LOG(log, "  CAS::FEVD - Couldn't export a "
+                  "declaration from the modules");
     return;
   }
 
@@ -1072,17 +1048,17 @@ void ClangExpressionDeclMap::LookupInModulesDeclVendor(
 
     context.AddNamedDecl(copied_function);
 
-    context.m_found.function_with_type_info = true;
-    context.m_found.function = true;
+    context.m_found_function_with_type_info = true;
+    context.m_found_function = true;
   } else if (auto copied_var = dyn_cast<clang::VarDecl>(copied_decl)) {
     context.AddNamedDecl(copied_var);
-    context.m_found.variable = true;
+    context.m_found_variable = true;
   }
 }
 
 bool ClangExpressionDeclMap::LookupLocalVariable(
-    NameSearchContext &context, ConstString name, unsigned current_id,
-    SymbolContext &sym_ctx, CompilerDeclContext &namespace_decl) {
+    NameSearchContext &context, ConstString name, SymbolContext &sym_ctx,
+    const CompilerDeclContext &namespace_decl) {
   if (sym_ctx.block == nullptr)
     return false;
 
@@ -1117,10 +1093,34 @@ bool ClangExpressionDeclMap::LookupLocalVariable(
     if (var && !variable_found) {
       variable_found = true;
       ValueObjectSP valobj = ValueObjectVariable::Create(frame, var);
-      AddOneVariable(context, var, valobj, current_id);
-      context.m_found.variable = true;
+      AddOneVariable(context, var, valobj);
+      context.m_found_variable = true;
     }
   }
+
+  // We're in a local_var_lookup but haven't found any local variables
+  // so far. When performing a variable lookup from within the context of
+  // a lambda, we count the lambda captures as local variables. Thus,
+  // see if we captured any variables with the requested 'name'.
+  if (!variable_found) {
+    auto find_capture = [](ConstString varname,
+                           StackFrame *frame) -> ValueObjectSP {
+      if (auto lambda = ClangExpressionUtil::GetLambdaValueObject(frame)) {
+        if (auto capture = lambda->GetChildMemberWithName(varname)) {
+          return capture;
+        }
+      }
+
+      return nullptr;
+    };
+
+    if (auto capture = find_capture(name, frame)) {
+      variable_found = true;
+      context.m_found_variable = true;
+      AddOneVariable(context, std::move(capture), std::move(find_capture));
+    }
+  }
+
   return variable_found;
 }
 
@@ -1142,19 +1142,16 @@ SymbolContextList ClangExpressionDeclMap::SearchFunctionsInSymbolContexts(
   // remove unwanted functions and separate out the functions we want to
   // compare and prune into a separate list. Cache the info needed about
   // the function declarations in a vector for efficiency.
-  uint32_t num_indices = sc_list.GetSize();
   SymbolContextList sc_sym_list;
   std::vector<FuncDeclInfo> decl_infos;
-  decl_infos.reserve(num_indices);
+  decl_infos.reserve(sc_list.GetSize());
   clang::DeclContext *frame_decl_ctx =
       (clang::DeclContext *)frame_decl_context.GetOpaqueDeclContext();
-  ClangASTContext *ast = llvm::dyn_cast_or_null<ClangASTContext>(
+  TypeSystemClang *ast = llvm::dyn_cast_or_null<TypeSystemClang>(
       frame_decl_context.GetTypeSystem());
 
-  for (uint32_t index = 0; index < num_indices; ++index) {
+  for (const SymbolContext &sym_ctx : sc_list) {
     FuncDeclInfo fdi;
-    SymbolContext sym_ctx;
-    sc_list.GetContextAtIndex(index, sym_ctx);
 
     // We don't know enough about symbols to compare them, but we should
     // keep them in the list.
@@ -1167,8 +1164,7 @@ SymbolContextList ClangExpressionDeclMap::SearchFunctionsInSymbolContexts(
     // class/instance methods, since they'll be skipped in the code that
     // follows anyway.
     CompilerDeclContext func_decl_context = function->GetDeclContext();
-    if (!func_decl_context ||
-        func_decl_context.IsClassMethod(nullptr, nullptr, nullptr))
+    if (!func_decl_context || func_decl_context.IsClassMethod())
       continue;
     // We can only prune functions for which we can copy the type.
     CompilerType func_clang_type = function->GetType()->GetFullCompilerType();
@@ -1222,11 +1218,9 @@ SymbolContextList ClangExpressionDeclMap::SearchFunctionsInSymbolContexts(
   return sc_func_list;
 }
 
-void ClangExpressionDeclMap::LookupFunction(NameSearchContext &context,
-                                            lldb::ModuleSP module_sp,
-                                            ConstString name,
-                                            CompilerDeclContext &namespace_decl,
-                                            unsigned current_id) {
+void ClangExpressionDeclMap::LookupFunction(
+    NameSearchContext &context, lldb::ModuleSP module_sp, ConstString name,
+    const CompilerDeclContext &namespace_decl) {
   if (!m_parser_vars)
     return;
 
@@ -1235,28 +1229,31 @@ void ClangExpressionDeclMap::LookupFunction(NameSearchContext &context,
   std::vector<clang::NamedDecl *> decls_from_modules;
 
   if (target) {
-    if (ClangModulesDeclVendor *decl_vendor =
-            target->GetClangModulesDeclVendor()) {
+    if (std::shared_ptr<ClangModulesDeclVendor> decl_vendor =
+            GetClangModulesDeclVendor()) {
       decl_vendor->FindDecls(name, false, UINT32_MAX, decls_from_modules);
     }
   }
 
-  const bool include_inlines = false;
   SymbolContextList sc_list;
   if (namespace_decl && module_sp) {
-    const bool include_symbols = false;
+    ModuleFunctionSearchOptions function_options;
+    function_options.include_inlines = false;
+    function_options.include_symbols = false;
 
-    module_sp->FindFunctions(name, &namespace_decl, eFunctionNameTypeBase,
-                             include_symbols, include_inlines, sc_list);
+    module_sp->FindFunctions(name, namespace_decl, eFunctionNameTypeBase,
+                             function_options, sc_list);
   } else if (target && !namespace_decl) {
-    const bool include_symbols = true;
+    ModuleFunctionSearchOptions function_options;
+    function_options.include_inlines = false;
+    function_options.include_symbols = true;
 
     // TODO Fix FindFunctions so that it doesn't return
     //   instance methods for eFunctionNameTypeBase.
 
     target->GetImages().FindFunctions(
-        name, eFunctionNameTypeFull | eFunctionNameTypeBase, include_symbols,
-        include_inlines, sc_list);
+        name, eFunctionNameTypeFull | eFunctionNameTypeBase, function_options,
+        sc_list);
   }
 
   // If we found more than one function, see if we can use the frame's decl
@@ -1289,11 +1286,7 @@ void ClangExpressionDeclMap::LookupFunction(NameSearchContext &context,
     Symbol *extern_symbol = nullptr;
     Symbol *non_extern_symbol = nullptr;
 
-    for (uint32_t index = 0, num_indices = sc_list.GetSize();
-         index < num_indices; ++index) {
-      SymbolContext sym_ctx;
-      sc_list.GetContextAtIndex(index, sym_ctx);
-
+    for (const SymbolContext &sym_ctx : sc_list) {
       if (sym_ctx.function) {
         CompilerDeclContext decl_ctx = sym_ctx.function->GetDeclContext();
 
@@ -1301,46 +1294,47 @@ void ClangExpressionDeclMap::LookupFunction(NameSearchContext &context,
           continue;
 
         // Filter out class/instance methods.
-        if (decl_ctx.IsClassMethod(nullptr, nullptr, nullptr))
+        if (decl_ctx.IsClassMethod())
           continue;
 
-        AddOneFunction(context, sym_ctx.function, nullptr, current_id);
-        context.m_found.function_with_type_info = true;
-        context.m_found.function = true;
+        AddOneFunction(context, sym_ctx.function, nullptr);
+        context.m_found_function_with_type_info = true;
+        context.m_found_function = true;
       } else if (sym_ctx.symbol) {
-        if (sym_ctx.symbol->GetType() == eSymbolTypeReExported && target) {
-          sym_ctx.symbol = sym_ctx.symbol->ResolveReExportedSymbol(*target);
-          if (sym_ctx.symbol == nullptr)
+        Symbol *symbol = sym_ctx.symbol;
+        if (target && symbol->GetType() == eSymbolTypeReExported) {
+          symbol = symbol->ResolveReExportedSymbol(*target);
+          if (symbol == nullptr)
             continue;
         }
 
-        if (sym_ctx.symbol->IsExternal())
-          extern_symbol = sym_ctx.symbol;
+        if (symbol->IsExternal())
+          extern_symbol = symbol;
         else
-          non_extern_symbol = sym_ctx.symbol;
+          non_extern_symbol = symbol;
       }
     }
 
-    if (!context.m_found.function_with_type_info) {
+    if (!context.m_found_function_with_type_info) {
       for (clang::NamedDecl *decl : decls_from_modules) {
         if (llvm::isa<clang::FunctionDecl>(decl)) {
           clang::NamedDecl *copied_decl =
               llvm::cast_or_null<FunctionDecl>(CopyDecl(decl));
           if (copied_decl) {
             context.AddNamedDecl(copied_decl);
-            context.m_found.function_with_type_info = true;
+            context.m_found_function_with_type_info = true;
           }
         }
       }
     }
 
-    if (!context.m_found.function_with_type_info) {
+    if (!context.m_found_function_with_type_info) {
       if (extern_symbol) {
-        AddOneFunction(context, nullptr, extern_symbol, current_id);
-        context.m_found.function = true;
+        AddOneFunction(context, nullptr, extern_symbol);
+        context.m_found_function = true;
       } else if (non_extern_symbol) {
-        AddOneFunction(context, nullptr, non_extern_symbol, current_id);
-        context.m_found.function = true;
+        AddOneFunction(context, nullptr, non_extern_symbol);
+        context.m_found_function = true;
       }
     }
   }
@@ -1348,10 +1342,10 @@ void ClangExpressionDeclMap::LookupFunction(NameSearchContext &context,
 
 void ClangExpressionDeclMap::FindExternalVisibleDecls(
     NameSearchContext &context, lldb::ModuleSP module_sp,
-    CompilerDeclContext &namespace_decl, unsigned int current_id) {
+    const CompilerDeclContext &namespace_decl) {
   assert(m_ast_context);
 
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
+  Log *log = GetLog(LLDBLog::Expressions);
 
   const ConstString name(context.m_decl_name.getAsString().c_str());
   if (IgnoreName(name, false))
@@ -1373,16 +1367,16 @@ void ClangExpressionDeclMap::FindExternalVisibleDecls(
 
   // Try the persistent decls, which take precedence over all else.
   if (!namespace_decl)
-    SearchPersistenDecls(context, name, current_id);
+    SearchPersistenDecls(context, name);
 
-  if (name.GetStringRef().startswith("$") && !namespace_decl) {
+  if (name.GetStringRef().starts_with("$") && !namespace_decl) {
     if (name == "$__lldb_class") {
-      LookUpLldbClass(context, current_id);
+      LookUpLldbClass(context);
       return;
     }
 
     if (name == "$__lldb_objc_class") {
-      LookUpLldbObjCClass(context, current_id);
+      LookUpLldbObjCClass(context);
       return;
     }
     if (name == g_lldb_local_vars_namespace_cstr) {
@@ -1391,7 +1385,7 @@ void ClangExpressionDeclMap::FindExternalVisibleDecls(
     }
 
     // any other $__lldb names should be weeded out now
-    if (name.GetStringRef().startswith("$__lldb"))
+    if (name.GetStringRef().starts_with("$__lldb"))
       return;
 
     // No ParserVars means we can't do register or variable lookup.
@@ -1402,11 +1396,11 @@ void ClangExpressionDeclMap::FindExternalVisibleDecls(
         m_parser_vars->m_persistent_vars->GetVariable(name));
 
     if (pvar_sp) {
-      AddOneVariable(context, pvar_sp, current_id);
+      AddOneVariable(context, pvar_sp);
       return;
     }
 
-    assert(name.GetStringRef().startswith("$"));
+    assert(name.GetStringRef().starts_with("$"));
     llvm::StringRef reg_name = name.GetStringRef().substr(1);
 
     if (m_parser_vars->m_exe_ctx.GetRegisterContext()) {
@@ -1415,10 +1409,9 @@ void ClangExpressionDeclMap::FindExternalVisibleDecls(
               reg_name));
 
       if (reg_info) {
-        LLDB_LOGF(log, "  CEDM::FEVD[%u] Found register %s", current_id,
-                  reg_info->name);
+        LLDB_LOG(log, "  CEDM::FEVD Found register {0}", reg_info->name);
 
-        AddOneRegister(context, reg_info, current_id);
+        AddOneRegister(context, reg_info);
       }
     }
     return;
@@ -1427,29 +1420,29 @@ void ClangExpressionDeclMap::FindExternalVisibleDecls(
   bool local_var_lookup = !namespace_decl || (namespace_decl.GetName() ==
                                               g_lldb_local_vars_namespace_cstr);
   if (frame && local_var_lookup)
-    if (LookupLocalVariable(context, name, current_id, sym_ctx, namespace_decl))
+    if (LookupLocalVariable(context, name, sym_ctx, namespace_decl))
       return;
 
   if (target) {
     ValueObjectSP valobj;
     VariableSP var;
-    var = FindGlobalVariable(*target, module_sp, name, &namespace_decl);
+    var = FindGlobalVariable(*target, module_sp, name, namespace_decl);
 
     if (var) {
       valobj = ValueObjectVariable::Create(target, var);
-      AddOneVariable(context, var, valobj, current_id);
-      context.m_found.variable = true;
+      AddOneVariable(context, var, valobj);
+      context.m_found_variable = true;
       return;
     }
   }
 
-  LookupFunction(context, module_sp, name, namespace_decl, current_id);
+  LookupFunction(context, module_sp, name, namespace_decl);
 
   // Try the modules next.
-  if (!context.m_found.function_with_type_info)
-    LookupInModulesDeclVendor(context, name, current_id);
+  if (!context.m_found_function_with_type_info)
+    LookupInModulesDeclVendor(context, name);
 
-  if (target && !context.m_found.variable && !namespace_decl) {
+  if (target && !context.m_found_variable && !namespace_decl) {
     // We couldn't find a non-symbol variable for this.  Now we'll hunt for a
     // generic data symbol, and -- if it is found -- treat it as a variable.
     Status error;
@@ -1471,8 +1464,8 @@ void ClangExpressionDeclMap::FindExternalVisibleDecls(
           m_ast_context->getDiagnostics().getCustomDiagID(
               clang::DiagnosticsEngine::Level::Warning, "%0");
       m_ast_context->getDiagnostics().Report(diag_id) << warning.c_str();
-      AddOneGenericVariable(context, *data_symbol, current_id);
-      context.m_found.variable = true;
+      AddOneGenericVariable(context, *data_symbol);
+      context.m_found_variable = true;
     }
   }
 }
@@ -1481,47 +1474,43 @@ bool ClangExpressionDeclMap::GetVariableValue(VariableSP &var,
                                               lldb_private::Value &var_location,
                                               TypeFromUser *user_type,
                                               TypeFromParser *parser_type) {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
+  Log *log = GetLog(LLDBLog::Expressions);
 
   Type *var_type = var->GetType();
 
   if (!var_type) {
-    if (log)
-      log->PutCString("Skipped a definition because it has no type");
+    LLDB_LOG(log, "Skipped a definition because it has no type");
     return false;
   }
 
   CompilerType var_clang_type = var_type->GetFullCompilerType();
 
   if (!var_clang_type) {
-    if (log)
-      log->PutCString("Skipped a definition because it has no Clang type");
+    LLDB_LOG(log, "Skipped a definition because it has no Clang type");
     return false;
   }
 
-  ClangASTContext *clang_ast = llvm::dyn_cast_or_null<ClangASTContext>(
-      var_type->GetForwardCompilerType().GetTypeSystem());
+  auto ts = var_type->GetForwardCompilerType().GetTypeSystem();
+  auto clang_ast = ts.dyn_cast_or_null<TypeSystemClang>();
 
   if (!clang_ast) {
-    if (log)
-      log->PutCString("Skipped a definition because it has no Clang AST");
+    LLDB_LOG(log, "Skipped a definition because it has no Clang AST");
     return false;
   }
 
-  DWARFExpression &var_location_expr = var->LocationExpression();
+  DWARFExpressionList &var_location_list = var->LocationExpressionList();
 
   Target *target = m_parser_vars->m_exe_ctx.GetTargetPtr();
   Status err;
 
   if (var->GetLocationIsConstantValueData()) {
     DataExtractor const_value_extractor;
-
-    if (var_location_expr.GetExpressionData(const_value_extractor)) {
+    if (var_location_list.GetExpressionData(const_value_extractor)) {
       var_location = Value(const_value_extractor.GetDataStart(),
                            const_value_extractor.GetByteSize());
-      var_location.SetValueType(Value::eValueTypeHostAddress);
+      var_location.SetValueType(Value::ValueType::HostAddress);
     } else {
-      LLDB_LOGF(log, "Error evaluating constant variable: %s", err.AsCString());
+      LLDB_LOG(log, "Error evaluating constant variable: {0}", err.AsCString());
       return false;
     }
   }
@@ -1529,8 +1518,8 @@ bool ClangExpressionDeclMap::GetVariableValue(VariableSP &var,
   CompilerType type_to_use = GuardedCopyType(var_clang_type);
 
   if (!type_to_use) {
-    LLDB_LOGF(log,
-              "Couldn't copy a variable's type into the parser's AST context");
+    LLDB_LOG(log,
+             "Couldn't copy a variable's type into the parser's AST context");
 
     return false;
   }
@@ -1538,10 +1527,10 @@ bool ClangExpressionDeclMap::GetVariableValue(VariableSP &var,
   if (parser_type)
     *parser_type = TypeFromParser(type_to_use);
 
-  if (var_location.GetContextType() == Value::eContextTypeInvalid)
+  if (var_location.GetContextType() == Value::ContextType::Invalid)
     var_location.SetCompilerType(type_to_use);
 
-  if (var_location.GetValueType() == Value::eValueTypeFileAddress) {
+  if (var_location.GetValueType() == Value::ValueType::FileAddress) {
     SymbolContext var_sc;
     var->CalculateSymbolContext(&var_sc);
 
@@ -1555,7 +1544,7 @@ bool ClangExpressionDeclMap::GetVariableValue(VariableSP &var,
 
     if (load_addr != LLDB_INVALID_ADDRESS) {
       var_location.GetScalar() = load_addr;
-      var_location.SetValueType(Value::eValueTypeLoadAddress);
+      var_location.SetValueType(Value::ValueType::LoadAddress);
     }
   }
 
@@ -1565,26 +1554,15 @@ bool ClangExpressionDeclMap::GetVariableValue(VariableSP &var,
   return true;
 }
 
-void ClangExpressionDeclMap::AddOneVariable(NameSearchContext &context,
-                                            VariableSP var,
-                                            ValueObjectSP valobj,
-                                            unsigned int current_id) {
-  assert(m_parser_vars.get());
-
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
-
-  TypeFromUser ut;
-  TypeFromParser pt;
-  Value var_location;
-
-  if (!GetVariableValue(var, var_location, &ut, &pt))
-    return;
-
+ClangExpressionVariable::ParserVars *
+ClangExpressionDeclMap::AddExpressionVariable(NameSearchContext &context,
+                                              TypeFromParser const &pt,
+                                              ValueObjectSP valobj) {
   clang::QualType parser_opaque_type =
       QualType::getFromOpaquePtr(pt.GetOpaqueQualType());
 
   if (parser_opaque_type.isNull())
-    return;
+    return nullptr;
 
   if (const clang::Type *parser_type = parser_opaque_type.getTypePtr()) {
     if (const TagType *tag_type = dyn_cast<TagType>(parser_type))
@@ -1611,25 +1589,94 @@ void ClangExpressionDeclMap::AddOneVariable(NameSearchContext &context,
   entity->EnableParserVars(GetParserID());
   ClangExpressionVariable::ParserVars *parser_vars =
       entity->GetParserVars(GetParserID());
-  parser_vars->m_parser_type = pt;
+
   parser_vars->m_named_decl = var_decl;
-  parser_vars->m_llvm_value = nullptr;
-  parser_vars->m_lldb_value = var_location;
-  parser_vars->m_lldb_var = var;
 
   if (is_reference)
     entity->m_flags |= ClangExpressionVariable::EVTypeIsReference;
 
-  LLDB_LOG(log,
-           "  CEDM::FEVD[{0}] Found variable {1}, returned\n{2} (original {3})",
-           current_id, decl_name, ClangUtil::DumpDecl(var_decl),
-           ClangUtil::ToString(ut));
+  return parser_vars;
+}
+
+void ClangExpressionDeclMap::AddOneVariable(
+    NameSearchContext &context, ValueObjectSP valobj,
+    ValueObjectProviderTy valobj_provider) {
+  assert(m_parser_vars.get());
+  assert(valobj);
+
+  Log *log = GetLog(LLDBLog::Expressions);
+
+  Value var_location = valobj->GetValue();
+
+  TypeFromUser user_type = valobj->GetCompilerType();
+
+  auto clang_ast =
+      user_type.GetTypeSystem().dyn_cast_or_null<TypeSystemClang>();
+
+  if (!clang_ast) {
+    LLDB_LOG(log, "Skipped a definition because it has no Clang AST");
+    return;
+  }
+
+  TypeFromParser parser_type = GuardedCopyType(user_type);
+
+  if (!parser_type) {
+    LLDB_LOG(log,
+             "Couldn't copy a variable's type into the parser's AST context");
+
+    return;
+  }
+
+  if (var_location.GetContextType() == Value::ContextType::Invalid)
+    var_location.SetCompilerType(parser_type);
+
+  ClangExpressionVariable::ParserVars *parser_vars =
+      AddExpressionVariable(context, parser_type, valobj);
+
+  if (!parser_vars)
+    return;
+
+  LLDB_LOG(log, "  CEDM::FEVD Found variable {0}, returned\n{1} (original {2})",
+           context.m_decl_name, ClangUtil::DumpDecl(parser_vars->m_named_decl),
+           ClangUtil::ToString(user_type));
+
+  parser_vars->m_llvm_value = nullptr;
+  parser_vars->m_lldb_value = std::move(var_location);
+  parser_vars->m_lldb_valobj_provider = std::move(valobj_provider);
 }
 
 void ClangExpressionDeclMap::AddOneVariable(NameSearchContext &context,
-                                            ExpressionVariableSP &pvar_sp,
-                                            unsigned int current_id) {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
+                                            VariableSP var,
+                                            ValueObjectSP valobj) {
+  assert(m_parser_vars.get());
+
+  Log *log = GetLog(LLDBLog::Expressions);
+
+  TypeFromUser ut;
+  TypeFromParser pt;
+  Value var_location;
+
+  if (!GetVariableValue(var, var_location, &ut, &pt))
+    return;
+
+  ClangExpressionVariable::ParserVars *parser_vars =
+      AddExpressionVariable(context, pt, std::move(valobj));
+
+  if (!parser_vars)
+    return;
+
+  LLDB_LOG(log, "  CEDM::FEVD Found variable {0}, returned\n{1} (original {2})",
+           context.m_decl_name, ClangUtil::DumpDecl(parser_vars->m_named_decl),
+           ClangUtil::ToString(ut));
+
+  parser_vars->m_llvm_value = nullptr;
+  parser_vars->m_lldb_value = var_location;
+  parser_vars->m_lldb_var = var;
+}
+
+void ClangExpressionDeclMap::AddOneVariable(NameSearchContext &context,
+                                            ExpressionVariableSP &pvar_sp) {
+  Log *log = GetLog(LLDBLog::Expressions);
 
   TypeFromUser user_type(
       llvm::cast<ClangExpressionVariable>(pvar_sp.get())->GetTypeFromUser());
@@ -1637,8 +1684,8 @@ void ClangExpressionDeclMap::AddOneVariable(NameSearchContext &context,
   TypeFromParser parser_type(GuardedCopyType(user_type));
 
   if (!parser_type.GetOpaqueQualType()) {
-    LLDB_LOGF(log, "  CEDM::FEVD[%u] Couldn't import type for pvar %s",
-              current_id, pvar_sp->GetName().GetCString());
+    LLDB_LOG(log, "  CEDM::FEVD Couldn't import type for pvar {0}",
+             pvar_sp->GetName());
     return;
   }
 
@@ -1650,28 +1697,26 @@ void ClangExpressionDeclMap::AddOneVariable(NameSearchContext &context,
   ClangExpressionVariable::ParserVars *parser_vars =
       llvm::cast<ClangExpressionVariable>(pvar_sp.get())
           ->GetParserVars(GetParserID());
-  parser_vars->m_parser_type = parser_type;
   parser_vars->m_named_decl = var_decl;
   parser_vars->m_llvm_value = nullptr;
   parser_vars->m_lldb_value.Clear();
 
-  LLDB_LOG(log, "  CEDM::FEVD[{0}] Added pvar {1}, returned\n{2}", current_id,
+  LLDB_LOG(log, "  CEDM::FEVD Added pvar {0}, returned\n{1}",
            pvar_sp->GetName(), ClangUtil::DumpDecl(var_decl));
 }
 
 void ClangExpressionDeclMap::AddOneGenericVariable(NameSearchContext &context,
-                                                   const Symbol &symbol,
-                                                   unsigned int current_id) {
+                                                   const Symbol &symbol) {
   assert(m_parser_vars.get());
 
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
+  Log *log = GetLog(LLDBLog::Expressions);
 
   Target *target = m_parser_vars->m_exe_ctx.GetTargetPtr();
 
   if (target == nullptr)
     return;
 
-  ClangASTContext *scratch_ast_context = ClangASTContext::GetScratch(*target);
+  auto scratch_ast_context = GetScratchContext(*target);
   if (!scratch_ast_context)
     return;
 
@@ -1698,33 +1743,31 @@ void ClangExpressionDeclMap::AddOneGenericVariable(NameSearchContext &context,
   const Address symbol_address = symbol.GetAddress();
   lldb::addr_t symbol_load_addr = symbol_address.GetLoadAddress(target);
 
-  // parser_vars->m_lldb_value.SetContext(Value::eContextTypeClangType,
+  // parser_vars->m_lldb_value.SetContext(Value::ContextType::ClangType,
   // user_type.GetOpaqueQualType());
   parser_vars->m_lldb_value.SetCompilerType(user_type);
   parser_vars->m_lldb_value.GetScalar() = symbol_load_addr;
-  parser_vars->m_lldb_value.SetValueType(Value::eValueTypeLoadAddress);
+  parser_vars->m_lldb_value.SetValueType(Value::ValueType::LoadAddress);
 
-  parser_vars->m_parser_type = parser_type;
   parser_vars->m_named_decl = var_decl;
   parser_vars->m_llvm_value = nullptr;
   parser_vars->m_lldb_sym = &symbol;
 
-  LLDB_LOG(log, "  CEDM::FEVD[{0}] Found variable {1}, returned\n{2}",
-           current_id, decl_name, ClangUtil::DumpDecl(var_decl));
+  LLDB_LOG(log, "  CEDM::FEVD Found variable {0}, returned\n{1}", decl_name,
+           ClangUtil::DumpDecl(var_decl));
 }
 
 void ClangExpressionDeclMap::AddOneRegister(NameSearchContext &context,
-                                            const RegisterInfo *reg_info,
-                                            unsigned int current_id) {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
+                                            const RegisterInfo *reg_info) {
+  Log *log = GetLog(LLDBLog::Expressions);
 
   CompilerType clang_type =
       m_clang_ast_context->GetBuiltinTypeForEncodingAndBitSize(
           reg_info->encoding, reg_info->byte_size * 8);
 
   if (!clang_type) {
-    LLDB_LOGF(log, "  Tried to add a type for %s, but couldn't get one",
-              context.m_decl_name.getAsString().c_str());
+    LLDB_LOG(log, "  Tried to add a type for {0}, but couldn't get one",
+             context.m_decl_name.getAsString());
     return;
   }
 
@@ -1744,23 +1787,21 @@ void ClangExpressionDeclMap::AddOneRegister(NameSearchContext &context,
   entity->EnableParserVars(GetParserID());
   ClangExpressionVariable::ParserVars *parser_vars =
       entity->GetParserVars(GetParserID());
-  parser_vars->m_parser_type = parser_clang_type;
   parser_vars->m_named_decl = var_decl;
   parser_vars->m_llvm_value = nullptr;
   parser_vars->m_lldb_value.Clear();
   entity->m_flags |= ClangExpressionVariable::EVBareRegister;
 
-  LLDB_LOG(log, "  CEDM::FEVD[{0}] Added register {1}, returned\n{2}",
-           current_id, context.m_decl_name.getAsString(),
-           ClangUtil::DumpDecl(var_decl));
+  LLDB_LOG(log, "  CEDM::FEVD Added register {0}, returned\n{1}",
+           context.m_decl_name.getAsString(), ClangUtil::DumpDecl(var_decl));
 }
 
 void ClangExpressionDeclMap::AddOneFunction(NameSearchContext &context,
-                                            Function *function, Symbol *symbol,
-                                            unsigned int current_id) {
+                                            Function *function,
+                                            Symbol *symbol) {
   assert(m_parser_vars.get());
 
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
+  Log *log = GetLog(LLDBLog::Expressions);
 
   NamedDecl *function_decl = nullptr;
   Address fun_address;
@@ -1780,7 +1821,7 @@ void ClangExpressionDeclMap::AddOneFunction(NameSearchContext &context,
 
     if (!extern_c) {
       TypeSystem *type_system = function->GetDeclContext().GetTypeSystem();
-      if (llvm::isa<ClangASTContext>(type_system)) {
+      if (llvm::isa<TypeSystemClang>(type_system)) {
         clang::DeclContext *src_decl_context =
             (clang::DeclContext *)function->GetDeclContext()
                 .GetOpaqueDeclContext();
@@ -1800,9 +1841,9 @@ void ClangExpressionDeclMap::AddOneFunction(NameSearchContext &context,
               function->DumpSymbolContext(&ss);
 
               LLDB_LOG(log,
-                       "  CEDM::FEVD[{0}] Imported decl for function template"
-                       " {1} (description {2}), returned\n{3}",
-                       current_id, copied_function_template->getNameAsString(),
+                       "  CEDM::FEVD Imported decl for function template"
+                       " {0} (description {1}), returned\n{2}",
+                       copied_function_template->getNameAsString(),
                        ss.GetData(),
                        ClangUtil::DumpDecl(copied_function_template));
             }
@@ -1819,35 +1860,31 @@ void ClangExpressionDeclMap::AddOneFunction(NameSearchContext &context,
               function->DumpSymbolContext(&ss);
 
               LLDB_LOG(log,
-                       "  CEDM::FEVD[{0}]] Imported decl for function {1} "
-                       "(description {2}), returned\n{3}",
-                       current_id, copied_function_decl->getNameAsString(),
-                       ss.GetData(), ClangUtil::DumpDecl(copied_function_decl));
+                       "  CEDM::FEVD Imported decl for function {0} "
+                       "(description {1}), returned\n{2}",
+                       copied_function_decl->getNameAsString(), ss.GetData(),
+                       ClangUtil::DumpDecl(copied_function_decl));
             }
 
             context.AddNamedDecl(copied_function_decl);
             return;
           } else {
-            if (log) {
-              LLDB_LOGF(log, "  Failed to import the function decl for '%s'",
-                        src_function_decl->getName().str().c_str());
-            }
+            LLDB_LOG(log, "  Failed to import the function decl for '{0}'",
+                     src_function_decl->getName());
           }
         }
       }
     }
 
     if (!function_type) {
-      if (log)
-        log->PutCString("  Skipped a function because it has no type");
+      LLDB_LOG(log, "  Skipped a function because it has no type");
       return;
     }
 
     function_clang_type = function_type->GetFullCompilerType();
 
     if (!function_clang_type) {
-      if (log)
-        log->PutCString("  Skipped a function because it has no Clang type");
+      LLDB_LOG(log, "  Skipped a function because it has no Clang type");
       return;
     }
 
@@ -1858,24 +1895,17 @@ void ClangExpressionDeclMap::AddOneFunction(NameSearchContext &context,
       function_decl = context.AddFunDecl(copied_function_type, extern_c);
 
       if (!function_decl) {
-        if (log) {
-          LLDB_LOGF(
-              log,
-              "  Failed to create a function decl for '%s' {0x%8.8" PRIx64 "}",
-              function_type->GetName().GetCString(), function_type->GetID());
-        }
+        LLDB_LOG(log, "  Failed to create a function decl for '{0}' ({1:x})",
+                 function_type->GetName(), function_type->GetID());
 
         return;
       }
     } else {
       // We failed to copy the type we found
-      if (log) {
-        LLDB_LOGF(log,
-                  "  Failed to import the function type '%s' {0x%8.8" PRIx64
-                  "} into the expression parser AST contenxt",
-                  function_type->GetName().GetCString(),
-                  function_type->GetID());
-      }
+      LLDB_LOG(log,
+               "  Failed to import the function type '{0}' ({1:x})"
+               " into the expression parser AST context",
+               function_type->GetName(), function_type->GetID());
 
       return;
     }
@@ -1884,8 +1914,7 @@ void ClangExpressionDeclMap::AddOneFunction(NameSearchContext &context,
     function_decl = context.AddGenericFunDecl();
     is_indirect_function = symbol->IsIndirect();
   } else {
-    if (log)
-      log->PutCString("  AddOneFunction called with no function and no symbol");
+    LLDB_LOG(log, "  AddOneFunction called with no function and no symbol");
     return;
   }
 
@@ -1909,14 +1938,14 @@ void ClangExpressionDeclMap::AddOneFunction(NameSearchContext &context,
       entity->GetParserVars(GetParserID());
 
   if (load_addr != LLDB_INVALID_ADDRESS) {
-    parser_vars->m_lldb_value.SetValueType(Value::eValueTypeLoadAddress);
+    parser_vars->m_lldb_value.SetValueType(Value::ValueType::LoadAddress);
     parser_vars->m_lldb_value.GetScalar() = load_addr;
   } else {
     // We have to try finding a file address.
 
     lldb::addr_t file_addr = fun_address.GetFileAddress();
 
-    parser_vars->m_lldb_value.SetValueType(Value::eValueTypeFileAddress);
+    parser_vars->m_lldb_value.SetValueType(Value::ValueType::FileAddress);
     parser_vars->m_lldb_value.GetScalar() = file_addr;
   }
 
@@ -1931,25 +1960,22 @@ void ClangExpressionDeclMap::AddOneFunction(NameSearchContext &context,
                      Address::DumpStyleResolvedDescription);
 
     LLDB_LOG(log,
-             "  CEDM::FEVD[{0}] Found {1} function {2} (description {3}), "
-             "returned\n{4}",
-             current_id, (function ? "specific" : "generic"), decl_name,
-             ss.GetData(), ClangUtil::DumpDecl(function_decl));
+             "  CEDM::FEVD Found {0} function {1} (description {2}), "
+             "returned\n{3}",
+             (function ? "specific" : "generic"), decl_name, ss.GetData(),
+             ClangUtil::DumpDecl(function_decl));
   }
 }
 
-void ClangExpressionDeclMap::AddThisType(NameSearchContext &context,
-                                         const TypeFromUser &ut,
-                                         unsigned int current_id) {
+void ClangExpressionDeclMap::AddContextClassType(NameSearchContext &context,
+                                                 const TypeFromUser &ut) {
   CompilerType copied_clang_type = GuardedCopyType(ut);
 
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
+  Log *log = GetLog(LLDBLog::Expressions);
 
   if (!copied_clang_type) {
-    if (log)
-      LLDB_LOGF(
-          log,
-          "ClangExpressionDeclMap::AddThisType - Couldn't import the type");
+    LLDB_LOG(log,
+             "ClangExpressionDeclMap::AddThisType - Couldn't import the type");
 
     return;
   }
@@ -2004,21 +2030,17 @@ void ClangExpressionDeclMap::AddThisType(NameSearchContext &context,
     return;
 
   context.AddNamedDecl(typedef_decl);
-
-  return;
 }
 
 void ClangExpressionDeclMap::AddOneType(NameSearchContext &context,
-                                        const TypeFromUser &ut,
-                                        unsigned int current_id) {
+                                        const TypeFromUser &ut) {
   CompilerType copied_clang_type = GuardedCopyType(ut);
 
   if (!copied_clang_type) {
-    Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
+    Log *log = GetLog(LLDBLog::Expressions);
 
-    if (log)
-      LLDB_LOGF(
-          log, "ClangExpressionDeclMap::AddOneType - Couldn't import the type");
+    LLDB_LOG(log,
+             "ClangExpressionDeclMap::AddOneType - Couldn't import the type");
 
     return;
   }

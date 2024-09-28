@@ -15,6 +15,7 @@
 #define LLVM_LIB_EXECUTIONENGINE_RUNTIMEDYLD_TARGETS_RUNTIMEDYLDCOFFAARCH64_H
 
 #include "../RuntimeDyldCOFF.h"
+#include "llvm/ADT/SmallString.h"
 #include "llvm/BinaryFormat/COFF.h"
 #include "llvm/Object/COFF.h"
 #include "llvm/Support/Endian.h"
@@ -26,7 +27,7 @@ using namespace llvm::support::endian;
 namespace llvm {
 
 // This relocation type is used for handling long branch instruction
-// throught the Stub.
+// through the Stub.
 enum InternalRelocationType : unsigned {
   INTERNAL_REL_ARM64_LONG_BRANCH26 = 0x111,
 };
@@ -89,9 +90,10 @@ private:
 public:
   RuntimeDyldCOFFAArch64(RuntimeDyld::MemoryManager &MM,
                          JITSymbolResolver &Resolver)
-      : RuntimeDyldCOFF(MM, Resolver), ImageBase(0) {}
+      : RuntimeDyldCOFF(MM, Resolver, 8, COFF::IMAGE_REL_ARM64_ADDR64),
+        ImageBase(0) {}
 
-  unsigned getStubAlignment() override { return 8; }
+  Align getStubAlignment() override { return Align(8); }
 
   unsigned getMaxStubSize() const override { return 20; }
 
@@ -161,13 +163,31 @@ public:
     uint64_t Offset = RelI->getOffset();
 
     // If there is no section, this must be an external reference.
-    const bool IsExtern = Section == Obj.section_end();
+    bool IsExtern = Section == Obj.section_end();
 
     // Determine the Addend used to adjust the relocation value.
     uint64_t Addend = 0;
     SectionEntry &AddendSection = Sections[SectionID];
     uintptr_t ObjTarget = AddendSection.getObjAddress() + Offset;
     uint8_t *Displacement = (uint8_t *)ObjTarget;
+
+    unsigned TargetSectionID = -1;
+    uint64_t TargetOffset = -1;
+
+    if (TargetName.starts_with(getImportSymbolPrefix())) {
+      TargetSectionID = SectionID;
+      TargetOffset = getDLLImportOffset(SectionID, Stubs, TargetName);
+      TargetName = StringRef();
+      IsExtern = false;
+    } else if (!IsExtern) {
+      if (auto TargetSectionIDOrErr = findOrEmitSection(
+              Obj, *Section, Section->isText(), ObjSectionToID))
+        TargetSectionID = *TargetSectionIDOrErr;
+      else
+        return TargetSectionIDOrErr.takeError();
+
+      TargetOffset = getSymbolOffset(*Symbol);
+    }
 
     switch (RelType) {
     case COFF::IMAGE_REL_ARM64_ADDR32:
@@ -224,18 +244,10 @@ public:
                       << TargetName << " Addend " << Addend << "\n");
 #endif
 
-    unsigned TargetSectionID = -1;
     if (IsExtern) {
       RelocationEntry RE(SectionID, Offset, RelType, Addend);
       addRelocationForSymbol(RE, TargetName);
     } else {
-      if (auto TargetSectionIDOrErr = findOrEmitSection(
-              Obj, *Section, Section->isText(), ObjSectionToID)) {
-        TargetSectionID = *TargetSectionIDOrErr;
-      } else
-        return TargetSectionIDOrErr.takeError();
-
-      uint64_t TargetOffset = getSymbolOffset(*Symbol);
       RelocationEntry RE(SectionID, Offset, RelType, TargetOffset + Addend);
       addRelocationForSection(RE, TargetSectionID);
     }

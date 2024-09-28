@@ -1,11 +1,12 @@
-; RUN: opt -S -loop-fusion -pass-remarks-missed=loop-fusion -disable-output < %s 2>&1 | FileCheck %s
+; RUN: opt -S -passes=loop-fusion -pass-remarks-missed=loop-fusion -disable-output < %s 2>&1 | FileCheck %s
+; REQUIRES: asserts
 
 target datalayout = "e-m:o-i64:64-f80:128-n8:16:32:64-S128"
 
 @B = common global [1024 x i32] zeroinitializer, align 16, !dbg !0
 
 ; CHECK: remark: diagnostics_missed.c:18:3: [non_adjacent]: entry and for.end: Loops are not adjacent
-define void @non_adjacent(i32* noalias %A) !dbg !14 {
+define void @non_adjacent(ptr noalias %A) !dbg !14 {
 entry:
   br label %for.body
 
@@ -19,8 +20,8 @@ for.body:                                         ; preds = %entry, %for.inc
   %mul = mul nsw i64 %sub, %add
   %rem = srem i64 %mul, %i.02
   %conv = trunc i64 %rem to i32
-  %arrayidx = getelementptr inbounds i32, i32* %A, i64 %i.02
-  store i32 %conv, i32* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds i32, ptr %A, i64 %i.02
+  store i32 %conv, ptr %arrayidx, align 4
   br label %for.inc
 
 for.inc:                                          ; preds = %for.body
@@ -41,8 +42,8 @@ for.body6:                                        ; preds = %for.end, %for.inc13
   %mul9 = mul nsw i64 %sub7, %add8
   %rem10 = srem i64 %mul9, %i1.01
   %conv11 = trunc i64 %rem10 to i32
-  %arrayidx12 = getelementptr inbounds [1024 x i32], [1024 x i32]* @B, i64 0, i64 %i1.01
-  store i32 %conv11, i32* %arrayidx12, align 4
+  %arrayidx12 = getelementptr inbounds [1024 x i32], ptr @B, i64 0, i64 %i1.01
+  store i32 %conv11, ptr %arrayidx12, align 4
   br label %for.inc13
 
 for.inc13:                                        ; preds = %for.body6
@@ -55,7 +56,7 @@ for.end15:                                        ; preds = %for.cond.cleanup5
 }
 
 ; CHECK: remark: diagnostics_missed.c:28:3: [different_bounds]: entry and for.end: Loop trip counts are not the same
-define void @different_bounds(i32* noalias %A) !dbg !36 {
+define void @different_bounds(ptr noalias %A) !dbg !36 {
 entry:
   br label %for.body
 
@@ -69,8 +70,8 @@ for.body:                                         ; preds = %entry, %for.inc
   %mul = mul nsw i64 %sub, %add
   %rem = srem i64 %mul, %i.02
   %conv = trunc i64 %rem to i32
-  %arrayidx = getelementptr inbounds i32, i32* %A, i64 %i.02
-  store i32 %conv, i32* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds i32, ptr %A, i64 %i.02
+  store i32 %conv, ptr %arrayidx, align 4
   br label %for.inc
 
 for.inc:                                          ; preds = %for.body
@@ -91,8 +92,8 @@ for.body6:                                        ; preds = %for.end, %for.inc13
   %mul9 = mul nsw i64 %sub7, %add8
   %rem10 = srem i64 %mul9, %i1.01
   %conv11 = trunc i64 %rem10 to i32
-  %arrayidx12 = getelementptr inbounds [1024 x i32], [1024 x i32]* @B, i64 0, i64 %i1.01
-  store i32 %conv11, i32* %arrayidx12, align 4
+  %arrayidx12 = getelementptr inbounds [1024 x i32], ptr @B, i64 0, i64 %i1.01
+  store i32 %conv11, ptr %arrayidx12, align 4
   br label %for.inc13
 
 for.inc13:                                        ; preds = %for.body6
@@ -104,16 +105,16 @@ for.end15:                                        ; preds = %for.cond.cleanup5
   ret void
 }
 
-; CHECK: remark: diagnostics_missed.c:38:3: [negative_dependence]: entry and for.end: Loop has a non-empty preheader
-define void @negative_dependence(i32* noalias %A) !dbg !51 {
+; CHECK: remark: diagnostics_missed.c:38:3: [negative_dependence]: entry and for.end: Dependencies prevent fusion
+define void @negative_dependence(ptr noalias %A) !dbg !51 {
 entry:
   br label %for.body
 
 for.body:                                         ; preds = %entry, %for.inc
   %indvars.iv13 = phi i64 [ 0, %entry ], [ %indvars.iv.next2, %for.inc ]
-  %arrayidx = getelementptr inbounds i32, i32* %A, i64 %indvars.iv13
+  %arrayidx = getelementptr inbounds i32, ptr %A, i64 %indvars.iv13
   %tmp = trunc i64 %indvars.iv13 to i32
-  store i32 %tmp, i32* %arrayidx, align 4
+  store i32 %tmp, ptr %arrayidx, align 4
   br label %for.inc
 
 for.inc:                                          ; preds = %for.body
@@ -128,11 +129,11 @@ for.end:                                          ; preds = %for.inc
 for.body5:                                        ; preds = %for.end, %for.inc10
   %indvars.iv2 = phi i64 [ 0, %for.end ], [ %indvars.iv.next, %for.inc10 ]
   %indvars.iv.next = add nuw nsw i64 %indvars.iv2, 1
-  %arrayidx7 = getelementptr inbounds i32, i32* %A, i64 %indvars.iv.next
-  %tmp4 = load i32, i32* %arrayidx7, align 4
+  %arrayidx7 = getelementptr inbounds i32, ptr %A, i64 %indvars.iv.next
+  %tmp4 = load i32, ptr %arrayidx7, align 4
   %mul = shl nsw i32 %tmp4, 1
-  %arrayidx9 = getelementptr inbounds [1024 x i32], [1024 x i32]* @B, i64 0, i64 %indvars.iv2
-  store i32 %mul, i32* %arrayidx9, align 4
+  %arrayidx9 = getelementptr inbounds [1024 x i32], ptr @B, i64 0, i64 %indvars.iv2
+  store i32 %mul, ptr %arrayidx9, align 4
   br label %for.inc10
 
 for.inc10:                                        ; preds = %for.body5
@@ -144,7 +145,7 @@ for.end12:                                        ; preds = %for.inc10
 }
 
 ; CHECK: remark: diagnostics_missed.c:51:3: [sumTest]: entry and for.cond2.preheader: Dependencies prevent fusion
-define i32 @sumTest(i32* noalias %A) !dbg !63 {
+define i32 @sumTest(ptr noalias %A) !dbg !63 {
 entry:
   br label %for.body
 
@@ -157,8 +158,8 @@ for.body:                                         ; preds = %entry, %for.inc
   br label %for.inc
 
 for.inc:                                          ; preds = %for.body
-  %arrayidx = getelementptr inbounds i32, i32* %A, i64 %indvars.iv13
-  %tmp = load i32, i32* %arrayidx, align 4
+  %arrayidx = getelementptr inbounds i32, ptr %A, i64 %indvars.iv13
+  %tmp = load i32, ptr %arrayidx, align 4
   %add = add nsw i32 %sum.04, %tmp
   %indvars.iv.next2 = add nuw nsw i64 %indvars.iv13, 1
   %exitcond3 = icmp ne i64 %indvars.iv.next2, 100
@@ -166,11 +167,11 @@ for.inc:                                          ; preds = %for.body
 
 for.body5:                                        ; preds = %for.cond2.preheader, %for.inc10
   %indvars.iv2 = phi i64 [ 0, %for.cond2.preheader ], [ %indvars.iv.next, %for.inc10 ]
-  %arrayidx7 = getelementptr inbounds i32, i32* %A, i64 %indvars.iv2
-  %tmp4 = load i32, i32* %arrayidx7, align 4
+  %arrayidx7 = getelementptr inbounds i32, ptr %A, i64 %indvars.iv2
+  %tmp4 = load i32, ptr %arrayidx7, align 4
   %div = sdiv i32 %tmp4, %add
-  %arrayidx9 = getelementptr inbounds [1024 x i32], [1024 x i32]* @B, i64 0, i64 %indvars.iv2
-  store i32 %div, i32* %arrayidx9, align 4
+  %arrayidx9 = getelementptr inbounds [1024 x i32], ptr @B, i64 0, i64 %indvars.iv2
+  store i32 %div, ptr %arrayidx9, align 4
   br label %for.inc10
 
 for.inc10:                                        ; preds = %for.body5
@@ -184,6 +185,123 @@ for.end12:                                        ; preds = %for.inc10
 
 ; Function Attrs: nounwind readnone speculatable willreturn
 declare void @llvm.dbg.value(metadata, metadata, metadata) #0
+
+; CHECK: remark: diagnostics_missed.c:62:3: [unsafe_preheader]: for.first.preheader and for.second.preheader: Loop has a non-empty preheader with instructions that cannot be moved
+define void @unsafe_preheader(ptr noalias %A, ptr noalias %B) {
+for.first.preheader:
+  br label %for.first, !dbg !80
+
+for.first:
+  %i.02 = phi i64 [ 0, %for.first.preheader ], [ %inc, %for.first ]
+  %arrayidx = getelementptr inbounds i32, ptr %A, i64 %i.02
+  store i32 0, ptr %arrayidx, align 4
+  %inc = add nsw i64 %i.02, 1
+  %cmp = icmp slt i64 %inc, 100
+  br i1 %cmp, label %for.first, label %for.second.preheader
+
+for.second.preheader:
+  call void @bar()
+  br label %for.second
+
+for.second:
+  %j.01 = phi i64 [ 0, %for.second.preheader ], [ %inc6, %for.second ]
+  %arrayidx4 = getelementptr inbounds i32, ptr %B, i64 %j.01
+  store i32 0, ptr %arrayidx4, align 4
+  %inc6 = add nsw i64 %j.01, 1
+  %cmp2 = icmp slt i64 %inc6, 100
+  br i1 %cmp2, label %for.second, label %for.end
+
+for.end:
+  ret void
+}
+
+; CHECK: remark: diagnostics_missed.c:67:3: [unsafe_exitblock]: for.first.preheader and for.second.preheader: Candidate has a non-empty exit block with instructions that cannot be moved
+define void @unsafe_exitblock(ptr noalias %A, ptr noalias %B, i64 %N) {
+for.first.guard:
+  %cmp3 = icmp slt i64 0, %N
+  br i1 %cmp3, label %for.first.preheader, label %for.second.guard
+
+for.first.preheader:
+  br label %for.first, !dbg !83
+
+for.first:
+  %i.04 = phi i64 [ %inc, %for.first ], [ 0, %for.first.preheader ]
+  %arrayidx = getelementptr inbounds i32, ptr %A, i64 %i.04
+  store i32 0, ptr %arrayidx, align 4
+  %inc = add nsw i64 %i.04, 1
+  %cmp = icmp slt i64 %inc, %N
+  br i1 %cmp, label %for.first, label %for.first.exit
+
+for.first.exit:
+  call void @bar()
+  br label %for.second.guard
+
+for.second.guard:
+  %cmp21 = icmp slt i64 0, %N
+  br i1 %cmp21, label %for.second.preheader, label %for.end
+
+for.second.preheader:
+  br label %for.second
+
+for.second:
+  %j.02 = phi i64 [ %inc6, %for.second ], [ 0, %for.second.preheader ]
+  %arrayidx4 = getelementptr inbounds i32, ptr %B, i64 %j.02
+  store i32 0, ptr %arrayidx4, align 4
+  %inc6 = add nsw i64 %j.02, 1
+  %cmp2 = icmp slt i64 %inc6, %N
+  br i1 %cmp2, label %for.second, label %for.second.exit
+
+for.second.exit:
+  br label %for.end
+
+for.end:
+  ret void
+}
+
+; CHECK: remark: diagnostics_missed.c:72:3: [unsafe_guardblock]: for.first.preheader and for.second.preheader: Candidate has a non-empty guard block with instructions that cannot be moved
+define void @unsafe_guardblock(ptr noalias %A, ptr noalias %B, i64 %N) {
+for.first.guard:
+  %cmp3 = icmp slt i64 0, %N
+  br i1 %cmp3, label %for.first.preheader, label %for.second.guard
+
+for.first.preheader:
+  br label %for.first, !dbg !86
+
+for.first:
+  %i.04 = phi i64 [ %inc, %for.first ], [ 0, %for.first.preheader ]
+  %arrayidx = getelementptr inbounds i32, ptr %A, i64 %i.04
+  store i32 0, ptr %arrayidx, align 4
+  %inc = add nsw i64 %i.04, 1
+  %cmp = icmp slt i64 %inc, %N
+  br i1 %cmp, label %for.first, label %for.first.exit
+
+for.first.exit:
+  br label %for.second.guard
+
+for.second.guard:
+  call void @bar()
+  %cmp21 = icmp slt i64 0, %N
+  br i1 %cmp21, label %for.second.preheader, label %for.end
+
+for.second.preheader:
+  br label %for.second
+
+for.second:
+  %j.02 = phi i64 [ %inc6, %for.second ], [ 0, %for.second.preheader ]
+  %arrayidx4 = getelementptr inbounds i32, ptr %B, i64 %j.02
+  store i32 0, ptr %arrayidx4, align 4
+  %inc6 = add nsw i64 %j.02, 1
+  %cmp2 = icmp slt i64 %inc6, %N
+  br i1 %cmp2, label %for.second, label %for.second.exit
+
+for.second.exit:
+  br label %for.end
+
+for.end:
+  ret void
+}
+
+declare void @bar()
 
 attributes #0 = { nounwind readnone speculatable willreturn }
 
@@ -267,3 +385,13 @@ attributes #0 = { nounwind readnone speculatable willreturn }
 !74 = !DILocation(line: 51, column: 3, scope: !70)
 !75 = !DILocation(line: 52, column: 15, scope: !70)
 !76 = !DILocation(line: 57, column: 3, scope: !63)
+!77 = distinct !DISubprogram(name: "unsafe_preheader", scope: !3, file: !3, line: 60, type: !15, scopeLine: 60, flags: DIFlagPrototyped, spFlags: DISPFlagDefinition, unit: !2, retainedNodes: !78)
+!78 = !{}
+!79 = distinct !DILexicalBlock(scope: !77, file: !3, line: 3, column: 5)
+!80 = !DILocation(line: 62, column: 3, scope: !79)
+!81 = distinct !DISubprogram(name: "unsafe_exitblock", scope: !3, file: !3, line: 65, type: !15, scopeLine: 60, flags: DIFlagPrototyped, spFlags: DISPFlagDefinition, unit: !2, retainedNodes: !78)
+!82 = distinct !DILexicalBlock(scope: !81, file: !3, line: 3, column: 5)
+!83 = !DILocation(line: 67, column: 3, scope: !82)
+!84 = distinct !DISubprogram(name: "unsafe_guardblock", scope: !3, file: !3, line: 70, type: !15, scopeLine: 60, flags: DIFlagPrototyped, spFlags: DISPFlagDefinition, unit: !2, retainedNodes: !78)
+!85 = distinct !DILexicalBlock(scope: !84, file: !3, line: 3, column: 5)
+!86 = !DILocation(line: 72, column: 3, scope: !85)

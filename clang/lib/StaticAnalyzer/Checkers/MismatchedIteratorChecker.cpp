@@ -28,35 +28,26 @@ using namespace iterator;
 namespace {
 
 class MismatchedIteratorChecker
-  : public Checker<check::PreCall> {
+  : public Checker<check::PreCall, check::PreStmt<BinaryOperator>> {
 
-  std::unique_ptr<BugType> MismatchedBugType;
+  const BugType MismatchedBugType{this, "Iterator(s) mismatched",
+                                  "Misuse of STL APIs",
+                                  /*SuppressOnSink=*/true};
 
-  void verifyMatch(CheckerContext &C, const SVal &Iter,
-                   const MemRegion *Cont) const;
-  void verifyMatch(CheckerContext &C, const SVal &Iter1,
-                   const SVal &Iter2) const;
-  void reportBug(const StringRef &Message, const SVal &Val1,
-                 const SVal &Val2, CheckerContext &C,
+  void verifyMatch(CheckerContext &C, SVal Iter, const MemRegion *Cont) const;
+  void verifyMatch(CheckerContext &C, SVal Iter1, SVal Iter2) const;
+  void reportBug(StringRef Message, SVal Val1, SVal Val2, CheckerContext &C,
                  ExplodedNode *ErrNode) const;
-  void reportBug(const StringRef &Message, const SVal &Val,
-                 const MemRegion *Reg, CheckerContext &C,
-                 ExplodedNode *ErrNode) const;
+  void reportBug(StringRef Message, SVal Val, const MemRegion *Reg,
+                 CheckerContext &C, ExplodedNode *ErrNode) const;
 
 public:
-  MismatchedIteratorChecker();
-
   void checkPreCall(const CallEvent &Call, CheckerContext &C) const;
+  void checkPreStmt(const BinaryOperator *BO, CheckerContext &C) const;
 
 };
 
 } // namespace
-
-MismatchedIteratorChecker::MismatchedIteratorChecker() {
-  MismatchedBugType.reset(
-      new BugType(this, "Iterator(s) mismatched", "Misuse of STL APIs",
-                  /*SuppressOnSink=*/true));
-}
 
 void MismatchedIteratorChecker::checkPreCall(const CallEvent &Call,
                                              CheckerContext &C) const {
@@ -141,7 +132,7 @@ void MismatchedIteratorChecker::checkPreCall(const CallEvent &Call,
     // Example:
     // template<typename I1, typename I2>
     // void f(I1 first1, I1 last1, I2 first2, I2 last2);
-    // 
+    //
     // In this case the first two arguments to f() must be iterators must belong
     // to the same container and the last to also to the same container but
     // not necessarily to the same as the first two.
@@ -175,8 +166,10 @@ void MismatchedIteratorChecker::checkPreCall(const CallEvent &Call,
         const auto *Param = Func->getParamDecl(J);
         const auto *ParamType =
             Param->getType()->getAs<SubstTemplateTypeParmType>();
-        if (!ParamType ||
-            ParamType->getReplacedParameter()->getDecl() != TPDecl)
+        if (!ParamType)
+          continue;
+        const TemplateTypeParmDecl *D = ParamType->getReplacedParameter();
+        if (D != TPDecl)
           continue;
         if (LHS.isUndef()) {
           LHS = Call.getArgSVal(J);
@@ -188,7 +181,18 @@ void MismatchedIteratorChecker::checkPreCall(const CallEvent &Call,
   }
 }
 
-void MismatchedIteratorChecker::verifyMatch(CheckerContext &C, const SVal &Iter,
+void MismatchedIteratorChecker::checkPreStmt(const BinaryOperator *BO,
+                                             CheckerContext &C) const {
+  if (!BO->isComparisonOp())
+    return;
+
+  ProgramStateRef State = C.getState();
+  SVal LVal = State->getSVal(BO->getLHS(), C.getLocationContext());
+  SVal RVal = State->getSVal(BO->getRHS(), C.getLocationContext());
+  verifyMatch(C, LVal, RVal);
+}
+
+void MismatchedIteratorChecker::verifyMatch(CheckerContext &C, SVal Iter,
                                             const MemRegion *Cont) const {
   // Verify match between a container and the container of an iterator
   Cont = Cont->getMostDerivedObjectRegion();
@@ -224,9 +228,8 @@ void MismatchedIteratorChecker::verifyMatch(CheckerContext &C, const SVal &Iter,
   }
 }
 
-void MismatchedIteratorChecker::verifyMatch(CheckerContext &C,
-                                            const SVal &Iter1,
-                                            const SVal &Iter2) const {
+void MismatchedIteratorChecker::verifyMatch(CheckerContext &C, SVal Iter1,
+                                            SVal Iter2) const {
   // Verify match between the containers of two iterators
   auto State = C.getState();
   const auto *Pos1 = getIteratorPosition(State, Iter1);
@@ -263,23 +266,21 @@ void MismatchedIteratorChecker::verifyMatch(CheckerContext &C,
   }
 }
 
-void MismatchedIteratorChecker::reportBug(const StringRef &Message,
-                                          const SVal &Val1,
-                                          const SVal &Val2,
-                                          CheckerContext &C,
+void MismatchedIteratorChecker::reportBug(StringRef Message, SVal Val1,
+                                          SVal Val2, CheckerContext &C,
                                           ExplodedNode *ErrNode) const {
-  auto R = std::make_unique<PathSensitiveBugReport>(*MismatchedBugType, Message,
+  auto R = std::make_unique<PathSensitiveBugReport>(MismatchedBugType, Message,
                                                     ErrNode);
   R->markInteresting(Val1);
   R->markInteresting(Val2);
   C.emitReport(std::move(R));
 }
 
-void MismatchedIteratorChecker::reportBug(const StringRef &Message,
-                                          const SVal &Val, const MemRegion *Reg,
+void MismatchedIteratorChecker::reportBug(StringRef Message, SVal Val,
+                                          const MemRegion *Reg,
                                           CheckerContext &C,
                                           ExplodedNode *ErrNode) const {
-  auto R = std::make_unique<PathSensitiveBugReport>(*MismatchedBugType, Message,
+  auto R = std::make_unique<PathSensitiveBugReport>(MismatchedBugType, Message,
                                                     ErrNode);
   R->markInteresting(Val);
   R->markInteresting(Reg);
@@ -290,6 +291,6 @@ void ento::registerMismatchedIteratorChecker(CheckerManager &mgr) {
   mgr.registerChecker<MismatchedIteratorChecker>();
 }
 
-bool ento::shouldRegisterMismatchedIteratorChecker(const LangOptions &LO) {
+bool ento::shouldRegisterMismatchedIteratorChecker(const CheckerManager &mgr) {
   return true;
 }

@@ -1,4 +1,3 @@
-// -*- C++ -*-
 //===----------------------------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
@@ -7,9 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-// UNSUPPORTED: c++98, c++03, c++11, c++14
-
-// XFAIL: dylib-has-no-bad_variant_access && !libcpp-no-exceptions
+// UNSUPPORTED: c++03, c++11, c++14
 
 // <variant>
 
@@ -28,18 +25,18 @@
 #include "test_macros.h"
 #include "variant_test_helpers.h"
 
-template <class Var, size_t I, class... Args>
+template <class Var, std::size_t I, class... Args>
 constexpr auto test_emplace_exists_imp(int) -> decltype(
     std::declval<Var>().template emplace<I>(std::declval<Args>()...), true) {
   return true;
 }
 
-template <class, size_t, class...>
+template <class, std::size_t, class...>
 constexpr auto test_emplace_exists_imp(long) -> bool {
   return false;
 }
 
-template <class Var, size_t I, class... Args> constexpr bool emplace_exists() {
+template <class Var, std::size_t I, class... Args> constexpr bool emplace_exists() {
   return test_emplace_exists_imp<Var, I, Args...>(0);
 }
 

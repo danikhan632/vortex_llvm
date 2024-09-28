@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_CommandObjectVersion_h_
-#define liblldb_CommandObjectVersion_h_
+#ifndef LLDB_SOURCE_COMMANDS_COMMANDOBJECTVERSION_H
+#define LLDB_SOURCE_COMMANDS_COMMANDOBJECTVERSION_H
 
 #include "lldb/Interpreter/CommandObject.h"
 
@@ -22,9 +22,9 @@ public:
   ~CommandObjectVersion() override;
 
 protected:
-  bool DoExecute(Args &args, CommandReturnObject &result) override;
+  void DoExecute(Args &args, CommandReturnObject &result) override;
 };
 
 } // namespace lldb_private
 
-#endif // liblldb_CommandObjectVersion_h_
+#endif // LLDB_SOURCE_COMMANDS_COMMANDOBJECTVERSION_H

@@ -36,6 +36,13 @@ public:
     return Diags.isIgnored(DiagID, SourceLocation());
   }
 
+  static bool unimplemented(const GroupRecord &Group) {
+    if (!Group.diagnostics().empty())
+      return false;
+
+    return llvm::all_of(Group.subgroups(), unimplemented);
+  }
+
   static bool enabledByDefault(const GroupRecord &Group) {
     for (const DiagnosticRecord &DR : Group.diagnostics()) {
       if (isIgnored(DR.DiagID))
@@ -53,7 +60,9 @@ public:
   void printGroup(const GroupRecord &Group, unsigned Indent = 0) {
     out.indent(Indent * 2);
 
-    if (enabledByDefault(Group))
+    if (unimplemented(Group))
+      out << Colors::RED;
+    else if (enabledByDefault(Group))
       out << Colors::GREEN;
     else
       out << Colors::YELLOW;
@@ -117,7 +126,12 @@ public:
 
   void showKey() {
     out << '\n' << Colors::GREEN << "GREEN" << Colors::RESET
-        << " = enabled by default\n\n";
+        << " = enabled by default";
+    out << '\n'
+        << Colors::YELLOW << "YELLOW" << Colors::RESET
+        << " = disabled by default";
+    out << '\n' << Colors::RED << "RED" << Colors::RESET
+        << " = unimplemented (accepted for GCC compatibility)\n\n";
   }
 };
 
@@ -146,7 +160,7 @@ int TreeView::run(unsigned int argc, char **argv, llvm::raw_ostream &out) {
     break;
   case 1:
     RootGroup = argv[0];
-    if (RootGroup.startswith("-W"))
+    if (RootGroup.starts_with("-W"))
       RootGroup = RootGroup.substr(2);
     if (RootGroup == "everything")
       ShowAll = true;

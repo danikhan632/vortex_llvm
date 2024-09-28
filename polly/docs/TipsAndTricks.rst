@@ -2,8 +2,8 @@
 Tips and Tricks on using and contributing to Polly
 ==================================================
 
-Commiting to polly trunk
-------------------------
+Committing to polly trunk
+-------------------------
     - `General reference to git-svn workflow <https://stackoverflow.com/questions/190431/is-git-svn-dcommit-after-merging-in-git-dangerous>`_
 
 
@@ -21,7 +21,7 @@ Using bugpoint to track down errors in large files
 
     - ``$ bugpoint crash.ll -polly-codegen -opt-args  -polly-canonicalize -polly-process-unprofitable``
 
-    For more documentation on bugpoint, `Visit the LLVM manual <http://llvm.org/docs/Bugpoint.html>`_
+    For more documentation on bugpoint, `Visit the LLVM manual <https://llvm.org/docs/Bugpoint.html>`_
 
 
 Understanding which pass makes a particular change

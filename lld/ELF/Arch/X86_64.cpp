@@ -6,21 +6,22 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "InputFiles.h"
+#include "OutputSections.h"
+#include "Relocations.h"
 #include "Symbols.h"
 #include "SyntheticSections.h"
 #include "Target.h"
 #include "lld/Common/ErrorHandler.h"
-#include "llvm/Object/ELF.h"
+#include "llvm/BinaryFormat/ELF.h"
 #include "llvm/Support/Endian.h"
+#include "llvm/Support/MathExtras.h"
 
 using namespace llvm;
 using namespace llvm::object;
 using namespace llvm::support::endian;
 using namespace llvm::ELF;
-
-namespace lld {
-namespace elf {
+using namespace lld;
+using namespace lld::elf;
 
 namespace {
 class X86_64 : public TargetInfo {
@@ -32,27 +33,43 @@ public:
   RelType getDynRel(RelType type) const override;
   void writeGotPltHeader(uint8_t *buf) const override;
   void writeGotPlt(uint8_t *buf, const Symbol &s) const override;
+  void writeIgotPlt(uint8_t *buf, const Symbol &s) const override;
   void writePltHeader(uint8_t *buf) const override;
   void writePlt(uint8_t *buf, const Symbol &sym,
                 uint64_t pltEntryAddr) const override;
-  void relocateOne(uint8_t *loc, RelType type, uint64_t val) const override;
-
-  RelExpr adjustRelaxExpr(RelType type, const uint8_t *data,
-                          RelExpr expr) const override;
-  void relaxGot(uint8_t *loc, RelType type, uint64_t val) const override;
-  void relaxTlsGdToIe(uint8_t *loc, RelType type, uint64_t val) const override;
-  void relaxTlsGdToLe(uint8_t *loc, RelType type, uint64_t val) const override;
-  void relaxTlsIeToLe(uint8_t *loc, RelType type, uint64_t val) const override;
-  void relaxTlsLdToLe(uint8_t *loc, RelType type, uint64_t val) const override;
+  void relocate(uint8_t *loc, const Relocation &rel,
+                uint64_t val) const override;
+  int64_t getImplicitAddend(const uint8_t *buf, RelType type) const override;
+  void applyJumpInstrMod(uint8_t *loc, JumpModType type,
+                         unsigned size) const override;
+  RelExpr adjustGotPcExpr(RelType type, int64_t addend,
+                          const uint8_t *loc) const override;
+  void relocateAlloc(InputSectionBase &sec, uint8_t *buf) const override;
   bool adjustPrologueForCrossSplitStack(uint8_t *loc, uint8_t *end,
                                         uint8_t stOther) const override;
+  bool deleteFallThruJmpInsn(InputSection &is, InputFile *file,
+                             InputSection *nextIS) const override;
+  bool relaxOnce(int pass) const override;
 };
 } // namespace
+
+// This is vector of NOP instructions of sizes from 1 to 8 bytes.  The
+// appropriately sized instructions are used to fill the gaps between sections
+// which are executed during fall through.
+static const std::vector<std::vector<uint8_t>> nopInstructions = {
+    {0x90},
+    {0x66, 0x90},
+    {0x0f, 0x1f, 0x00},
+    {0x0f, 0x1f, 0x40, 0x00},
+    {0x0f, 0x1f, 0x44, 0x00, 0x00},
+    {0x66, 0x0f, 0x1f, 0x44, 0x00, 0x00},
+    {0x0F, 0x1F, 0x80, 0x00, 0x00, 0x00, 0x00},
+    {0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00},
+    {0x66, 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00}};
 
 X86_64::X86_64() {
   copyRel = R_X86_64_COPY;
   gotRel = R_X86_64_GLOB_DAT;
-  noneRel = R_X86_64_NONE;
   pltRel = R_X86_64_JUMP_SLOT;
   relativeRel = R_X86_64_RELATIVE;
   iRelativeRel = R_X86_64_IRELATIVE;
@@ -61,23 +78,276 @@ X86_64::X86_64() {
   tlsGotRel = R_X86_64_TPOFF64;
   tlsModuleIndexRel = R_X86_64_DTPMOD64;
   tlsOffsetRel = R_X86_64_DTPOFF64;
+  gotBaseSymInGotPlt = true;
+  gotEntrySize = 8;
   pltHeaderSize = 16;
   pltEntrySize = 16;
   ipltEntrySize = 16;
   trapInstr = {0xcc, 0xcc, 0xcc, 0xcc}; // 0xcc = INT3
+  nopInstrs = nopInstructions;
 
   // Align to the large page size (known as a superpage or huge page).
   // FreeBSD automatically promotes large, superpage-aligned allocations.
   defaultImageBase = 0x200000;
 }
 
-int X86_64::getTlsGdRelaxSkip(RelType type) const { return 2; }
+int X86_64::getTlsGdRelaxSkip(RelType type) const {
+  // TLSDESC relocations are processed separately. See relaxTlsGdToLe below.
+  return type == R_X86_64_GOTPC32_TLSDESC || type == R_X86_64_TLSDESC_CALL ? 1
+                                                                           : 2;
+}
+
+// Opcodes for the different X86_64 jmp instructions.
+enum JmpInsnOpcode : uint32_t {
+  J_JMP_32,
+  J_JNE_32,
+  J_JE_32,
+  J_JG_32,
+  J_JGE_32,
+  J_JB_32,
+  J_JBE_32,
+  J_JL_32,
+  J_JLE_32,
+  J_JA_32,
+  J_JAE_32,
+  J_UNKNOWN,
+};
+
+// Given the first (optional) and second byte of the insn's opcode, this
+// returns the corresponding enum value.
+static JmpInsnOpcode getJmpInsnType(const uint8_t *first,
+                                    const uint8_t *second) {
+  if (*second == 0xe9)
+    return J_JMP_32;
+
+  if (first == nullptr)
+    return J_UNKNOWN;
+
+  if (*first == 0x0f) {
+    switch (*second) {
+    case 0x84:
+      return J_JE_32;
+    case 0x85:
+      return J_JNE_32;
+    case 0x8f:
+      return J_JG_32;
+    case 0x8d:
+      return J_JGE_32;
+    case 0x82:
+      return J_JB_32;
+    case 0x86:
+      return J_JBE_32;
+    case 0x8c:
+      return J_JL_32;
+    case 0x8e:
+      return J_JLE_32;
+    case 0x87:
+      return J_JA_32;
+    case 0x83:
+      return J_JAE_32;
+    }
+  }
+  return J_UNKNOWN;
+}
+
+// Return the relocation index for input section IS with a specific Offset.
+// Returns the maximum size of the vector if no such relocation is found.
+static unsigned getRelocationWithOffset(const InputSection &is,
+                                        uint64_t offset) {
+  unsigned size = is.relocs().size();
+  for (unsigned i = size - 1; i + 1 > 0; --i) {
+    if (is.relocs()[i].offset == offset && is.relocs()[i].expr != R_NONE)
+      return i;
+  }
+  return size;
+}
+
+// Returns true if R corresponds to a relocation used for a jump instruction.
+// TODO: Once special relocations for relaxable jump instructions are available,
+// this should be modified to use those relocations.
+static bool isRelocationForJmpInsn(Relocation &R) {
+  return R.type == R_X86_64_PLT32 || R.type == R_X86_64_PC32 ||
+         R.type == R_X86_64_PC8;
+}
+
+// Return true if Relocation R points to the first instruction in the
+// next section.
+// TODO: Delete this once psABI reserves a new relocation type for fall thru
+// jumps.
+static bool isFallThruRelocation(InputSection &is, InputFile *file,
+                                 InputSection *nextIS, Relocation &r) {
+  if (!isRelocationForJmpInsn(r))
+    return false;
+
+  uint64_t addrLoc = is.getOutputSection()->addr + is.outSecOff + r.offset;
+  uint64_t targetOffset = InputSectionBase::getRelocTargetVA(
+      file, r.type, r.addend, addrLoc, *r.sym, r.expr);
+
+  // If this jmp is a fall thru, the target offset is the beginning of the
+  // next section.
+  uint64_t nextSectionOffset =
+      nextIS->getOutputSection()->addr + nextIS->outSecOff;
+  return (addrLoc + 4 + targetOffset) == nextSectionOffset;
+}
+
+// Return the jmp instruction opcode that is the inverse of the given
+// opcode.  For example, JE inverted is JNE.
+static JmpInsnOpcode invertJmpOpcode(const JmpInsnOpcode opcode) {
+  switch (opcode) {
+  case J_JE_32:
+    return J_JNE_32;
+  case J_JNE_32:
+    return J_JE_32;
+  case J_JG_32:
+    return J_JLE_32;
+  case J_JGE_32:
+    return J_JL_32;
+  case J_JB_32:
+    return J_JAE_32;
+  case J_JBE_32:
+    return J_JA_32;
+  case J_JL_32:
+    return J_JGE_32;
+  case J_JLE_32:
+    return J_JG_32;
+  case J_JA_32:
+    return J_JBE_32;
+  case J_JAE_32:
+    return J_JB_32;
+  default:
+    return J_UNKNOWN;
+  }
+}
+
+// Deletes direct jump instruction in input sections that jumps to the
+// following section as it is not required.  If there are two consecutive jump
+// instructions, it checks if they can be flipped and one can be deleted.
+// For example:
+// .section .text
+// a.BB.foo:
+//    ...
+//    10: jne aa.BB.foo
+//    16: jmp bar
+// aa.BB.foo:
+//    ...
+//
+// can be converted to:
+// a.BB.foo:
+//   ...
+//   10: je bar  #jne flipped to je and the jmp is deleted.
+// aa.BB.foo:
+//   ...
+bool X86_64::deleteFallThruJmpInsn(InputSection &is, InputFile *file,
+                                   InputSection *nextIS) const {
+  const unsigned sizeOfDirectJmpInsn = 5;
+
+  if (nextIS == nullptr)
+    return false;
+
+  if (is.getSize() < sizeOfDirectJmpInsn)
+    return false;
+
+  // If this jmp insn can be removed, it is the last insn and the
+  // relocation is 4 bytes before the end.
+  unsigned rIndex = getRelocationWithOffset(is, is.getSize() - 4);
+  if (rIndex == is.relocs().size())
+    return false;
+
+  Relocation &r = is.relocs()[rIndex];
+
+  // Check if the relocation corresponds to a direct jmp.
+  const uint8_t *secContents = is.content().data();
+  // If it is not a direct jmp instruction, there is nothing to do here.
+  if (*(secContents + r.offset - 1) != 0xe9)
+    return false;
+
+  if (isFallThruRelocation(is, file, nextIS, r)) {
+    // This is a fall thru and can be deleted.
+    r.expr = R_NONE;
+    r.offset = 0;
+    is.drop_back(sizeOfDirectJmpInsn);
+    is.nopFiller = true;
+    return true;
+  }
+
+  // Now, check if flip and delete is possible.
+  const unsigned sizeOfJmpCCInsn = 6;
+  // To flip, there must be at least one JmpCC and one direct jmp.
+  if (is.getSize() < sizeOfDirectJmpInsn + sizeOfJmpCCInsn)
+    return false;
+
+  unsigned rbIndex =
+      getRelocationWithOffset(is, (is.getSize() - sizeOfDirectJmpInsn - 4));
+  if (rbIndex == is.relocs().size())
+    return false;
+
+  Relocation &rB = is.relocs()[rbIndex];
+
+  const uint8_t *jmpInsnB = secContents + rB.offset - 1;
+  JmpInsnOpcode jmpOpcodeB = getJmpInsnType(jmpInsnB - 1, jmpInsnB);
+  if (jmpOpcodeB == J_UNKNOWN)
+    return false;
+
+  if (!isFallThruRelocation(is, file, nextIS, rB))
+    return false;
+
+  // jmpCC jumps to the fall thru block, the branch can be flipped and the
+  // jmp can be deleted.
+  JmpInsnOpcode jInvert = invertJmpOpcode(jmpOpcodeB);
+  if (jInvert == J_UNKNOWN)
+    return false;
+  is.jumpInstrMod = make<JumpInstrMod>();
+  *is.jumpInstrMod = {rB.offset - 1, jInvert, 4};
+  // Move R's values to rB except the offset.
+  rB = {r.expr, r.type, rB.offset, r.addend, r.sym};
+  // Cancel R
+  r.expr = R_NONE;
+  r.offset = 0;
+  is.drop_back(sizeOfDirectJmpInsn);
+  is.nopFiller = true;
+  return true;
+}
+
+bool X86_64::relaxOnce(int pass) const {
+  uint64_t minVA = UINT64_MAX, maxVA = 0;
+  for (OutputSection *osec : outputSections) {
+    minVA = std::min(minVA, osec->addr);
+    maxVA = std::max(maxVA, osec->addr + osec->size);
+  }
+  // If the max VA difference is under 2^31, GOT-generating relocations with a 32-bit range cannot overflow.
+  if (isUInt<31>(maxVA - minVA))
+    return false;
+
+  SmallVector<InputSection *, 0> storage;
+  bool changed = false;
+  for (OutputSection *osec : outputSections) {
+    if (!(osec->flags & SHF_EXECINSTR))
+      continue;
+    for (InputSection *sec : getInputSections(*osec, storage)) {
+      for (Relocation &rel : sec->relocs()) {
+        if (rel.expr != R_RELAX_GOT_PC)
+          continue;
+
+        uint64_t v = sec->getRelocTargetVA(sec->file, rel.type, rel.addend,
+                                           sec->getOutputSection()->addr +
+                                               sec->outSecOff + rel.offset,
+                                           *rel.sym, rel.expr);
+        if (isInt<32>(v))
+          continue;
+        if (rel.sym->auxIdx == 0) {
+          rel.sym->allocateAux();
+          addGotEntry(*rel.sym);
+          changed = true;
+        }
+        rel.expr = R_GOT_PC;
+      }
+    }
+  }
+  return changed;
+}
 
 RelExpr X86_64::getRelExpr(RelType type, const Symbol &s,
                            const uint8_t *loc) const {
-  if (type == R_X86_64_GOTTPOFF)
-    config->hasStaticTlsModel = true;
-
   switch (type) {
   case R_X86_64_8:
   case R_X86_64_16:
@@ -89,7 +359,8 @@ RelExpr X86_64::getRelExpr(RelType type, const Symbol &s,
   case R_X86_64_DTPOFF64:
     return R_DTPREL;
   case R_X86_64_TPOFF32:
-    return R_TLS;
+  case R_X86_64_TPOFF64:
+    return R_TPREL;
   case R_X86_64_TLSDESC_CALL:
     return R_TLSDESC_CALL;
   case R_X86_64_TLSLD:
@@ -118,6 +389,8 @@ RelExpr X86_64::getRelExpr(RelType type, const Symbol &s,
     return R_GOT_PC;
   case R_X86_64_GOTOFF64:
     return R_GOTPLTREL;
+  case R_X86_64_PLTOFF64:
+    return R_PLT_GOTPLT;
   case R_X86_64_GOTPC32:
   case R_X86_64_GOTPC64:
     return R_GOTPLTONLY_PC;
@@ -131,16 +404,22 @@ RelExpr X86_64::getRelExpr(RelType type, const Symbol &s,
 }
 
 void X86_64::writeGotPltHeader(uint8_t *buf) const {
-  // The first entry holds the value of _DYNAMIC. It is not clear why that is
-  // required, but it is documented in the psabi and the glibc dynamic linker
-  // seems to use it (note that this is relevant for linking ld.so, not any
-  // other program).
+  // The first entry holds the link-time address of _DYNAMIC. It is documented
+  // in the psABI and glibc before Aug 2021 used the entry to compute run-time
+  // load address of the shared object (note that this is relevant for linking
+  // ld.so, not any other program).
   write64le(buf, mainPart->dynamic->getVA());
 }
 
 void X86_64::writeGotPlt(uint8_t *buf, const Symbol &s) const {
   // See comments in X86::writeGotPlt.
   write64le(buf, s.getPltVA() + 6);
+}
+
+void X86_64::writeIgotPlt(uint8_t *buf, const Symbol &s) const {
+  // An x86 entry is the address of the ifunc resolver function (for -z rel).
+  if (config->writeAddends)
+    write64le(buf, s.getVA());
 }
 
 void X86_64::writePltHeader(uint8_t *buf) const {
@@ -166,7 +445,7 @@ void X86_64::writePlt(uint8_t *buf, const Symbol &sym,
   memcpy(buf, inst, sizeof(inst));
 
   write32le(buf + 2, sym.getGotPltVA() - pltEntryAddr - 6);
-  write32le(buf + 7, sym.pltIndex);
+  write32le(buf + 7, sym.getPltIdx());
   write32le(buf + 12, in.plt->getVA() - pltEntryAddr - 16);
 }
 
@@ -177,8 +456,8 @@ RelType X86_64::getDynRel(RelType type) const {
   return R_X86_64_NONE;
 }
 
-void X86_64::relaxTlsGdToLe(uint8_t *loc, RelType type, uint64_t val) const {
-  if (type == R_X86_64_TLSGD) {
+static void relaxTlsGdToLe(uint8_t *loc, const Relocation &rel, uint64_t val) {
+  if (rel.type == R_X86_64_TLSGD) {
     // Convert
     //   .byte 0x66
     //   leaq x@tlsgd(%rip), %rdi
@@ -196,29 +475,29 @@ void X86_64::relaxTlsGdToLe(uint8_t *loc, RelType type, uint64_t val) const {
     // The original code used a pc relative relocation and so we have to
     // compensate for the -4 in had in the addend.
     write32le(loc + 8, val + 4);
-  } else {
-    // Convert
-    //   lea x@tlsgd(%rip), %rax
-    //   call *(%rax)
-    // to the following two instructions.
-    assert(type == R_X86_64_GOTPC32_TLSDESC);
-    if (memcmp(loc - 3, "\x48\x8d\x05", 3)) {
-      error(getErrorLocation(loc - 3) + "R_X86_64_GOTPC32_TLSDESC must be used "
-                                        "in callq *x@tlsdesc(%rip), %rax");
+  } else if (rel.type == R_X86_64_GOTPC32_TLSDESC) {
+    // Convert leaq x@tlsdesc(%rip), %REG to movq $x@tpoff, %REG.
+    if ((loc[-3] & 0xfb) != 0x48 || loc[-2] != 0x8d ||
+        (loc[-1] & 0xc7) != 0x05) {
+      errorOrWarn(getErrorLocation(loc - 3) +
+                  "R_X86_64_GOTPC32_TLSDESC must be used "
+                  "in leaq x@tlsdesc(%rip), %REG");
       return;
     }
-    // movq $x@tpoff(%rip),%rax
+    loc[-3] = 0x48 | ((loc[-3] >> 2) & 1);
     loc[-2] = 0xc7;
-    loc[-1] = 0xc0;
+    loc[-1] = 0xc0 | ((loc[-1] >> 3) & 7);
     write32le(loc, val + 4);
-    // xchg ax,ax
-    loc[4] = 0x66;
-    loc[5] = 0x90;
+  } else {
+    // Convert call *x@tlsdesc(%REG) to xchg ax, ax.
+    assert(rel.type == R_X86_64_TLSDESC_CALL);
+    loc[0] = 0x66;
+    loc[1] = 0x90;
   }
 }
 
-void X86_64::relaxTlsGdToIe(uint8_t *loc, RelType type, uint64_t val) const {
-  if (type == R_X86_64_TLSGD) {
+static void relaxTlsGdToIe(uint8_t *loc, const Relocation &rel, uint64_t val) {
+  if (rel.type == R_X86_64_TLSGD) {
     // Convert
     //   .byte 0x66
     //   leaq x@tlsgd(%rip), %rdi
@@ -236,29 +515,29 @@ void X86_64::relaxTlsGdToIe(uint8_t *loc, RelType type, uint64_t val) const {
     // Both code sequences are PC relatives, but since we are moving the
     // constant forward by 8 bytes we have to subtract the value by 8.
     write32le(loc + 8, val - 8);
-  } else {
-    // Convert
-    //   lea x@tlsgd(%rip), %rax
-    //   call *(%rax)
-    // to the following two instructions.
-    assert(type == R_X86_64_GOTPC32_TLSDESC);
-    if (memcmp(loc - 3, "\x48\x8d\x05", 3)) {
-      error(getErrorLocation(loc - 3) + "R_X86_64_GOTPC32_TLSDESC must be used "
-                                        "in callq *x@tlsdesc(%rip), %rax");
+  } else if (rel.type == R_X86_64_GOTPC32_TLSDESC) {
+    // Convert leaq x@tlsdesc(%rip), %REG to movq x@gottpoff(%rip), %REG.
+    assert(rel.type == R_X86_64_GOTPC32_TLSDESC);
+    if ((loc[-3] & 0xfb) != 0x48 || loc[-2] != 0x8d ||
+        (loc[-1] & 0xc7) != 0x05) {
+      errorOrWarn(getErrorLocation(loc - 3) +
+                  "R_X86_64_GOTPC32_TLSDESC must be used "
+                  "in leaq x@tlsdesc(%rip), %REG");
       return;
     }
-    // movq x@gottpoff(%rip),%rax
     loc[-2] = 0x8b;
     write32le(loc, val);
-    // xchg ax,ax
-    loc[4] = 0x66;
-    loc[5] = 0x90;
+  } else {
+    // Convert call *x@tlsdesc(%rax) to xchg ax, ax.
+    assert(rel.type == R_X86_64_TLSDESC_CALL);
+    loc[0] = 0x66;
+    loc[1] = 0x90;
   }
 }
 
 // In some conditions, R_X86_64_GOTTPOFF relocation can be optimized to
 // R_X86_64_TPOFF32 so that it does not use GOT.
-void X86_64::relaxTlsIeToLe(uint8_t *loc, RelType type, uint64_t val) const {
+static void relaxTlsIeToLe(uint8_t *loc, const Relocation &, uint64_t val) {
   uint8_t *inst = loc - 3;
   uint8_t reg = loc[-1] >> 3;
   uint8_t *regSlot = loc - 1;
@@ -299,16 +578,7 @@ void X86_64::relaxTlsIeToLe(uint8_t *loc, RelType type, uint64_t val) const {
   write32le(loc, val + 4);
 }
 
-void X86_64::relaxTlsLdToLe(uint8_t *loc, RelType type, uint64_t val) const {
-  if (type == R_X86_64_DTPOFF64) {
-    write64le(loc, val);
-    return;
-  }
-  if (type == R_X86_64_DTPOFF32) {
-    write32le(loc, val);
-    return;
-  }
-
+static void relaxTlsLdToLe(uint8_t *loc, const Relocation &rel, uint64_t val) {
   const uint8_t inst[] = {
       0x66, 0x66,                                           // .word 0x6666
       0x66,                                                 // .byte 0x66
@@ -347,28 +617,103 @@ void X86_64::relaxTlsLdToLe(uint8_t *loc, RelType type, uint64_t val) const {
         "expected R_X86_64_PLT32 or R_X86_64_GOTPCRELX after R_X86_64_TLSLD");
 }
 
-void X86_64::relocateOne(uint8_t *loc, RelType type, uint64_t val) const {
+// A JumpInstrMod at a specific offset indicates that the jump instruction
+// opcode at that offset must be modified.  This is specifically used to relax
+// jump instructions with basic block sections.  This function looks at the
+// JumpMod and effects the change.
+void X86_64::applyJumpInstrMod(uint8_t *loc, JumpModType type,
+                               unsigned size) const {
+  switch (type) {
+  case J_JMP_32:
+    if (size == 4)
+      *loc = 0xe9;
+    else
+      *loc = 0xeb;
+    break;
+  case J_JE_32:
+    if (size == 4) {
+      loc[-1] = 0x0f;
+      *loc = 0x84;
+    } else
+      *loc = 0x74;
+    break;
+  case J_JNE_32:
+    if (size == 4) {
+      loc[-1] = 0x0f;
+      *loc = 0x85;
+    } else
+      *loc = 0x75;
+    break;
+  case J_JG_32:
+    if (size == 4) {
+      loc[-1] = 0x0f;
+      *loc = 0x8f;
+    } else
+      *loc = 0x7f;
+    break;
+  case J_JGE_32:
+    if (size == 4) {
+      loc[-1] = 0x0f;
+      *loc = 0x8d;
+    } else
+      *loc = 0x7d;
+    break;
+  case J_JB_32:
+    if (size == 4) {
+      loc[-1] = 0x0f;
+      *loc = 0x82;
+    } else
+      *loc = 0x72;
+    break;
+  case J_JBE_32:
+    if (size == 4) {
+      loc[-1] = 0x0f;
+      *loc = 0x86;
+    } else
+      *loc = 0x76;
+    break;
+  case J_JL_32:
+    if (size == 4) {
+      loc[-1] = 0x0f;
+      *loc = 0x8c;
+    } else
+      *loc = 0x7c;
+    break;
+  case J_JLE_32:
+    if (size == 4) {
+      loc[-1] = 0x0f;
+      *loc = 0x8e;
+    } else
+      *loc = 0x7e;
+    break;
+  case J_JA_32:
+    if (size == 4) {
+      loc[-1] = 0x0f;
+      *loc = 0x87;
+    } else
+      *loc = 0x77;
+    break;
+  case J_JAE_32:
+    if (size == 4) {
+      loc[-1] = 0x0f;
+      *loc = 0x83;
+    } else
+      *loc = 0x73;
+    break;
+  case J_UNKNOWN:
+    llvm_unreachable("Unknown Jump Relocation");
+  }
+}
+
+int64_t X86_64::getImplicitAddend(const uint8_t *buf, RelType type) const {
   switch (type) {
   case R_X86_64_8:
-    checkIntUInt(loc, val, 8, type);
-    *loc = val;
-    break;
   case R_X86_64_PC8:
-    checkInt(loc, val, 8, type);
-    *loc = val;
-    break;
+    return SignExtend64<8>(*buf);
   case R_X86_64_16:
-    checkIntUInt(loc, val, 16, type);
-    write16le(loc, val);
-    break;
   case R_X86_64_PC16:
-    checkInt(loc, val, 16, type);
-    write16le(loc, val);
-    break;
+    return SignExtend64<16>(read16le(buf));
   case R_X86_64_32:
-    checkUInt(loc, val, 32, type);
-    write32le(loc, val);
-    break;
   case R_X86_64_32S:
   case R_X86_64_TPOFF32:
   case R_X86_64_GOT32:
@@ -384,29 +729,142 @@ void X86_64::relocateOne(uint8_t *loc, RelType type, uint64_t val) const {
   case R_X86_64_TLSLD:
   case R_X86_64_DTPOFF32:
   case R_X86_64_SIZE32:
-    checkInt(loc, val, 32, type);
+    return SignExtend64<32>(read32le(buf));
+  case R_X86_64_64:
+  case R_X86_64_TPOFF64:
+  case R_X86_64_DTPOFF64:
+  case R_X86_64_DTPMOD64:
+  case R_X86_64_PC64:
+  case R_X86_64_SIZE64:
+  case R_X86_64_GLOB_DAT:
+  case R_X86_64_GOT64:
+  case R_X86_64_GOTOFF64:
+  case R_X86_64_GOTPC64:
+  case R_X86_64_PLTOFF64:
+  case R_X86_64_IRELATIVE:
+  case R_X86_64_RELATIVE:
+    return read64le(buf);
+  case R_X86_64_TLSDESC:
+    return read64le(buf + 8);
+  case R_X86_64_JUMP_SLOT:
+  case R_X86_64_NONE:
+    // These relocations are defined as not having an implicit addend.
+    return 0;
+  default:
+    internalLinkerError(getErrorLocation(buf),
+                        "cannot read addend for relocation " + toString(type));
+    return 0;
+  }
+}
+
+static void relaxGot(uint8_t *loc, const Relocation &rel, uint64_t val);
+
+void X86_64::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
+  switch (rel.type) {
+  case R_X86_64_8:
+    checkIntUInt(loc, val, 8, rel);
+    *loc = val;
+    break;
+  case R_X86_64_PC8:
+    checkInt(loc, val, 8, rel);
+    *loc = val;
+    break;
+  case R_X86_64_16:
+    checkIntUInt(loc, val, 16, rel);
+    write16le(loc, val);
+    break;
+  case R_X86_64_PC16:
+    checkInt(loc, val, 16, rel);
+    write16le(loc, val);
+    break;
+  case R_X86_64_32:
+    checkUInt(loc, val, 32, rel);
+    write32le(loc, val);
+    break;
+  case R_X86_64_32S:
+  case R_X86_64_GOT32:
+  case R_X86_64_GOTPC32:
+  case R_X86_64_GOTPCREL:
+  case R_X86_64_PC32:
+  case R_X86_64_PLT32:
+  case R_X86_64_DTPOFF32:
+  case R_X86_64_SIZE32:
+    checkInt(loc, val, 32, rel);
     write32le(loc, val);
     break;
   case R_X86_64_64:
+  case R_X86_64_TPOFF64:
   case R_X86_64_DTPOFF64:
   case R_X86_64_PC64:
   case R_X86_64_SIZE64:
   case R_X86_64_GOT64:
   case R_X86_64_GOTOFF64:
   case R_X86_64_GOTPC64:
+  case R_X86_64_PLTOFF64:
     write64le(loc, val);
+    break;
+  case R_X86_64_GOTPCRELX:
+  case R_X86_64_REX_GOTPCRELX:
+    if (rel.expr != R_GOT_PC) {
+      relaxGot(loc, rel, val);
+    } else {
+      checkInt(loc, val, 32, rel);
+      write32le(loc, val);
+    }
+    break;
+  case R_X86_64_GOTPC32_TLSDESC:
+  case R_X86_64_TLSDESC_CALL:
+  case R_X86_64_TLSGD:
+    if (rel.expr == R_RELAX_TLS_GD_TO_LE) {
+      relaxTlsGdToLe(loc, rel, val);
+    } else if (rel.expr == R_RELAX_TLS_GD_TO_IE) {
+      relaxTlsGdToIe(loc, rel, val);
+    } else {
+      checkInt(loc, val, 32, rel);
+      write32le(loc, val);
+    }
+    break;
+  case R_X86_64_TLSLD:
+    if (rel.expr == R_RELAX_TLS_LD_TO_LE) {
+      relaxTlsLdToLe(loc, rel, val);
+    } else {
+      checkInt(loc, val, 32, rel);
+      write32le(loc, val);
+    }
+    break;
+  case R_X86_64_GOTTPOFF:
+    if (rel.expr == R_RELAX_TLS_IE_TO_LE) {
+      relaxTlsIeToLe(loc, rel, val);
+    } else {
+      checkInt(loc, val, 32, rel);
+      write32le(loc, val);
+    }
+    break;
+  case R_X86_64_TPOFF32:
+    checkInt(loc, val, 32, rel);
+    write32le(loc, val);
+    break;
+
+  case R_X86_64_TLSDESC:
+    // The addend is stored in the second 64-bit word.
+    write64le(loc + 8, val);
     break;
   default:
     llvm_unreachable("unknown relocation");
   }
 }
 
-RelExpr X86_64::adjustRelaxExpr(RelType type, const uint8_t *data,
-                                RelExpr relExpr) const {
-  if (type != R_X86_64_GOTPCRELX && type != R_X86_64_REX_GOTPCRELX)
-    return relExpr;
-  const uint8_t op = data[-2];
-  const uint8_t modRm = data[-1];
+RelExpr X86_64::adjustGotPcExpr(RelType type, int64_t addend,
+                                const uint8_t *loc) const {
+  // Only R_X86_64_[REX_]GOTPCRELX can be relaxed. GNU as may emit GOTPCRELX
+  // with addend != -4. Such an instruction does not load the full GOT entry, so
+  // we cannot relax the relocation. E.g. movl x@GOTPCREL+4(%rip), %rax
+  // (addend=0) loads the high 32 bits of the GOT entry.
+  if (!config->relax || addend != -4 ||
+      (type != R_X86_64_GOTPCRELX && type != R_X86_64_REX_GOTPCRELX))
+    return R_GOT_PC;
+  const uint8_t op = loc[-2];
+  const uint8_t modRm = loc[-1];
 
   // FIXME: When PIC is disabled and foo is defined locally in the
   // lower 32 bit address space, memory operand in mov can be converted into
@@ -419,12 +877,13 @@ RelExpr X86_64::adjustRelaxExpr(RelType type, const uint8_t *data,
   if (op == 0xff && (modRm == 0x15 || modRm == 0x25))
     return R_RELAX_GOT_PC;
 
+  // We don't support test/binop instructions without a REX prefix.
+  if (type == R_X86_64_GOTPCRELX)
+    return R_GOT_PC;
+
   // Relaxation of test, adc, add, and, cmp, or, sbb, sub, xor.
   // If PIC then no relaxation is available.
-  // We also don't relax test/binop instructions without REX byte,
-  // they are 32bit operations and not common to have.
-  assert(type == R_X86_64_REX_GOTPCRELX);
-  return config->isPic ? relExpr : R_RELAX_GOT_PC_NOPIC;
+  return config->isPic ? R_GOT_PC : R_RELAX_GOT_PC_NOPIC;
 }
 
 // A subset of relaxations can only be applied for no-PIC. This method
@@ -495,7 +954,9 @@ static void relaxGotNoPic(uint8_t *loc, uint64_t val, uint8_t op,
   write32le(loc, val);
 }
 
-void X86_64::relaxGot(uint8_t *loc, RelType type, uint64_t val) const {
+static void relaxGot(uint8_t *loc, const Relocation &rel, uint64_t val) {
+  assert(isInt<32>(val) &&
+         "GOTPCRELX should not have been relaxed if it overflows");
   const uint8_t op = loc[-2];
   const uint8_t modRm = loc[-1];
 
@@ -540,7 +1001,7 @@ void X86_64::relaxGot(uint8_t *loc, RelType type, uint64_t val) const {
 bool X86_64::adjustPrologueForCrossSplitStack(uint8_t *loc, uint8_t *end,
                                               uint8_t stOther) const {
   if (!config->is64) {
-    error("Target doesn't support split stacks.");
+    error("target doesn't support split stacks");
     return false;
   }
 
@@ -568,6 +1029,27 @@ bool X86_64::adjustPrologueForCrossSplitStack(uint8_t *loc, uint8_t *end,
   return false;
 }
 
+void X86_64::relocateAlloc(InputSectionBase &sec, uint8_t *buf) const {
+  uint64_t secAddr = sec.getOutputSection()->addr;
+  if (auto *s = dyn_cast<InputSection>(&sec))
+    secAddr += s->outSecOff;
+  else if (auto *ehIn = dyn_cast<EhInputSection>(&sec))
+    secAddr += ehIn->getParent()->outSecOff;
+  for (const Relocation &rel : sec.relocs()) {
+    if (rel.expr == R_NONE) // See deleteFallThruJmpInsn
+      continue;
+    uint8_t *loc = buf + rel.offset;
+    const uint64_t val =
+        sec.getRelocTargetVA(sec.file, rel.type, rel.addend,
+                             secAddr + rel.offset, *rel.sym, rel.expr);
+    relocate(loc, rel, val);
+  }
+  if (sec.jumpInstrMod) {
+    applyJumpInstrMod(buf + sec.jumpInstrMod->offset,
+                      sec.jumpInstrMod->original, sec.jumpInstrMod->size);
+  }
+}
+
 // If Intel Indirect Branch Tracking is enabled, we have to emit special PLT
 // entries containing endbr64 instructions. A PLT entry will be split into two
 // parts, one in .plt.sec (writePlt), and the other in .plt (writeIBTPlt).
@@ -588,7 +1070,7 @@ IntelIBT::IntelIBT() { pltHeaderSize = 0; }
 
 void IntelIBT::writeGotPlt(uint8_t *buf, const Symbol &s) const {
   uint64_t va =
-      in.ibtPlt->getVA() + IBTPltHeaderSize + s.pltIndex * pltEntrySize;
+      in.ibtPlt->getVA() + IBTPltHeaderSize + s.getPltIdx() * pltEntrySize;
   write64le(buf, va);
 }
 
@@ -700,7 +1182,7 @@ void Retpoline::writePlt(uint8_t *buf, const Symbol &sym,
   write32le(buf + 3, sym.getGotPltVA() - pltEntryAddr - 7);
   write32le(buf + 8, -off - 12 + 32);
   write32le(buf + 13, -off - 17 + 18);
-  write32le(buf + 18, sym.pltIndex);
+  write32le(buf + 18, sym.getPltIdx());
   write32le(buf + 23, -off - 27);
 }
 
@@ -758,7 +1240,4 @@ static TargetInfo *getTargetInfo() {
   return &t;
 }
 
-TargetInfo *getX86_64TargetInfo() { return getTargetInfo(); }
-
-} // namespace elf
-} // namespace lld
+TargetInfo *elf::getX86_64TargetInfo() { return getTargetInfo(); }

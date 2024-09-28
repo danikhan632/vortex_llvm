@@ -69,8 +69,7 @@ public:
     if (!CondS || CondS->computeComplexity() > ComplexityThreshold)
       return State;
 
-    for (auto B=CondS->symbol_begin(), E=CondS->symbol_end(); B != E; ++B) {
-      const SymbolRef Antecedent = *B;
+    for (SymbolRef Antecedent : CondS->symbols()) {
       State = addImplication(Antecedent, State, true);
       State = addImplication(Antecedent, State, false);
     }
@@ -252,6 +251,6 @@ void ento::registerTrustNonnullChecker(CheckerManager &Mgr) {
   Mgr.registerChecker<TrustNonnullChecker>(Mgr.getASTContext());
 }
 
-bool ento::shouldRegisterTrustNonnullChecker(const LangOptions &LO) {
+bool ento::shouldRegisterTrustNonnullChecker(const CheckerManager &mgr) {
   return true;
 }

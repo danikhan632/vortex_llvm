@@ -42,7 +42,6 @@ namespace test2 {
   }
 }
 
-// rdar: // 8382559
 namespace radar8382559 {
   void func(bool& outHasProperty);
 
@@ -102,8 +101,6 @@ namespace test5 {
 }
 
 
-// rdar://16356628
-//
 // Ensure that we can end function bodies while parsing an
 // expression that requires an explicitly-tracked cleanup object
 // (i.e. a block literal).
@@ -152,4 +149,17 @@ void f() {
   constexpr S s;
   auto some_block = ^{ (void)s; };
 }
+}
+
+void static_data_member() {
+  auto block = ^{
+    class X {
+      static int x; // expected-error {{static data member 'x' not allowed in local class 'X'}}
+    };
+    class Y {
+      struct Z {
+        static int z; // expected-error {{static data member 'z' not allowed in local struct 'Z'}}
+      };
+    };
+  };
 }

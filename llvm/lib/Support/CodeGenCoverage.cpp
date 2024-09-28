@@ -11,29 +11,23 @@
 
 #include "llvm/Support/CodeGenCoverage.h"
 
-#include "llvm/Config/llvm-config.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Mutex.h"
+#include "llvm/Support/Process.h"
 #include "llvm/Support/ScopedPrinter.h"
 #include "llvm/Support/ToolOutputFile.h"
-
-#if LLVM_ON_UNIX
-#include <unistd.h>
-#elif defined(_WIN32)
-#include <windows.h>
-#endif
 
 using namespace llvm;
 
 static sys::SmartMutex<true> OutputMutex;
 
-CodeGenCoverage::CodeGenCoverage() {}
+CodeGenCoverage::CodeGenCoverage() = default;
 
 void CodeGenCoverage::setCovered(uint64_t RuleID) {
   if (RuleCoverage.size() <= RuleID)
-    RuleCoverage.resize(RuleID + 1, 0);
+    RuleCoverage.resize(RuleID + 1, false);
   RuleCoverage[RuleID] = true;
 }
 
@@ -64,7 +58,8 @@ bool CodeGenCoverage::parse(MemoryBuffer &Buffer, StringRef BackendName) {
       if (std::distance(CurPtr, Buffer.getBufferEnd()) < 8)
         return false; // Data is invalid. Not enough bytes for another rule id.
 
-      uint64_t RuleID = support::endian::read64(CurPtr, support::native);
+      uint64_t RuleID =
+          support::endian::read64(CurPtr, llvm::endianness::native);
       CurPtr += 8;
 
       // ~0ull terminates the rule id list.
@@ -89,14 +84,7 @@ bool CodeGenCoverage::emit(StringRef CoveragePrefix,
     // We can handle locking within a process easily enough but we don't want to
     // manage it between multiple processes. Use the process ID to ensure no
     // more than one process is ever writing to the same file at the same time.
-    std::string Pid =
-#if LLVM_ON_UNIX
-        llvm::to_string(::getpid());
-#elif defined(_WIN32)
-        llvm::to_string(::GetCurrentProcessId());
-#else
-        "";
-#endif
+    std::string Pid = llvm::to_string(sys::Process::getProcessId());
 
     std::string CoverageFilename = (CoveragePrefix + Pid).str();
 

@@ -6,8 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-// UNSUPPORTED: c++98, c++03, c++11, c++14
-// XFAIL: c++17, c++2a
+// UNSUPPORTED: c++03, c++11, c++14
 
 // <functional>
 
@@ -39,7 +38,7 @@
 #include "test_iterators.h"
 
 template <typename T> struct MyHash {
-    size_t operator () (T t) const { return static_cast<size_t>(t); }
+    std::size_t operator () (T t) const { return static_cast<size_t>(t); }
 };
 
 struct count_equal

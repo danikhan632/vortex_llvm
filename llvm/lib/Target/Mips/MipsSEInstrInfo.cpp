@@ -18,9 +18,9 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
-#include "llvm/Support/TargetRegistry.h"
 
 using namespace llvm;
 
@@ -200,50 +200,20 @@ static bool isORCopyInst(const MachineInstr &MI) {
   return false;
 }
 
-/// If @MI is WRDSP/RRDSP instruction return true with @isWrite set to true
-/// if it is WRDSP instruction.
-static bool isReadOrWriteToDSPReg(const MachineInstr &MI, bool &isWrite) {
-  switch (MI.getOpcode()) {
-  default:
-   return false;
-  case Mips::WRDSP:
-  case Mips::WRDSP_MM:
-    isWrite = true;
-    break;
-  case Mips::RDDSP:
-  case Mips::RDDSP_MM:
-    isWrite = false;
-    break;
-  }
-  return true;
-}
-
 /// We check for the common case of 'or', as it's MIPS' preferred instruction
 /// for GPRs but we have to check the operands to ensure that is the case.
 /// Other move instructions for MIPS are directly identifiable.
-Optional<DestSourcePair>
+std::optional<DestSourcePair>
 MipsSEInstrInfo::isCopyInstrImpl(const MachineInstr &MI) const {
-  bool isDSPControlWrite = false;
-  // Condition is made to match the creation of WRDSP/RDDSP copy instruction
-  // from copyPhysReg function.
-  if (isReadOrWriteToDSPReg(MI, isDSPControlWrite)) {
-    if (!MI.getOperand(1).isImm() || MI.getOperand(1).getImm() != (1 << 4))
-      return None;
-    else if (isDSPControlWrite) {
-      return DestSourcePair{MI.getOperand(2), MI.getOperand(0)};
-
-    } else {
-      return DestSourcePair{MI.getOperand(0), MI.getOperand(2)};
-    }
-  } else if (MI.isMoveReg() || isORCopyInst(MI)) {
+  if (MI.isMoveReg() || isORCopyInst(MI))
     return DestSourcePair{MI.getOperand(0), MI.getOperand(1)};
-  }
-  return None;
+
+  return std::nullopt;
 }
 
 void MipsSEInstrInfo::
 storeRegToStack(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
-                unsigned SrcReg, bool isKill, int FI,
+                Register SrcReg, bool isKill, int FI,
                 const TargetRegisterClass *RC, const TargetRegisterInfo *TRI,
                 int64_t Offset) const {
   DebugLoc DL;
@@ -317,7 +287,7 @@ storeRegToStack(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
 
 void MipsSEInstrInfo::
 loadRegFromStack(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
-                 unsigned DestReg, int FI, const TargetRegisterClass *RC,
+                 Register DestReg, int FI, const TargetRegisterClass *RC,
                  const TargetRegisterInfo *TRI, int64_t Offset) const {
   DebugLoc DL;
   if (I != MBB.end()) DL = I->getDebugLoc();
@@ -481,6 +451,20 @@ bool MipsSEInstrInfo::expandPostRAPseudo(MachineInstr &MI) const {
 
   MBB.erase(MI);
   return true;
+}
+
+/// isBranchWithImm - Return true if the branch contains an immediate
+/// operand (\see lib/Target/Mips/MipsBranchExpansion.cpp).
+bool MipsSEInstrInfo::isBranchWithImm(unsigned Opc) const {
+  switch (Opc) {
+  default:
+    return false;
+  case Mips::BBIT0:
+  case Mips::BBIT1:
+  case Mips::BBIT032:
+  case Mips::BBIT132:
+    return true;
+  }
 }
 
 /// getOppositeBranchOpc - Return the inverse of the specified

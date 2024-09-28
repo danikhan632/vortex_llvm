@@ -1,5 +1,5 @@
 // RUN: %clang_cc1 -triple x86_64-apple-darwin -fsyntax-only -Wconversion -std=c++11 -verify %s
-// RUN: %clang_cc1 -triple x86_64-apple-darwin -fsyntax-only -Wconversion -std=c++11 %s 2>&1 | FileCheck %s
+// RUN: not %clang_cc1 -triple x86_64-apple-darwin -fsyntax-only -Wconversion -std=c++11 %s 2>&1 | FileCheck %s
 
 #include <stddef.h>
 
@@ -13,7 +13,6 @@ typedef unsigned short uint16_t;
 typedef unsigned int   uint32_t;
 typedef unsigned long  uint64_t;
 
-// <rdar://problem/7909130>
 namespace test0 {
   int32_t test1_positive(char *I, char *E) {
     return (E - I); // expected-warning {{implicit conversion loses integer precision}}
@@ -129,9 +128,9 @@ namespace test6 {
 
 namespace test7 {
   bool fun() {
-    bool x = nullptr; // expected-warning {{implicit conversion of nullptr constant to 'bool'}}
+    bool x = nullptr; // expected-error {{cannot initialize}}
     if (nullptr) {} // expected-warning {{implicit conversion of nullptr constant to 'bool'}}
-    return nullptr; // expected-warning {{implicit conversion of nullptr constant to 'bool'}}
+    return nullptr; // expected-error {{cannot initialize}}
   }
 }
 
@@ -198,14 +197,12 @@ namespace test8 {
   }
 }
 
-// Don't warn on a nullptr to bool conversion when the nullptr is the return
-// type of a function.
 namespace test9 {
   typedef decltype(nullptr) nullptr_t;
   nullptr_t EXIT();
 
   bool test() {
-    return EXIT();
+    return EXIT(); // expected-error {{cannot initialize}}
   }
 }
 
@@ -273,10 +270,10 @@ void function1(const char* str) {
   CHECK13(check_str_null_13(str));
 }
 
-bool some_bool_function(bool);
+bool some_bool_function(bool); // expected-note {{no known conversion}}
 void function2() {
-  CHECK13(some_bool_function(nullptr));  // expected-warning{{implicit conversion of nullptr constant to 'bool'}}
-  CHECK13(some_bool_function(NULL));  // expected-warning{{implicit conversion of NULL constant to 'bool'}}
+  CHECK13(some_bool_function(nullptr));  // expected-error {{no matching function}}
+  CHECK13(some_bool_function(NULL));  // expected-warning {{implicit conversion of NULL constant to 'bool'}}
 }
 
 #define run_check_nullptr_13(str) \

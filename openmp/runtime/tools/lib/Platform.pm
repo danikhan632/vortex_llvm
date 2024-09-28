@@ -63,6 +63,10 @@ sub canon_arch($) {
             $arch = "mips";
         } elsif ( $arch =~ m{\Ariscv64} ) {
             $arch = "riscv64";
+        } elsif ( $arch =~ m{\Aloongarch64} ) {
+            $arch = "loongarch64";
+        } elsif ( $arch =~ m{\As390x} ) {
+            $arch = "s390x";
         } else {
             $arch = undef;
         }; # if
@@ -93,6 +97,7 @@ sub canon_mic_arch($) {
         "32e" => "Intel(R) 64",
         "arm" => "ARM",
         "aarch64" => "AArch64",
+        "loongarch64" => "LoongArch64",
         "mic" => "Intel(R) Many Integrated Core Architecture",
         "mips" => "MIPS",
         "mips64" => "MIPS64",
@@ -187,12 +192,12 @@ sub target_options() {
                 set_target_os( $_[ 1 ] ) or
                     die "Bad value of --target-os option: \"$_[ 1 ]\"\n";
             },
-        "target-architecture|targert-arch|architecture|arch=s" =>
+        "target-architecture|target-arch|architecture|arch=s" =>
            sub {
                set_target_arch( $_[ 1 ] ) or
                    die "Bad value of --target-architecture option: \"$_[ 1 ]\"\n";
            },
-        "target-mic-architecture|targert-mic-arch|mic-architecture|mic-arch=s" =>
+        "target-mic-architecture|target-mic-arch|mic-architecture|mic-arch=s" =>
            sub {
                set_target_mic_arch( $_[ 1 ] ) or
                    die "Bad value of --target-mic-architecture option: \"$_[ 1 ]\"\n";
@@ -225,6 +230,10 @@ sub target_options() {
         $_host_arch = "mips";
     } elsif ( $hardware_platform eq "riscv64" ) {
         $_host_arch = "riscv64";
+    } elsif ( $hardware_platform eq "loongarch64" ) {
+        $_host_arch = "loongarch64";
+    } elsif ( $hardware_platform eq "s390x" ) {
+        $_host_arch = "s390x";
     } else {
         die "Unsupported host hardware platform: \"$hardware_platform\"; stopped";
     }; # if
@@ -390,7 +399,7 @@ naming files, directories, macros, etc.
     my $os     = canon_os( "Windows NT" );     # Returns "win".
 
     print( $host_arch, $host_os, $host_platform );
-    print( $taregt_arch, $target_os, $target_platform );
+    print( $target_arch, $target_os, $target_platform );
 
     tools::get_options(
         Platform::target_options(),
@@ -414,7 +423,7 @@ the script assumes host architecture is target one.
 
 Input string is an architecture name to canonize. The function recognizes many variants, for example:
 C<32e>, C<Intel64>, C<Intel(R) 64>, etc. Returned string is a canonized architecture name,
-one of: C<32>, C<32e>, C<64>, C<arm>, C<ppc64le>, C<ppc64>, C<mic>, C<mips>, C<mips64>, C<riscv64> or C<undef> is input string is not recognized.
+one of: C<32>, C<32e>, C<64>, C<arm>, C<ppc64le>, C<ppc64>, C<mic>, C<mips>, C<mips64>, C<riscv64>, C<loongarch64>, C<s390x>, or C<undef> is input string is not recognized.
 
 =item B<legal_arch( $arch )>
 
@@ -450,7 +459,7 @@ C<--target-architecture=I<str>> and C<--target-os=I<str>> options. Typical usage
         Platform::target_options(),  # Let script recognize --target-os and --target-arch options.
         ...
     );
-    # Initialize variabls after parsing command line.
+    # Initialize variables after parsing command line.
     ( $os, $arch, $platform ) = ( Platform::target_os(), Platform::target_arch(), Platform::target_platform() );
 
 =back

@@ -2,7 +2,7 @@ User Guides
 ===========
 
 NOTE: If you are a user who is only interested in using an LLVM-based compiler,
-you should look into `Clang <http://clang.llvm.org>`_ instead. The
+you should look into `Clang <https://clang.llvm.org>`_ instead. The
 documentation here is intended for users who have a need to work with the
 intermediate LLVM representation.
 
@@ -12,6 +12,7 @@ intermediate LLVM representation.
 .. toctree::
    :hidden:
 
+   AArch64SME
    AddingConstrainedIntrinsics
    AdvancedBuilds
    AliasAnalysis
@@ -27,32 +28,51 @@ intermediate LLVM representation.
    CommandLine
    CompileCudaWithLLVM
    CoverageMappingFormat
+   CycleTerminology
    DebuggingJITedCode
+   DirectXUsage
    Docker
+   FatLTO
    ExtendingLLVM
+   GitHub
    GoldPlugin
+   GlobalISel/MIRPatterns
    HowToBuildOnARM
    HowToBuildWithPGO
+   HowToBuildWindowsItaniumPrograms
    HowToCrossCompileBuiltinsOnArm
    HowToCrossCompileLLVM
+   HowToUpdateDebugInfo
+   InstrProfileFormat
+   InstrRefDebugInfo
    LinkTimeOptimization
    LoopTerminology
    MarkdownQuickstartTemplate
    MemorySSA
    MergeFunctions
    MCJITDesignAndImplementation
+   MisExpect
+   ORCv2
+   OpaquePointers
+   JITLink
+   NewPassManager
    NVPTXUsage
    Phabricator
    Passes
    ReportingGuide
+   ResponseGuide
    Remarks
+   RemoveDIsDebugInfo
+   RISCVUsage
    SourceLevelDebugging
+   SPIRVUsage
    StackSafetyAnalysis
    SupportLibrary
    TableGen/index
    TableGenFundamentals
    Vectorizers
    WritingAnLLVMPass
+   WritingAnLLVMNewPMPass
    WritingAnLLVMBackend
    yaml2obj
 
@@ -71,7 +91,7 @@ Clang
 `How to build the C, C++, ObjC, and ObjC++ front end`__
    Instructions for building the clang front-end from source.
 
-   .. __: http://clang.llvm.org/get_started.html
+   .. __: https://clang.llvm.org/get_started.html
 
 :doc:`CoverageMappingFormat`
   This describes the format and encoding used for LLVM’s code coverage mapping.
@@ -95,13 +115,20 @@ LLVM Builds and Distributions
 
 :doc:`Support Library <SupportLibrary>`
    This document describes the LLVM Support Library (``lib/Support``) and
-   how to keep LLVM source code portable
+   how to keep LLVM source code portable.
+
+:doc:`AdvancedBuilds`
+   This document describes more advanced build configurations.
 
 Optimizations
 -------------
 
 :doc:`WritingAnLLVMPass`
    Information on how to write LLVM transformations and analyses.
+
+:doc:`WritingAnLLVMNewPMPass`
+   Information on how to write LLVM transformations under the new pass
+   manager.
 
 :doc:`Passes`
    A list of optimizations and analyses implemented in LLVM.
@@ -123,6 +150,9 @@ Optimizations
 :doc:`LoopTerminology`
   A document describing Loops and associated terms as used in LLVM.
 
+:doc:`CycleTerminology`
+  A document describing cycles as a generalization of loops.
+
 :doc:`Vectorizers`
    This document describes the current status of vectorization in LLVM.
 
@@ -140,6 +170,22 @@ Optimizations
    This document describes the design and philosophy behind the LLVM
    source-level debugger.
 
+:doc:`How to Update Debug Info <HowToUpdateDebugInfo>`
+   This document specifies how to correctly update debug info in various kinds
+   of code transformations.
+
+:doc:`InstrRefDebugInfo`
+   This document explains how LLVM uses value tracking, or instruction
+   referencing, to determine variable locations for debug info in the final
+   stages of compilation.
+
+:doc:`RemoveDIsDebugInfo`
+   This is a migration guide describing how to move from debug info using
+   intrinsics such as dbg.value to using the non-instruction DPValue object.
+
+:doc:`InstrProfileFormat`
+   This document explains two binary formats of instrumentation-based profiles.
+
 Code Generation
 ---------------
 
@@ -155,12 +201,27 @@ Code Generation
    Describes the TableGen tool, which is used heavily by the LLVM code
    generator.
 
+==========
+GlobalISel
+==========
+
+:doc:`MIRPatterns <GlobalISel/MIRPatterns>`
+   Describes the design of MIR Patterns and how to use them.
+
 ===
 JIT
 ===
 
 :doc:`MCJITDesignAndImplementation`
    Describes the inner workings of MCJIT execution engine.
+
+:doc:`ORCv2`
+   Describes the design and implementation of the ORC APIs, including some
+   usage examples, and a guide for users transitioning from ORCv1 to ORCv2.
+
+:doc:`JITLink`
+   Describes the design and APIs for the JITLink library, ORC's new JIT
+   linker.
 
 :doc:`DebuggingJITedCode`
    How to debug JITed code with GDB.
@@ -178,12 +239,18 @@ Additional Topics
    Gives the steps necessary when adding a new constrained math intrinsic
    to LLVM.
 
+:doc:`HowToBuildWindowsItaniumPrograms`
+   Notes on assembling a Windows Itanium environment.
+
 :doc:`HowToCrossCompileBuiltinsOnArm`
    Notes on cross-building and testing the compiler-rt builtins for Arm.
 
 :doc:`BigEndianNEON`
   LLVM's support for generating NEON instructions on big endian ARM targets is
   somewhat nonintuitive. This document explains the implementation and rationale.
+
+:doc:`AArch64SME`
+  LLVM's support for AArch64 SME ACLE and ABI.
 
 :doc:`CompileCudaWithLLVM`
   LLVM support for CUDA.
@@ -193,3 +260,22 @@ Additional Topics
 
 :doc:`AMDGPUUsage`
    This document describes using the AMDGPU backend to compile GPU kernels.
+
+:doc:`AMDGPUDwarfExtensionsForHeterogeneousDebugging`
+   This document describes DWARF extensions to support heterogeneous debugging
+   for targets such as the AMDGPU backend.
+
+:doc:`AMDGPUDwarfExtensionAllowLocationDescriptionOnTheDwarfExpressionStack/AMDGPUDwarfExtensionAllowLocationDescriptionOnTheDwarfExpressionStack`
+   This document describes a DWARF extension to allow location descriptions on
+   the DWARF expression stack. It is part of
+   :doc:`AMDGPUDwarfExtensionsForHeterogeneousDebugging`.
+
+:doc:`SPIRVUsage`
+   This document describes using the SPIR-V target to compile GPU kernels.
+
+:doc:`DirectXUsage`
+   This document describes using the DirectX target to compile GPU code for the
+   DirectX runtime.
+
+:doc:`RISCVUsage`
+   This document describes using the RISCV-V target.

@@ -6,14 +6,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef utility_JSON_h_
-#define utility_JSON_h_
+#ifndef LLDB_TOOLS_DEBUGSERVER_SOURCE_JSON_H
+#define LLDB_TOOLS_DEBUGSERVER_SOURCE_JSON_H
 
 #include "StdStringExtractor.h"
 
 // C includes
-#include <inttypes.h>
-#include <stdint.h>
+#include <cinttypes>
+#include <cstdint>
 
 // C++ includes
 #include <map>
@@ -71,7 +71,7 @@ class JSONNumber : public JSONValue {
 public:
   typedef std::shared_ptr<JSONNumber> SP;
 
-  // We cretae a constructor for all integer and floating point type with using
+  // We create a constructor for all integer and floating point type with using
   // templates and
   // SFINAE to avoid having ambiguous overloads because of the implicit type
   // promotion. If we
@@ -299,4 +299,4 @@ protected:
   JSONValue::SP ParseJSONArray();
 };
 
-#endif // utility_JSON_h_
+#endif // LLDB_TOOLS_DEBUGSERVER_SOURCE_JSON_H

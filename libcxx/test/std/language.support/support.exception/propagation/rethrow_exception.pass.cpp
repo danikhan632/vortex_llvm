@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-// UNSUPPORTED: libcpp-no-exceptions
+// UNSUPPORTED: no-exceptions
 // <exception>
 
 // void rethrow_exception [[noreturn]] (exception_ptr p);
@@ -47,7 +47,7 @@ int main(int, char**)
         }
         catch (const A& a)
         {
-#ifndef _LIBCPP_ABI_MICROSOFT
+#ifndef TEST_ABI_MICROSOFT
             assert(A::constructed == 1);
 #else
             // On Windows the exception_ptr copies the exception

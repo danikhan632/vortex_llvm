@@ -1,4 +1,3 @@
-// -*- C++ -*-
 //===----------------------------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
@@ -7,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-// UNSUPPORTED: c++98, c++03, c++11, c++14
+// UNSUPPORTED: c++03, c++11, c++14
 
 // <variant>
 
@@ -28,7 +27,7 @@
 #include "test_macros.h"
 #include "variant_test_helpers.h"
 
-template <class V, size_t I, class E> void test() {
+template <class V, std::size_t I, class E> void test() {
   static_assert(
       std::is_same_v<typename std::variant_alternative<I, V>::type, E>, "");
   static_assert(

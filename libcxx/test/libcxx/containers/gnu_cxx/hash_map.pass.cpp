@@ -6,11 +6,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+// UNSUPPORTED: clang-modules-build
 
-// Prevent emission of the deprecated warning.
-#ifdef __clang__
-#pragma clang diagnostic ignored "-W#warnings"
-#endif
+// Prevent <ext/hash_map> from generating deprecated warnings for this test.
+// ADDITIONAL_COMPILE_FLAGS: -Wno-deprecated
 
 #include <ext/hash_map>
 #include <cassert>
@@ -33,4 +32,5 @@ void test_default_does_not_allocate() {
 
 int main(int, char**) {
   test_default_does_not_allocate();
+  return 0;
 }

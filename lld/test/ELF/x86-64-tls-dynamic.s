@@ -2,7 +2,7 @@
 // RUN: llvm-mc -filetype=obj -triple=x86_64-unknown-linux %s -o %t
 // RUN: ld.lld --hash-style=sysv -shared %t -o %tout
 // RUN: llvm-readobj --sections -r %tout | FileCheck %s
-// RUN: llvm-objdump -d %tout | FileCheck %s --check-prefix=DIS
+// RUN: llvm-objdump --no-print-imm-hex -d %tout | FileCheck %s --check-prefix=DIS
 
   leaq  a@tlsld(%rip), %rdi
   callq __tls_get_addr@PLT
@@ -67,7 +67,7 @@ c:
 
 // DIS:      Disassembly of section .text:
 // DIS-EMPTY:
-// DIS-NEXT: .text:
+// DIS-NEXT: <.text>:
 // DIS-NEXT:     1330: {{.+}} leaq    4457(%rip), %rdi
 // DIS-NEXT:           {{.+}} callq
 // DIS-NEXT:     133c: {{.+}} leaq    4445(%rip), %rdi

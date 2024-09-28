@@ -12,9 +12,7 @@
 #include "../ClangTidyCheck.h"
 #include "llvm/Support/Regex.h"
 
-namespace clang {
-namespace tidy {
-namespace readability {
+namespace clang::tidy::readability {
 
 /// Checks that long namespaces have a closing comment.
 ///
@@ -24,11 +22,14 @@ namespace readability {
 class NamespaceCommentCheck : public ClangTidyCheck {
 public:
   NamespaceCommentCheck(StringRef Name, ClangTidyContext *Context);
+  bool isLanguageVersionSupported(const LangOptions &LangOpts) const override {
+    return LangOpts.CPlusPlus;
+  }
   void registerMatchers(ast_matchers::MatchFinder *Finder) override;
   void check(const ast_matchers::MatchFinder::MatchResult &Result) override;
 
 private:
-  void storeOptions(ClangTidyOptions::OptionMap &Options) override;
+  void storeOptions(ClangTidyOptions::OptionMap &Opts) override;
 
   llvm::Regex NamespaceCommentPattern;
   const unsigned ShortNamespaceLines;
@@ -36,8 +37,6 @@ private:
   llvm::SmallVector<SourceLocation, 4> Ends;
 };
 
-} // namespace readability
-} // namespace tidy
-} // namespace clang
+} // namespace clang::tidy::readability
 
 #endif // LLVM_CLANG_TOOLS_EXTRA_CLANG_TIDY_READABILITY_NAMESPACECOMMENTCHECK_H

@@ -109,7 +109,9 @@ sub process(\%) {
         if ( not $entries->{ $entry }->{ obsolete } ) {
             my $ordinal = $entries->{ $entry }->{ ordinal };
             # omp_alloc and omp_free are C/C++ only functions, skip "1000+ordinal" for them
-            if ( $entry =~ m{\A[ok]mp_} and $entry ne "omp_alloc" and $entry ne "omp_free" ) {
+            if ( $entry =~ m{\A[ok]mp_} and $entry ne "omp_alloc" and $entry ne "omp_free" and
+                $entry ne "omp_calloc" and $entry ne "omp_realloc" and
+                $entry ne "omp_aligned_alloc" and $entry ne "omp_aligned_calloc" ) {
                 if ( not defined( $ordinal ) ) {
                     runtime_error(
                         "Bad entry \"$entry\": ordinal number is not specified."
@@ -126,12 +128,16 @@ sub process(\%) {
 
 }; # sub process
 
-sub generate_output(\%$) {
+sub generate_output(\%$\%) {
 
-    my ( $entries, $output ) = @_;
+    my ( $entries, $output, $defs ) = @_;
+    my $lib = %$defs {'NAME'};
     my $bulk;
 
-    $bulk = "EXPORTS\n";
+    if (defined($lib)) {
+        $bulk = sprintf("NAME %s\n", $lib);
+    }
+    $bulk .= sprintf("EXPORTS\n");
     foreach my $entry ( sort( keys( %$entries ) ) ) {
         if ( not $entries->{ $entry }->{ obsolete } ) {
             $bulk .= sprintf( "    %-40s ", $entry );
@@ -140,7 +146,9 @@ sub generate_output(\%$) {
                 if ( $ordinal eq "DATA" ) {
                     $bulk .= "DATA";
                 } else {
-                    $bulk .= "\@" . $ordinal;
+                    if (not %$defs {'NOORDINALS'}) {
+                        $bulk .= "\@" . $ordinal;
+                    }
                 }; # if
             }; # if
             $bulk .= "\n";
@@ -152,7 +160,7 @@ sub generate_output(\%$) {
         print( $bulk );
     }; # if
 
-}; # sub generate_ouput
+}; # sub generate_output
 
 #
 # Parse command line.
@@ -191,7 +199,7 @@ $input = shift( @ARGV );
 
 my %data = parse_input( $input, %defs );
 %data = process( %data );
-generate_output( %data, $output );
+generate_output( %data, $output, %defs );
 exit( 0 );
 
 __END__
@@ -268,7 +276,7 @@ A name of input file.
 =head1 DESCRIPTION
 
 The script reads input file, process conditional directives, checks content for consistency, and
-generates ouptput file suitable for linker.
+generates output file suitable for linker.
 
 =head2 Input File Format
 
@@ -287,7 +295,7 @@ Comments start with C<#> symbol and continue to the end of line.
     %endif
 
 A part of file surrounded by C<%ifdef I<name>> and C<%endif> directives is a conditional part -- it
-has effect only if I<name> is defined in the comman line by B<--define> option. C<%ifndef> is a
+has effect only if I<name> is defined in the command line by B<--define> option. C<%ifndef> is a
 negated version of C<%ifdef> -- conditional part has an effect only if I<name> is B<not> defined.
 
 Conditional parts may be nested.

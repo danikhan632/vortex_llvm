@@ -1,4 +1,4 @@
-//===-------------------- Implementation of strcat -----------------------===//
+//===-- Implementation of strcat ------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -7,17 +7,20 @@
 //===----------------------------------------------------------------------===//
 
 #include "src/string/strcat.h"
+#include "src/string/strcpy.h"
+#include "src/string/string_utils.h"
 
 #include "src/__support/common.h"
-#include "src/string/strcpy.h"
 
-namespace __llvm_libc {
+namespace LIBC_NAMESPACE {
 
-char *LLVM_LIBC_ENTRYPOINT(strcat)(char *dest, const char *src) {
-  // We do not yet have an implementaion of strlen in so we will use strlen
-  // from another libc.
-  __llvm_libc::strcpy(dest + ::strlen(dest), src);
+LLVM_LIBC_FUNCTION(char *, strcat,
+                   (char *__restrict dest, const char *__restrict src)) {
+  size_t dest_length = internal::string_length(dest);
+  size_t src_length = internal::string_length(src);
+  LIBC_NAMESPACE::strcpy(dest + dest_length, src);
+  dest[dest_length + src_length] = '\0';
   return dest;
 }
 
-} // namespace __llvm_libc
+} // namespace LIBC_NAMESPACE

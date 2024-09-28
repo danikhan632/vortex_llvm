@@ -6,11 +6,20 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLDB_SBBreakpointLocation_h_
-#define LLDB_SBBreakpointLocation_h_
+#ifndef LLDB_API_SBBREAKPOINTLOCATION_H
+#define LLDB_API_SBBREAKPOINTLOCATION_H
 
 #include "lldb/API/SBBreakpoint.h"
 #include "lldb/API/SBDefines.h"
+
+namespace lldb_private {
+namespace python {
+class SWIGBridge;
+}
+namespace lua {
+class SWIGBridge;
+}
+} // namespace lldb_private
 
 namespace lldb {
 
@@ -48,10 +57,14 @@ public:
   void SetCondition(const char *condition);
 
   const char *GetCondition();
-   
+
   void SetAutoContinue(bool auto_continue);
 
   bool GetAutoContinue();
+
+#ifndef SWIG
+  void SetCallback(SBBreakpointHitCallback callback, void *baton);
+#endif
 
   void SetScriptCallbackFunction(const char *callback_function_name);
 
@@ -86,6 +99,9 @@ public:
 
   SBBreakpoint GetBreakpoint();
 
+protected:
+  friend class lldb_private::python::SWIGBridge;
+  friend class lldb_private::lua::SWIGBridge;
   SBBreakpointLocation(const lldb::BreakpointLocationSP &break_loc_sp);
 
 private:
@@ -100,4 +116,4 @@ private:
 
 } // namespace lldb
 
-#endif // LLDB_SBBreakpointLocation_h_
+#endif // LLDB_API_SBBREAKPOINTLOCATION_H

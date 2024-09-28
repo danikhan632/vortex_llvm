@@ -1,14 +1,16 @@
+
+
 // expected-no-diagnostics
 #ifndef HEADER
 #define HEADER
 
-// RUN: %clang_cc1 -DOMP45 -verify -fopenmp -fopenmp-version=45 -ast-print %s | FileCheck %s --check-prefix=OMP45
+// RUN: %clang_cc1 -DOMP45 -verify -Wno-vla -fopenmp -fopenmp-version=45 -ast-print %s | FileCheck %s --check-prefix=OMP45
 // RUN: %clang_cc1 -DOMP45 -fopenmp -fopenmp-version=45 -x c++ -std=c++11 -emit-pch -o %t %s
-// RUN: %clang_cc1 -DOMP45 -fopenmp -fopenmp-version=45 -std=c++11 -include-pch %t -fsyntax-only -verify %s -ast-print | FileCheck %s --check-prefix=OMP45
+// RUN: %clang_cc1 -DOMP45 -fopenmp -fopenmp-version=45 -std=c++11 -include-pch %t -fsyntax-only -verify -Wno-vla %s -ast-print | FileCheck %s --check-prefix=OMP45
 
-// RUN: %clang_cc1 -DOMP45 -verify -fopenmp-simd -fopenmp-version=45 -ast-print %s | FileCheck %s --check-prefix=OMP45
+// RUN: %clang_cc1 -DOMP45 -verify -Wno-vla -fopenmp-simd -fopenmp-version=45 -ast-print %s | FileCheck %s --check-prefix=OMP45
 // RUN: %clang_cc1 -DOMP45 -fopenmp-simd -fopenmp-version=45 -x c++ -std=c++11 -emit-pch -o %t %s
-// RUN: %clang_cc1 -DOMP45 -fopenmp-simd -fopenmp-version=45 -std=c++11 -include-pch %t -fsyntax-only -verify %s -ast-print | FileCheck %s --check-prefix=OMP45
+// RUN: %clang_cc1 -DOMP45 -fopenmp-simd -fopenmp-version=45 -std=c++11 -include-pch %t -fsyntax-only -verify -Wno-vla %s -ast-print | FileCheck %s --check-prefix=OMP45
 #ifdef OMP45
 
 void foo() {}
@@ -38,7 +40,7 @@ T tmain(T argc, T *argv) {
   {always++;i++;}
 #pragma omp target map(close,alloc: i)
   foo();
-#pragma omp target map(close from: i)
+#pragma omp target map(close, from: i)
   foo();
 #pragma omp target map(close)
   {close++;}
@@ -333,13 +335,35 @@ int main (int argc, char **argv) {
 #ifdef OMP5
 
 ///==========================================================================///
-// RUN: %clang_cc1 -DOMP5 -verify -fopenmp -fopenmp-version=50 -ast-print %s | FileCheck %s --check-prefix OMP5
+// RUN: %clang_cc1 -DOMP5 -verify -Wno-vla -fopenmp -fopenmp-version=50 -ast-print %s | FileCheck %s --check-prefix OMP5
 // RUN: %clang_cc1 -DOMP5 -fopenmp -fopenmp-version=50 -x c++ -std=c++11 -emit-pch -o %t %s
-// RUN: %clang_cc1 -DOMP5 -fopenmp -fopenmp-version=50 -std=c++11 -include-pch %t -fsyntax-only -verify %s -ast-print | FileCheck %s --check-prefix OMP5
+// RUN: %clang_cc1 -DOMP5 -fopenmp -fopenmp-version=50 -std=c++11 -include-pch %t -fsyntax-only -verify -Wno-vla %s -ast-print | FileCheck %s --check-prefix OMP5
 
-// RUN: %clang_cc1 -DOMP5 -verify -fopenmp-simd -fopenmp-version=50 -ast-print %s | FileCheck %s --check-prefix OMP5
+// RUN: %clang_cc1 -DOMP5 -verify -Wno-vla -fopenmp-simd -fopenmp-version=50 -ast-print %s | FileCheck %s --check-prefix OMP5
 // RUN: %clang_cc1 -DOMP5 -fopenmp-simd -fopenmp-version=50 -x c++ -std=c++11 -emit-pch -o %t %s
-// RUN: %clang_cc1 -DOMP5 -fopenmp-simd -fopenmp-version=50 -std=c++11 -include-pch %t -fsyntax-only -verify %s -ast-print | FileCheck %s --check-prefix OMP5
+// RUN: %clang_cc1 -DOMP5 -fopenmp-simd -fopenmp-version=50 -std=c++11 -include-pch %t -fsyntax-only -verify -Wno-vla %s -ast-print | FileCheck %s --check-prefix OMP5
+
+// RUN: %clang_cc1 -DOMP5 -verify -Wno-vla -fopenmp -fopenmp-version=99 -DOMP99 -ast-print %s | FileCheck %s --check-prefixes=OMP5,REV
+// RUN: %clang_cc1 -DOMP5 -fopenmp -fopenmp-version=99 -DOMP99 -x c++ -std=c++11 -emit-pch -o %t %s
+// RUN: %clang_cc1 -DOMP5 -fopenmp -fopenmp-version=99 -DOMP99 -std=c++11 -include-pch %t -fsyntax-only -verify -Wno-vla %s -ast-print | FileCheck %s --check-prefixes=OMP5,REV
+
+// RUN: %clang_cc1 -DOMP5 -verify -Wno-vla -fopenmp-simd -fopenmp-version=99 -DOMP99 -ast-print %s | FileCheck %s --check-prefixes=OMP5,REV
+// RUN: %clang_cc1 -DOMP5 -fopenmp-simd -fopenmp-version=99 -DOMP99 -x c++ -std=c++11 -emit-pch -o %t %s
+// RUN: %clang_cc1 -DOMP5 -fopenmp-simd -fopenmp-version=99 -DOMP99 -std=c++11 -include-pch %t -fsyntax-only -verify -Wno-vla %s -ast-print | FileCheck %s --check-prefixes=OMP5,REV
+
+#ifdef OMP99
+#pragma omp requires reverse_offload
+#endif
+typedef void **omp_allocator_handle_t;
+extern const omp_allocator_handle_t omp_null_allocator;
+extern const omp_allocator_handle_t omp_default_mem_alloc;
+extern const omp_allocator_handle_t omp_large_cap_mem_alloc;
+extern const omp_allocator_handle_t omp_const_mem_alloc;
+extern const omp_allocator_handle_t omp_high_bw_mem_alloc;
+extern const omp_allocator_handle_t omp_low_lat_mem_alloc;
+extern const omp_allocator_handle_t omp_cgroup_mem_alloc;
+extern const omp_allocator_handle_t omp_pteam_mem_alloc;
+extern const omp_allocator_handle_t omp_thread_mem_alloc;
 
 void foo() {}
 
@@ -353,12 +377,14 @@ int a;
 template <typename T, int C>
 T tmain(T argc, T *argv) {
   T i, j, a[20], always, close;
-#pragma omp target
+#pragma omp target device(argc)
   foo();
-#pragma omp target if (target:argc > 0)
+#pragma omp target if (target:argc > 0) device(device_num: C)
   foo();
-#pragma omp target if (C)
+#ifdef OMP99
+#pragma omp target if (C) device(ancestor: argc)
   foo();
+#endif
 #pragma omp target map(i)
   foo();
 #pragma omp target map(a[0:10], i)
@@ -367,7 +393,7 @@ T tmain(T argc, T *argv) {
   foo();
 #pragma omp target map(always,alloc: i)
   foo();
-#pragma omp target map(always from: i)
+#pragma omp target map(always, from: i)
   foo();
 #pragma omp target map(always)
   {always++;}
@@ -375,7 +401,7 @@ T tmain(T argc, T *argv) {
   {always++;i++;}
 #pragma omp target map(close,alloc: i)
   foo();
-#pragma omp target map(close from: i)
+#pragma omp target map(close, from: i)
   foo();
 #pragma omp target map(close)
   {close++;}
@@ -458,12 +484,12 @@ T tmain(T argc, T *argv) {
 
 // OMP5: template <typename T, int C> T tmain(T argc, T *argv) {
 // OMP5-NEXT: T i, j, a[20]
-// OMP5-NEXT: #pragma omp target{{$}}
+// OMP5-NEXT: #pragma omp target device(argc){{$}}
 // OMP5-NEXT: foo();
-// OMP5-NEXT: #pragma omp target if(target: argc > 0)
+// OMP5-NEXT: #pragma omp target if(target: argc > 0) device(device_num: C)
 // OMP5-NEXT: foo()
-// OMP5-NEXT: #pragma omp target if(C)
-// OMP5-NEXT: foo()
+// REV: #pragma omp target if(C) device(ancestor: argc)
+// REV-NEXT: foo()
 // OMP5-NEXT: #pragma omp target map(tofrom: i)
 // OMP5-NEXT: foo()
 // OMP5-NEXT: #pragma omp target map(tofrom: a[0:10],i)
@@ -558,8 +584,8 @@ T tmain(T argc, T *argv) {
 // OMP5-NEXT: foo();
 // OMP5-NEXT: #pragma omp target if(target: argc > 0)
 // OMP5-NEXT: foo()
-// OMP5-NEXT: #pragma omp target if(5)
-// OMP5-NEXT: foo()
+// REV: #pragma omp target if(5)
+// REV-NEXT: foo()
 // OMP5-NEXT: #pragma omp target map(tofrom: i)
 // OMP5-NEXT: foo()
 // OMP5-NEXT: #pragma omp target map(tofrom: a[0:10],i)
@@ -650,12 +676,12 @@ T tmain(T argc, T *argv) {
 // OMP5-NEXT: foo()
 // OMP5: template<> char tmain<char, 1>(char argc, char *argv) {
 // OMP5-NEXT: char i, j, a[20]
-// OMP5-NEXT: #pragma omp target
+// OMP5-NEXT: #pragma omp target device(argc)
 // OMP5-NEXT: foo();
-// OMP5-NEXT: #pragma omp target if(target: argc > 0)
+// OMP5-NEXT: #pragma omp target if(target: argc > 0) device(device_num: 1)
 // OMP5-NEXT: foo()
-// OMP5-NEXT: #pragma omp target if(1)
-// OMP5-NEXT: foo()
+// REV: #pragma omp target if(1) device(ancestor: argc)
+// REV-NEXT: foo()
 // OMP5-NEXT: #pragma omp target map(tofrom: i)
 // OMP5-NEXT: foo()
 // OMP5-NEXT: #pragma omp target map(tofrom: a[0:10],i)
@@ -831,7 +857,7 @@ int main (int argc, char **argv) {
   foo();
 // OMP5-NEXT: foo();
 
-#pragma omp target map(always from: i)
+#pragma omp target map(always, from: i)
 // OMP5-NEXT: #pragma omp target map(always,from: i)
   foo();
 // OMP5-NEXT: foo();
@@ -856,7 +882,7 @@ int main (int argc, char **argv) {
   foo();
 // OMP5-NEXT: foo();
 
-#pragma omp target map(close from: i)
+#pragma omp target map(close, from: i)
 // OMP5-NEXT: #pragma omp target map(close,from: i)
   foo();
 // OMP5-NEXT: foo();
@@ -1048,8 +1074,202 @@ int main (int argc, char **argv) {
 // OMP5-NEXT: #pragma omp target defaultmap(none: scalar)
   bar();
 // OMP5-NEXT: bar();
+#pragma omp target defaultmap(none)
+  // OMP5-NEXT: #pragma omp target defaultmap(none)
+  // OMP5-NEXT: bar();
+  bar();
+#pragma omp target allocate(omp_default_mem_alloc:argv) uses_allocators(omp_default_mem_alloc,omp_large_cap_mem_alloc) allocate(omp_large_cap_mem_alloc:argc) private(argc, argv)
+  // OMP5-NEXT: #pragma omp target allocate(omp_default_mem_alloc: argv) uses_allocators(omp_default_mem_alloc,omp_large_cap_mem_alloc) allocate(omp_large_cap_mem_alloc: argc) private(argc,argv)
+  // OMP5-NEXT: bar();
+  bar();
   return tmain<int, 5>(argc, &argc) + tmain<char, 1>(argv[0][0], argv[0]);
 }
 
 #endif //OMP5
+
+#ifdef OMP51
+
+///==========================================================================///
+// RUN: %clang_cc1 -DOMP51 -verify -Wno-vla -fopenmp -ast-print %s | FileCheck %s --check-prefix OMP51
+// RUN: %clang_cc1 -DOMP51 -fopenmp -x c++ -std=c++11 -emit-pch -o %t %s
+// RUN: %clang_cc1 -DOMP51 -fopenmp -std=c++11 -include-pch %t -fsyntax-only -verify -Wno-vla %s -ast-print | FileCheck %s --check-prefix OMP51
+
+// RUN: %clang_cc1 -DOMP51 -verify -Wno-vla -fopenmp-simd -ast-print %s | FileCheck %s --check-prefix OMP51
+// RUN: %clang_cc1 -DOMP51 -fopenmp-simd -x c++ -std=c++11 -emit-pch -o %t %s
+// RUN: %clang_cc1 -DOMP51 -fopenmp-simd -std=c++11 -include-pch %t -fsyntax-only -verify -Wno-vla %s -ast-print | FileCheck %s --check-prefix OMP51
+
+void foo() {}
+
+template <typename T, int C>
+T tmain(T argc, T *argv) {
+  #pragma omp target defaultmap(present: scalar)
+  foo();
+  #pragma omp target defaultmap(present: aggregate)
+  foo();
+  #pragma omp target defaultmap(present: pointer)
+  foo();
+  #pragma omp target thread_limit(C)
+  foo();
+  #pragma omp target defaultmap(present)
+  foo();
+
+  return 0;
+}
+
+// OMP51: template <typename T, int C> T tmain(T argc, T *argv) {
+// OMP51-NEXT: #pragma omp target defaultmap(present: scalar)
+// OMP51-NEXT: foo()
+// OMP51-NEXT: #pragma omp target defaultmap(present: aggregate)
+// OMP51-NEXT: foo()
+// OMP51-NEXT: #pragma omp target defaultmap(present: pointer)
+// OMP51-NEXT: foo()
+// OMP51-NEXT: #pragma omp target thread_limit(C)
+// OMP51-NEXT: foo()
+// OMP51-NEXT: #pragma omp target defaultmap(present)
+// OMP51-NEXT: foo()
+
+// OMP51-LABEL: int main(int argc, char **argv) {
+int main (int argc, char **argv) {
+#pragma omp target defaultmap(present: scalar)
+// OMP51-NEXT: #pragma omp target defaultmap(present: scalar)
+  foo();
+// OMP51-NEXT: foo();
+#pragma omp target defaultmap(present: aggregate)
+// OMP51-NEXT: #pragma omp target defaultmap(present: aggregate)
+  foo();
+// OMP51-NEXT: foo();
+#pragma omp target defaultmap(present: pointer)
+// OMP51-NEXT: #pragma omp target defaultmap(present: pointer)
+  foo();
+// OMP51-NEXT: foo();
+
+  return tmain<int, 5>(argc, &argc) + tmain<char, 1>(argv[0][0], argv[0]);
+}
+#endif // OMP51
+
+#ifdef OMP52
+
+///==========================================================================///
+// RUN: %clang_cc1 -DOMP52 -verify -Wno-vla -fopenmp -fopenmp-version=52 -ast-print %s | FileCheck %s --check-prefix OMP52
+// RUN: %clang_cc1 -DOMP52 -fopenmp -fopenmp-version=52 -x c++ -std=c++11 -emit-pch -o %t %s
+// RUN: %clang_cc1 -DOMP52 -fopenmp -fopenmp-version=52 -std=c++11 -include-pch %t -fsyntax-only -verify -Wno-vla %s -ast-print | FileCheck %s --check-prefix OMP52
+
+// RUN: %clang_cc1 -DOMP52 -verify -Wno-vla -fopenmp-simd -fopenmp-version=52 -ast-print %s | FileCheck %s --check-prefix OMP52
+// RUN: %clang_cc1 -DOMP52 -fopenmp-simd -fopenmp-version=52 -x c++ -std=c++11 -emit-pch -o %t %s
+// RUN: %clang_cc1 -DOMP52 -fopenmp-simd -fopenmp-version=52 -std=c++11 -include-pch %t -fsyntax-only -verify -Wno-vla %s -ast-print | FileCheck %s --check-prefix OMP52
+
+void foo() {}
+
+template <typename T, int C>
+T tmain(T argc, T *argv) {
+  int N = 100;
+  int v[N];
+  #pragma omp target map(iterator(it = 0:N:2), to: v[it])
+  foo();
+  #pragma omp target map(iterator(it = 0:N:4), from: v[it])
+  foo();
+
+  return 0;
+}
+
+// OMP52: template <typename T, int C> T tmain(T argc, T *argv) {
+// OMP52-NEXT: int N = 100;
+// OMP52-NEXT: int v[N];
+// OMP52-NEXT: #pragma omp target map(iterator(int it = 0:N:2),to: v[it])
+// OMP52-NEXT: foo()
+// OMP52-NEXT: #pragma omp target map(iterator(int it = 0:N:4),from: v[it])
+// OMP52-NEXT: foo()
+
+// OMP52-LABEL: int main(int argc, char **argv) {
+int main (int argc, char **argv) {
+  int i, j, a[20], always, close;
+// OMP52-NEXT: int i, j, a[20]
+#pragma omp target
+// OMP52-NEXT: #pragma omp target
+  foo();
+// OMP52-NEXT: foo();
+#pragma omp target map(iterator(it = 0:20:2), to: a[it])
+// OMP52-NEXT: #pragma omp target map(iterator(int it = 0:20:2),to: a[it])
+  foo();
+// OMP52-NEXT: foo();
+#pragma omp target map(iterator(it = 0:20:4), from: a[it])
+// OMP52-NEXT: #pragma omp target map(iterator(int it = 0:20:4),from: a[it])
+foo();
+// OMP52-NEXT: foo();
+
+  return tmain<int, 5>(argc, &argc) + tmain<char, 1>(argv[0][0], argv[0]);
+}
+#endif // OMP52
+
+#ifdef OMPX
+
+// RUN: %clang_cc1 -DOMPX -verify -Wno-vla -fopenmp -fopenmp-extensions -ast-print %s | FileCheck %s --check-prefix=OMPX
+// RUN: %clang_cc1 -DOMPX -fopenmp -fopenmp-extensions -x c++ -std=c++11 -emit-pch -o %t %s
+// RUN: %clang_cc1 -DOMPX -fopenmp -fopenmp-extensions -std=c++11 -include-pch %t -fsyntax-only -verify -Wno-vla %s -ast-print | FileCheck %s --check-prefix=OMPX
+
+// RUN: %clang_cc1 -DOMPX -verify -Wno-vla -fopenmp-simd -fopenmp-extensions -ast-print %s | FileCheck %s --check-prefix=OMPX
+// RUN: %clang_cc1 -DOMPX -fopenmp-simd -fopenmp-extensions -x c++ -std=c++11 -emit-pch -o %t %s
+// RUN: %clang_cc1 -DOMPX -fopenmp-simd -fopenmp-extensions -std=c++11 -include-pch %t -fsyntax-only -verify -Wno-vla %s -ast-print | FileCheck %s --check-prefix=OMPX
+
+void foo() {}
+
+template <typename T, int C>
+T tmain(T argc, T *argv) {
+  T i, ompx_hold;
+#pragma omp target map(ompx_hold,alloc: i)
+  foo();
+#pragma omp target map(ompx_hold from: i)
+  foo();
+#pragma omp target map(ompx_hold)
+  {ompx_hold++;}
+#pragma omp target map(ompx_hold,i)
+  {ompx_hold++;i++;}
+  return 0;
+}
+
+//      OMPX: template <typename T, int C> T tmain(T argc, T *argv) {
+// OMPX-NEXT:   T i, ompx_hold;
+// OMPX-NEXT:   #pragma omp target map(ompx_hold,alloc: i)
+// OMPX-NEXT:   foo()
+// OMPX-NEXT:   #pragma omp target map(ompx_hold,from: i)
+// OMPX-NEXT:   foo()
+// OMPX-NEXT:   #pragma omp target map(tofrom: ompx_hold)
+// OMPX-NEXT:   {
+// OMPX-NEXT:     ompx_hold++;
+// OMPX-NEXT:   }
+// OMPX-NEXT:   #pragma omp target map(tofrom: ompx_hold,i)
+// OMPX-NEXT:   {
+// OMPX-NEXT:     ompx_hold++;
+// OMPX-NEXT:     i++;
+// OMPX-NEXT:   }
+
+// OMPX-LABEL: int main(int argc, char **argv) {
+//  OMPX-NEXT:   int i, ompx_hold;
+//  OMPX-NEXT:   #pragma omp target map(ompx_hold,alloc: i)
+//  OMPX-NEXT:   foo();
+//  OMPX-NEXT:   #pragma omp target map(ompx_hold,from: i)
+//  OMPX-NEXT:   foo();
+//  OMPX-NEXT:   #pragma omp target map(tofrom: ompx_hold)
+//  OMPX-NEXT:   {
+//  OMPX-NEXT:     ompx_hold++;
+//  OMPX-NEXT:   }
+//  OMPX-NEXT:   #pragma omp target map(tofrom: ompx_hold,i)
+//  OMPX-NEXT:   {
+//  OMPX-NEXT:     ompx_hold++;
+//  OMPX-NEXT:     i++;
+//  OMPX-NEXT:   }
+int main (int argc, char **argv) {
+  int i, ompx_hold;
+  #pragma omp target map(ompx_hold,alloc: i)
+  foo();
+  #pragma omp target map(ompx_hold from: i)
+  foo();
+  #pragma omp target map(ompx_hold)
+  {ompx_hold++;}
+  #pragma omp target map(ompx_hold,i)
+  {ompx_hold++;i++;}
+  return tmain<int, 5>(argc, &argc) + tmain<char, 1>(argv[0][0], argv[0]);
+}
+
+#endif
 #endif

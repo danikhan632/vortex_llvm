@@ -1,10 +1,10 @@
-// RUN: mlir-opt %s -split-input-file -verify-diagnostics | FileCheck %s
+// RUN: mlir-opt -allow-unregistered-dialect %s -split-input-file -verify-diagnostics | FileCheck %s
 
 //===----------------------------------------------------------------------===//
 // Test the number of regions
 //===----------------------------------------------------------------------===//
 
-func @correct_number_of_regions() {
+func.func @correct_number_of_regions() {
     // CHECK: test.two_region_op
     "test.two_region_op"()(
       {"work"() : () -> ()},
@@ -15,8 +15,8 @@ func @correct_number_of_regions() {
 
 // -----
 
-func @missing_regions() {
-    // expected-error@+1 {{op has incorrect number of regions: expected 2 but found 1}}
+func.func @missing_regions() {
+    // expected-error@+1 {{expected 2 regions}}
     "test.two_region_op"()(
       {"work"() : () -> ()}
     ) : () -> ()
@@ -25,8 +25,8 @@ func @missing_regions() {
 
 // -----
 
-func @extra_regions() {
-    // expected-error@+1 {{op has incorrect number of regions: expected 2 but found 3}}
+func.func @extra_regions() {
+    // expected-error@+1 {{expected 2 regions}}
     "test.two_region_op"()(
       {"work"() : () -> ()},
       {"work"() : () -> ()},
@@ -41,18 +41,18 @@ func @extra_regions() {
 // Test SizedRegion
 //===----------------------------------------------------------------------===//
 
-func @unnamed_region_has_wrong_number_of_blocks() {
+func.func @unnamed_region_has_wrong_number_of_blocks() {
     // expected-error@+1 {{region #1 failed to verify constraint: region with 1 blocks}}
     "test.sized_region_op"() (
     {
         "work"() : () -> ()
-        br ^next1
+        cf.br ^next1
       ^next1:
         "work"() : () -> ()
     },
     {
         "work"() : () -> ()
-        br ^next2
+        cf.br ^next2
       ^next2:
         "work"() : () -> ()
     }) : () -> ()
@@ -62,7 +62,7 @@ func @unnamed_region_has_wrong_number_of_blocks() {
 // -----
 
 // Test region name in error message
-func @named_region_has_wrong_number_of_blocks() {
+func.func @named_region_has_wrong_number_of_blocks() {
     // expected-error@+1 {{region #0 ('my_region') failed to verify constraint: region with 2 blocks}}
     "test.sized_region_op"() (
     {
@@ -72,4 +72,38 @@ func @named_region_has_wrong_number_of_blocks() {
         "work"() : () -> ()
     }) : () -> ()
     return
+}
+
+// -----
+
+// Region with single block and not terminator.
+// CHECK: unregistered_without_terminator
+"test.unregistered_without_terminator"() ({
+  ^bb0:
+}) : () -> ()
+
+// -----
+
+// CHECK: test.single_no_terminator_op
+"test.single_no_terminator_op"() (
+  {
+    func.func @foo1() { return }
+    func.func @foo2() { return }
+  }
+) : () -> ()
+
+// CHECK: test.variadic_no_terminator_op
+"test.variadic_no_terminator_op"() (
+  {
+    func.func @foo1() { return }
+  },
+  {
+    func.func @foo2() { return }
+  }
+) : () -> ()
+
+// CHECK: test.single_no_terminator_custom_asm_op
+// CHECK-NEXT: important_dont_drop
+test.single_no_terminator_custom_asm_op {
+  "important_dont_drop"() : () -> ()
 }

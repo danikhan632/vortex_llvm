@@ -13,10 +13,7 @@
 
 using namespace clang::ast_matchers;
 
-namespace clang {
-namespace tidy {
-namespace google {
-namespace objc {
+namespace clang::tidy::google::objc {
 
 namespace {
 
@@ -52,7 +49,7 @@ FixItHint generateFixItHint(const FunctionDecl *Decl) {
   // otherwise the check cannot determine the appropriate function name prefix
   // to use.
   if (Decl->getStorageClass() != SC_Static)
-    return FixItHint();
+    return {};
 
   StringRef Name = Decl->getName();
   std::string NewName = Decl->getName().str();
@@ -60,8 +57,8 @@ FixItHint generateFixItHint(const FunctionDecl *Decl) {
   size_t Index = 0;
   bool AtWordBoundary = true;
   while (Index < NewName.size()) {
-    char ch = NewName[Index];
-    if (isalnum(ch)) {
+    char Ch = NewName[Index];
+    if (isalnum(Ch)) {
       // Capitalize the first letter after every word boundary.
       if (AtWordBoundary) {
         NewName[Index] = toupper(NewName[Index]);
@@ -83,16 +80,12 @@ FixItHint generateFixItHint(const FunctionDecl *Decl) {
         CharSourceRange::getTokenRange(SourceRange(Decl->getLocation())),
         llvm::StringRef(NewName));
 
-  return FixItHint();
+  return {};
 }
 
 } // namespace
 
 void FunctionNamingCheck::registerMatchers(MatchFinder *Finder) {
-  // This check should only be applied to Objective-C sources.
-  if (!getLangOpts().ObjC)
-    return;
-
   // Enforce Objective-C function naming conventions on all functions except:
   // • Functions defined in system headers.
   // • C++ member functions.
@@ -121,7 +114,4 @@ void FunctionNamingCheck::check(const MatchFinder::MatchResult &Result) {
       << MatchedDecl << IsGlobal << generateFixItHint(MatchedDecl);
 }
 
-} // namespace objc
-} // namespace google
-} // namespace tidy
-} // namespace clang
+} // namespace clang::tidy::google::objc

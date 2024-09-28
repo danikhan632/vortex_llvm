@@ -6,7 +6,7 @@
 # RUN:   | FileCheck %s
 # RUN: ld.lld %t -o /dev/null
 
-# exits with return code 42 on linux
+## exits with return code 42 on linux
 .globl _start
 _start:
   mov $60, %rax
@@ -128,26 +128,6 @@ _start:
 # CHECK-NEXT:     EntrySize: 0
 # CHECK-NEXT:   }
 # CHECK-NEXT: ]
-# CHECK-NEXT: Symbols [
-# CHECK-NEXT:   Symbol {
-# CHECK-NEXT:     Name:  (0)
-# CHECK-NEXT:     Value: 0x0
-# CHECK-NEXT:     Size: 0
-# CHECK-NEXT:     Binding: Local (0x0)
-# CHECK-NEXT:     Type: None (0x0)
-# CHECK-NEXT:     Other: 0
-# CHECK-NEXT:     Section: Undefined (0x0)
-# CHECK-NEXT:   }
-# CHECK-NEXT:   Symbol {
-# CHECK-NEXT:     Name: _start
-# CHECK-NEXT:     Value: [[ENTRY]]
-# CHECK-NEXT:     Size: 0
-# CHECK-NEXT:     Binding: Global (0x1)
-# CHECK-NEXT:     Type: None (0x0)
-# CHECK-NEXT:     Other: 0
-# CHECK-NEXT:     Section: .text
-# CHECK-NEXT:   }
-# CHECK-NEXT: ]
 # CHECK-NEXT: ProgramHeaders [
 # CHECK-NEXT:   ProgramHeader {
 # CHECK-NEXT:     Type: PT_PHDR (0x6)
@@ -200,58 +180,64 @@ _start:
 # CHECK-NEXT:     Alignment: 0
 # CHECK-NEXT:   }
 # CHECK-NEXT: ]
+# CHECK-NEXT: Symbols [
+# CHECK-NEXT:   Symbol {
+# CHECK-NEXT:     Name:  (0)
+# CHECK-NEXT:     Value: 0x0
+# CHECK-NEXT:     Size: 0
+# CHECK-NEXT:     Binding: Local (0x0)
+# CHECK-NEXT:     Type: None (0x0)
+# CHECK-NEXT:     Other: 0
+# CHECK-NEXT:     Section: Undefined (0x0)
+# CHECK-NEXT:   }
+# CHECK-NEXT:   Symbol {
+# CHECK-NEXT:     Name: _start
+# CHECK-NEXT:     Value: [[ENTRY]]
+# CHECK-NEXT:     Size: 0
+# CHECK-NEXT:     Binding: Global (0x1)
+# CHECK-NEXT:     Type: None (0x0)
+# CHECK-NEXT:     Other: 0
+# CHECK-NEXT:     Section: .text
+# CHECK-NEXT:   }
+# CHECK-NEXT: ]
 
-# Test for the response file (POSIX quoting style)
+## Test for the response file (POSIX quoting style)
 # RUN: echo " -o %t2" > %t.responsefile
 # RUN: ld.lld %t --rsp-quoting=posix @%t.responsefile
 # RUN: llvm-readobj --file-headers --sections -l --symbols %t2 \
 # RUN:   | FileCheck %s
 
-# Test for the response file (Windows quoting style)
+## Test for the response file (Windows quoting style)
 # RUN: echo " c:\blah\foo" > %t.responsefile
 # RUN: not ld.lld --rsp-quoting=windows %t @%t.responsefile 2>&1 | FileCheck \
 # RUN:   %s --check-prefix=WINRSP
 # WINRSP: cannot open c:\blah\foo
 
-# Test for the response file (invalid quoting style)
+## Test for the response file (invalid quoting style)
 # RUN: not ld.lld --rsp-quoting=patatino %t 2>&1 | FileCheck %s \
 # RUN:   --check-prefix=INVRSP
 # INVRSP: invalid response file quoting: patatino
 
-# RUN: not ld.lld %t.foo -o %t2 2>&1 | \
-# RUN:  FileCheck --check-prefix=MISSING %s
-# MISSING: cannot open {{.*}}.foo: {{[Nn]}}o such file or directory
+## Test erroring on a recursive response file, but only once.
+# RUN: echo @%t.responsefile > %t.responsefile
+# RUN: not ld.lld %t @%t.responsefile 2>&1 | FileCheck %s --check-prefix=RECRSP
+# RECRSP: recursive expansion of: '{{.*}}.responsefile'
+# RECRSP-NOT: recursive expansion of
 
-# RUN: not ld.lld -o %t2 2>&1 | \
+# RUN: not ld.lld %t.foo -o /dev/null 2>&1 | \
+# RUN:  FileCheck -DMSG=%errc_ENOENT --check-prefix=MISSING %s
+# MISSING: cannot open {{.*}}.foo: [[MSG]]
+
+# RUN: not ld.lld -o /dev/null 2>&1 | \
 # RUN:  FileCheck --check-prefix=NO_INPUT %s
 # NO_INPUT: ld.lld{{.*}}: no input files
 
-# RUN: not ld.lld %t.no.such.file -o %t2 2>&1 | \
-# RUN:  FileCheck --check-prefix=CANNOT_OPEN %s
-# CANNOT_OPEN: cannot open {{.*}}.no.such.file: {{[Nn]}}o such file or directory
-
-# RUN: not ld.lld %t -o 2>&1 | FileCheck --check-prefix=NO_O_VAL %s
-# NO_O_VAL: -o: missing argument
+# RUN: not ld.lld %t.no.such.file -o /dev/null 2>&1 | \
+# RUN:  FileCheck -DMSG=%errc_ENOENT --check-prefix=CANNOT_OPEN %s
+# CANNOT_OPEN: cannot open {{.*}}.no.such.file: [[MSG]]
 
 # RUN: not ld.lld --foo 2>&1 | FileCheck --check-prefix=UNKNOWN %s
 # UNKNOWN: unknown argument '--foo'
 
-# RUN: llvm-mc -filetype=obj -triple=x86_64-unknown-linux %s -o %t
-# RUN: not ld.lld %t %t -o %t2 2>&1 | FileCheck --check-prefix=DUP %s
-# DUP:      duplicate symbol: _start
-# DUP-NEXT: >>> defined at {{.*}}:(.text+0x0)
-# DUP-NEXT: >>> defined at {{.*}}:(.text+0x0)
-
-# RUN: not ld.lld %t -o %t -m wrong_emul_fbsd 2>&1 | FileCheck --check-prefix=UNKNOWN_EMUL %s
+# RUN: not ld.lld %t -o /dev/null -m wrong_emul_fbsd 2>&1 | FileCheck --check-prefix=UNKNOWN_EMUL %s
 # UNKNOWN_EMUL: unknown emulation: wrong_emul_fbsd
-
-# RUN: not ld.lld %t --lto-partitions=0 2>&1 | FileCheck --check-prefix=NOTHREADS %s
-# RUN: not ld.lld %t --plugin-opt=lto-partitions=0 2>&1 | FileCheck --check-prefix=NOTHREADS %s
-# NOTHREADS: --lto-partitions: number of threads must be > 0
-
-# RUN: not ld.lld %t --thinlto-jobs=0 2>&1 | FileCheck --check-prefix=NOTHREADSTHIN %s
-# RUN: not ld.lld %t --plugin-opt=jobs=0 2>&1 | FileCheck --check-prefix=NOTHREADSTHIN %s
-# NOTHREADSTHIN: --thinlto-jobs: number of threads must be > 0
-
-# RUN: not ld.lld %t -z ifunc-noplt -z text 2>&1 | FileCheck --check-prefix=NOIFUNCPLTNOTEXTREL %s
-# NOIFUNCPLTNOTEXTREL: -z text and -z ifunc-noplt may not be used together

@@ -11,6 +11,7 @@
 #include "llvm/ExecutionEngine/GenericValue.h"
 #include "llvm/ExecutionEngine/JITEventListener.h"
 #include "llvm/ExecutionEngine/MCJIT.h"
+#include "llvm/ExecutionEngine/ObjectCache.h"
 #include "llvm/ExecutionEngine/SectionMemoryManager.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -18,11 +19,13 @@
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Mangler.h"
 #include "llvm/IR/Module.h"
+#include "llvm/MC/MCContext.h"
 #include "llvm/Object/Archive.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/DynamicLibrary.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/SmallVectorMemoryBuffer.h"
 #include <mutex>
 
 using namespace llvm;
@@ -168,8 +171,8 @@ std::unique_ptr<MemoryBuffer> MCJIT::emitObject(Module *M) {
   PM.run(*M);
   // Flush the output buffer to get the generated code into memory
 
-  std::unique_ptr<MemoryBuffer> CompiledObjBuffer(
-      new SmallVectorMemoryBuffer(std::move(ObjBufferSV)));
+  auto CompiledObjBuffer = std::make_unique<SmallVectorMemoryBuffer>(
+      std::move(ObjBufferSV), /*RequiresNullTerminator=*/false);
 
   // If we have an object cache, tell it about the new object.
   // Note that we're using the compiled image, not the loaded image (as below).
@@ -216,8 +219,7 @@ void MCJIT::generateCodeForModule(Module *M) {
     std::string Buf;
     raw_string_ostream OS(Buf);
     logAllUnhandledErrors(LoadedObject.takeError(), OS);
-    OS.flush();
-    report_fatal_error(Buf);
+    report_fatal_error(Twine(OS.str()));
   }
   std::unique_ptr<RuntimeDyld::LoadedObjectInfo> L =
     Dyld.loadObject(*LoadedObject.get());
@@ -239,6 +241,10 @@ void MCJIT::finalizeLoadedModules() {
   // Resolve any outstanding relocations.
   Dyld.resolveRelocations();
 
+  // Check for Dyld error.
+  if (Dyld.hasError())
+    ErrMsg = Dyld.getErrorString().str();
+
   OwnedModules.markAllLoadedModulesAsFinalized();
 
   // Register EH frame data for any module we own which has been loaded
@@ -255,10 +261,10 @@ void MCJIT::finalizeObject() {
   // Generate code for module is going to move objects out of the 'added' list,
   // so we need to copy that out before using it:
   SmallVector<Module*, 16> ModsToAdd;
-  for (auto M : OwnedModules.added())
+  for (auto *M : OwnedModules.added())
     ModsToAdd.push_back(M);
 
-  for (auto M : ModsToAdd)
+  for (auto *M : ModsToAdd)
     generateCodeForModule(M);
 
   finalizeLoadedModules();
@@ -609,7 +615,7 @@ GenericValue MCJIT::runFunction(Function *F, ArrayRef<GenericValue> ArgValues) {
 
 void *MCJIT::getPointerToNamedFunction(StringRef Name, bool AbortOnFailure) {
   if (!isSymbolSearchingDisabled()) {
-    if (auto Sym = Resolver.findSymbol(Name)) {
+    if (auto Sym = Resolver.findSymbol(std::string(Name))) {
       if (auto AddrOrErr = Sym.getAddress())
         return reinterpret_cast<void*>(
                  static_cast<uintptr_t>(*AddrOrErr));
@@ -619,7 +625,7 @@ void *MCJIT::getPointerToNamedFunction(StringRef Name, bool AbortOnFailure) {
 
   /// If a LazyFunctionCreator is installed, use it to get/create the function.
   if (LazyFunctionCreator)
-    if (void *RP = LazyFunctionCreator(Name))
+    if (void *RP = LazyFunctionCreator(std::string(Name)))
       return RP;
 
   if (AbortOnFailure) {
@@ -653,9 +659,8 @@ void MCJIT::notifyObjectLoaded(const object::ObjectFile &Obj,
       static_cast<uint64_t>(reinterpret_cast<uintptr_t>(Obj.getData().data()));
   std::lock_guard<sys::Mutex> locked(lock);
   MemMgr->notifyObjectLoaded(this, Obj);
-  for (unsigned I = 0, S = EventListeners.size(); I < S; ++I) {
-    EventListeners[I]->notifyObjectLoaded(Key, Obj, L);
-  }
+  for (JITEventListener *EL : EventListeners)
+    EL->notifyObjectLoaded(Key, Obj, L);
 }
 
 void MCJIT::notifyFreeingObject(const object::ObjectFile &Obj) {

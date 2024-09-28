@@ -13,8 +13,7 @@
 // we have several customizations:
 //  - preamble handling
 //  - capturing diagnostics for later access
-//  - running clang-tidy checks checks
-//
+//  - running clang-tidy checks
 //
 //===----------------------------------------------------------------------===//
 
@@ -25,35 +24,35 @@
 #include "Compiler.h"
 #include "Diagnostics.h"
 #include "Headers.h"
-#include "Path.h"
 #include "Preamble.h"
-#include "index/CanonicalIncludes.h"
+#include "clang-include-cleaner/Record.h"
+#include "support/Path.h"
 #include "clang/Frontend/FrontendAction.h"
-#include "clang/Frontend/PrecompiledPreamble.h"
 #include "clang/Lex/Preprocessor.h"
-#include "clang/Tooling/CompilationDatabase.h"
 #include "clang/Tooling/Syntax/Tokens.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/StringRef.h"
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace clang {
+class Sema;
 namespace clangd {
-class SymbolIndex;
+class HeuristicResolver;
 
 /// Stores and provides access to parsed AST.
 class ParsedAST {
 public:
-  /// Attempts to run Clang and store parsed AST. If \p Preamble is non-null
-  /// it is reused during parsing.
-  static llvm::Optional<ParsedAST>
-  build(std::unique_ptr<clang::CompilerInvocation> CI,
+  /// Attempts to run Clang and store the parsed AST.
+  /// If \p Preamble is non-null it is reused during parsing.
+  /// This function does not check if preamble is valid to reuse.
+  static std::optional<ParsedAST>
+  build(llvm::StringRef Filename, const ParseInputs &Inputs,
+        std::unique_ptr<clang::CompilerInvocation> CI,
         llvm::ArrayRef<Diag> CompilerInvocationDiags,
-        std::shared_ptr<const PreambleData> Preamble,
-        std::unique_ptr<llvm::MemoryBuffer> Buffer,
-        llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> VFS,
-        const SymbolIndex *Index, const ParseOptions &Opts);
+        std::shared_ptr<const PreambleData> Preamble);
 
   ParsedAST(ParsedAST &&Other);
   ParsedAST &operator=(ParsedAST &&Other);
@@ -65,6 +64,8 @@ public:
   /// from the main file to be in the AST.
   ASTContext &getASTContext();
   const ASTContext &getASTContext() const;
+
+  Sema &getSema();
 
   Preprocessor &getPreprocessor();
   std::shared_ptr<Preprocessor> getPreprocessorPtr();
@@ -85,30 +86,50 @@ public:
   /// The result does not include the decls that come from the preamble.
   /// (These should be const, but RecursiveASTVisitor requires Decl*).
   ArrayRef<Decl *> getLocalTopLevelDecls();
+  ArrayRef<const Decl *> getLocalTopLevelDecls() const;
 
-  const std::vector<Diag> &getDiagnostics() const;
+  llvm::ArrayRef<Diag> getDiagnostics() const;
 
   /// Returns the estimated size of the AST and the accessory structures, in
   /// bytes. Does not include the size of the preamble.
   std::size_t getUsedBytes() const;
   const IncludeStructure &getIncludeStructure() const;
-  const CanonicalIncludes &getCanonicalIncludes() const;
 
   /// Gets all macro references (definition, expansions) present in the main
   /// file, including those in the preamble region.
   const MainFileMacros &getMacros() const;
+  /// Gets all pragma marks in the main file.
+  const std::vector<PragmaMark> &getMarks() const;
   /// Tokens recorded while parsing the main file.
   /// (!) does not have tokens from the preamble.
   const syntax::TokenBuffer &getTokens() const { return Tokens; }
+  /// Returns the PramaIncludes for preamble + main file includes.
+  const include_cleaner::PragmaIncludes &getPragmaIncludes() const;
+
+  /// Returns the version of the ParseInputs this AST was built from.
+  llvm::StringRef version() const { return Version; }
+
+  /// Returns the path passed by the caller when building this AST.
+  PathRef tuPath() const { return TUPath; }
+
+  /// Returns the version of the ParseInputs used to build Preamble part of this
+  /// AST. Might be std::nullopt if no Preamble is used.
+  std::optional<llvm::StringRef> preambleVersion() const;
+
+  const HeuristicResolver *getHeuristicResolver() const {
+    return Resolver.get();
+  }
 
 private:
-  ParsedAST(std::shared_ptr<const PreambleData> Preamble,
+  ParsedAST(PathRef TUPath, llvm::StringRef Version,
+            std::shared_ptr<const PreambleData> Preamble,
             std::unique_ptr<CompilerInstance> Clang,
             std::unique_ptr<FrontendAction> Action, syntax::TokenBuffer Tokens,
-            MainFileMacros Macros, std::vector<Decl *> LocalTopLevelDecls,
-            std::vector<Diag> Diags, IncludeStructure Includes,
-            CanonicalIncludes CanonIncludes);
-
+            MainFileMacros Macros, std::vector<PragmaMark> Marks,
+            std::vector<Decl *> LocalTopLevelDecls, std::vector<Diag> Diags,
+            IncludeStructure Includes, include_cleaner::PragmaIncludes PI);
+  Path TUPath;
+  std::string Version;
   // In-memory preambles must outlive the AST, it is important that this member
   // goes before Clang and Action.
   std::shared_ptr<const PreambleData> Preamble;
@@ -121,33 +142,24 @@ private:
   std::unique_ptr<FrontendAction> Action;
   /// Tokens recorded after the preamble finished.
   ///   - Includes all spelled tokens for the main file.
-  ///   - Includes expanded tokens produced **after** preabmle.
+  ///   - Includes expanded tokens produced **after** preamble.
   ///   - Does not have spelled or expanded tokens for files from preamble.
   syntax::TokenBuffer Tokens;
 
   /// All macro definitions and expansions in the main file.
   MainFileMacros Macros;
-  // Data, stored after parsing.
+  // Pragma marks in the main file.
+  std::vector<PragmaMark> Marks;
+  // Diags emitted while parsing this AST (including preamble and compiler
+  // invocation).
   std::vector<Diag> Diags;
   // Top-level decls inside the current file. Not that this does not include
   // top-level decls from the preamble.
   std::vector<Decl *> LocalTopLevelDecls;
   IncludeStructure Includes;
-  CanonicalIncludes CanonIncludes;
+  include_cleaner::PragmaIncludes PI;
+  std::unique_ptr<HeuristicResolver> Resolver;
 };
-
-/// Build an AST from provided user inputs. This function does not check if
-/// preamble can be reused, as this function expects that \p Preamble is the
-/// result of calling buildPreamble.
-llvm::Optional<ParsedAST>
-buildAST(PathRef FileName, std::unique_ptr<CompilerInvocation> Invocation,
-         llvm::ArrayRef<Diag> CompilerInvocationDiags,
-         const ParseInputs &Inputs,
-         std::shared_ptr<const PreambleData> Preamble);
-
-/// For testing/debugging purposes. Note that this method deserializes all
-/// unserialized Decls, so use with care.
-void dumpAST(ParsedAST &AST, llvm::raw_ostream &OS);
 
 } // namespace clangd
 } // namespace clang

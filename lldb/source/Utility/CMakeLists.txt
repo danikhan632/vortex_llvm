@@ -1,6 +1,19 @@
 set(LLDB_SYSTEM_LIBS)
 
-list(APPEND LLDB_SYSTEM_LIBS ${system_libs})
+if (APPLE)
+  list(APPEND LLDB_SYSTEM_LIBS
+       ${FOUNDATION_LIBRARY}
+       ${CORE_FOUNDATION_LIBRARY}
+       ${CORE_SERVICES_LIBRARY}
+       ${SECURITY_LIBRARY}
+       ${DEBUG_SYMBOLS_LIBRARY})
+endif()
+
+if(NOT PURE_WINDOWS)
+  list(APPEND LLDB_SYSTEM_LIBS ${CMAKE_THREAD_LIBS_INIT})
+endif()
+
+list(APPEND LLDB_SYSTEM_LIBS ${CMAKE_DL_LIBS})
 
 if (CMAKE_SYSTEM_NAME MATCHES "Windows")
   list(APPEND LLDB_SYSTEM_LIBS ws2_32 rpcrt4)
@@ -10,11 +23,13 @@ if (NOT HAVE_CXX_ATOMICS64_WITHOUT_LIB )
     list(APPEND LLDB_SYSTEM_LIBS atomic)
 endif()
 
-add_lldb_library(lldbUtility
+add_lldb_library(lldbUtility NO_INTERNAL_DEPENDENCIES
+  AddressableBits.cpp
   ArchSpec.cpp
   Args.cpp
   Baton.cpp
   Broadcaster.cpp
+  Checksum.cpp
   CompletionRequest.cpp
   Connection.cpp
   ConstString.cpp
@@ -22,28 +37,27 @@ add_lldb_library(lldbUtility
   DataBufferLLVM.cpp
   DataEncoder.cpp
   DataExtractor.cpp
+  Diagnostics.cpp
   Environment.cpp
   Event.cpp
   FileSpec.cpp
+  FileSpecList.cpp
   GDBRemote.cpp
   IOObject.cpp
   LLDBAssert.cpp
+  LLDBLog.cpp
   Listener.cpp
   Log.cpp
-  Logging.cpp
   NameMatches.cpp
   ProcessInfo.cpp
   RegisterValue.cpp
   RegularExpression.cpp
-  Reproducer.cpp
-  ReproducerInstrumentation.cpp
+  Instrumentation.cpp
   Scalar.cpp
   SelectHelper.cpp
-  SharingPtr.cpp
   State.cpp
   Status.cpp
   Stream.cpp
-  StreamCallback.cpp
   StreamString.cpp
   StringExtractor.cpp
   StringExtractorGDBRemote.cpp
@@ -52,12 +66,17 @@ add_lldb_library(lldbUtility
   StructuredData.cpp
   TildeExpressionResolver.cpp
   Timer.cpp
+  TraceGDBRemotePackets.cpp
+  TraceIntelPTGDBRemotePackets.cpp
+  UnimplementedError.cpp
   UUID.cpp
   UriParser.cpp
   UserID.cpp
   UserIDResolver.cpp
   VASprintf.cpp
   VMRange.cpp
+  XcodeSDK.cpp
+  ZipFile.cpp
 
   LINK_LIBS
     ${LLDB_SYSTEM_LIBS}
@@ -66,4 +85,5 @@ add_lldb_library(lldbUtility
   LINK_COMPONENTS
     BinaryFormat
     Support
+    TargetParser
   )

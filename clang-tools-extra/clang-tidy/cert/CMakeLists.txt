@@ -1,4 +1,7 @@
-set(LLVM_LINK_COMPONENTS support)
+set(LLVM_LINK_COMPONENTS
+  support
+  FrontendOpenMP
+  )
 
 add_clang_library(clangTidyCERTModule
   CERTTidyModule.cpp
@@ -8,6 +11,7 @@ add_clang_library(clangTidyCERTModule
   FloatLoopCounter.cpp
   LimitedRandomnessCheck.cpp
   MutatingCopyCheck.cpp
+  NonTrivialTypesLibcMemoryCallsCheck.cpp
   PostfixOperatorCheck.cpp
   ProperlySeededRandomGeneratorCheck.cpp
   SetLongJmpCheck.cpp
@@ -17,15 +21,24 @@ add_clang_library(clangTidyCERTModule
   VariadicFunctionDefCheck.cpp
 
   LINK_LIBS
-  clangAST
-  clangASTMatchers
-  clangBasic
-  clangLex
   clangTidy
   clangTidyBugproneModule
+  clangTidyConcurrencyModule
   clangTidyGoogleModule
   clangTidyMiscModule
   clangTidyPerformanceModule
   clangTidyReadabilityModule
   clangTidyUtils
+
+  DEPENDS
+  omp_gen
+  ClangDriverOptions
+  )
+
+clang_target_link_libraries(clangTidyCERTModule
+  PRIVATE
+  clangAST
+  clangASTMatchers
+  clangBasic
+  clangLex
   )

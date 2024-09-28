@@ -22,7 +22,6 @@ namespace llvm {
 
   // Forward delcarations
   class XCoreSubtarget;
-  class XCoreTargetMachine;
 
   namespace XCoreISD {
     enum NodeType : unsigned {
@@ -80,9 +79,6 @@ namespace llvm {
       // Exception handler return. The stack is restored to the first
       // followed by a jump to the second argument.
       EH_RETURN,
-
-      // Memory barrier.
-      MEMBARRIER
     };
   }
 
@@ -127,14 +123,14 @@ namespace llvm {
 
     /// If a physical register, this returns the register that receives the
     /// exception address on entry to an EH pad.
-    unsigned
+    Register
     getExceptionPointerRegister(const Constant *PersonalityFn) const override {
       return XCore::R0;
     }
 
     /// If a physical register, this returns the register that receives the
     /// exception typeid on entry to a landing pad.
-    unsigned
+    Register
     getExceptionSelectorRegister(const Constant *PersonalityFn) const override {
       return XCore::R1;
     }
@@ -185,10 +181,6 @@ namespace llvm {
     SDValue LowerADJUST_TRAMPOLINE(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerINTRINSIC_WO_CHAIN(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerATOMIC_FENCE(SDValue Op, SelectionDAG &DAG) const;
-    SDValue LowerATOMIC_LOAD(SDValue Op, SelectionDAG &DAG) const;
-    SDValue LowerATOMIC_STORE(SDValue Op, SelectionDAG &DAG) const;
-
-    MachineMemOperand::Flags getMMOFlags(const Instruction &I) const override;
 
     // Inline asm support
     std::pair<unsigned, const TargetRegisterClass *>
@@ -222,14 +214,10 @@ namespace llvm {
                         const SmallVectorImpl<SDValue> &OutVals,
                         const SDLoc &dl, SelectionDAG &DAG) const override;
 
-    bool
-      CanLowerReturn(CallingConv::ID CallConv, MachineFunction &MF,
-                     bool isVarArg,
-                     const SmallVectorImpl<ISD::OutputArg> &ArgsFlags,
-                     LLVMContext &Context) const override;
-    bool shouldInsertFencesForAtomic(const Instruction *I) const override {
-      return true;
-    }
+    bool CanLowerReturn(CallingConv::ID CallConv, MachineFunction &MF,
+                        bool isVarArg,
+                        const SmallVectorImpl<ISD::OutputArg> &ArgsFlags,
+                        LLVMContext &Context) const override;
   };
 }
 

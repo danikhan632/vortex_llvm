@@ -30,8 +30,10 @@ namespace {
 ///   10*a+10*a
 class ExpandMacro : public Tweak {
 public:
-  const char *id() const override final;
-  Intent intent() const override { return Intent::Refactor; }
+  const char *id() const final;
+  llvm::StringLiteral kind() const override {
+    return CodeAction::REFACTOR_KIND;
+  }
 
   bool prepare(const Selection &Inputs) override;
   Expected<Tweak::Effect> apply(const Selection &Inputs) override;
@@ -50,7 +52,7 @@ findTokenUnderCursor(const SourceManager &SM,
                      llvm::ArrayRef<syntax::Token> Spelled,
                      unsigned CursorOffset) {
   // Find the token that strats after the offset, then look at a previous one.
-  auto It = llvm::partition_point(Spelled, [&](const syntax::Token &T) {
+  auto *It = llvm::partition_point(Spelled, [&](const syntax::Token &T) {
     assert(T.location().isFileID());
     return SM.getFileOffset(T.location()) <= CursorOffset;
   });
@@ -98,7 +100,7 @@ bool ExpandMacro::prepare(const Selection &Inputs) {
   auto Expansion = Inputs.AST->getTokens().expansionStartingAt(T);
   if (!Expansion)
     return false;
-  this->MacroName = T->text(Inputs.AST->getSourceManager());
+  this->MacroName = std::string(T->text(Inputs.AST->getSourceManager()));
   this->Expansion = *Expansion;
   return true;
 }
@@ -126,7 +128,7 @@ Expected<Tweak::Effect> ExpandMacro::apply(const Selection &Inputs) {
 }
 
 std::string ExpandMacro::title() const {
-  return llvm::formatv("Expand macro '{0}'", MacroName);
+  return std::string(llvm::formatv("Expand macro '{0}'", MacroName));
 }
 
 } // namespace

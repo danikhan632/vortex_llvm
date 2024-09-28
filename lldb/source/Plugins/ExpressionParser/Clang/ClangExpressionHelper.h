@@ -6,36 +6,32 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_ClangExpression_h_
-#define liblldb_ClangExpression_h_
+#ifndef LLDB_SOURCE_PLUGINS_EXPRESSIONPARSER_CLANG_CLANGEXPRESSIONHELPER_H
+#define LLDB_SOURCE_PLUGINS_EXPRESSIONPARSER_CLANG_CLANGEXPRESSIONHELPER_H
 
 #include <map>
 #include <string>
 #include <vector>
 
-
-#include "lldb/Core/ClangForward.h"
 #include "lldb/Expression/ExpressionTypeSystemHelper.h"
 #include "lldb/lldb-forward.h"
 #include "lldb/lldb-private.h"
 
+namespace clang {
+class ASTConsumer;
+}
+
 namespace lldb_private {
 
-class RecordingMemoryManager;
+class ClangExpressionDeclMap;
 
 // ClangExpressionHelper
-class ClangExpressionHelper : public ExpressionTypeSystemHelper {
+class ClangExpressionHelper
+    : public llvm::RTTIExtends<ClangExpressionHelper,
+                               ExpressionTypeSystemHelper> {
 public:
-  static bool classof(const ExpressionTypeSystemHelper *ts) {
-    return ts->getKind() == eKindClangHelper;
-  }
-
-  ClangExpressionHelper()
-      : ExpressionTypeSystemHelper(
-            ExpressionTypeSystemHelper::LLVMCastKind::eKindClangHelper) {}
-
-  /// Destructor
-  virtual ~ClangExpressionHelper() {}
+  // LLVM RTTI support
+  static char ID;
 
   /// Return the object that the parser should use when resolving external
   /// values.  May be NULL if everything should be self-contained.
@@ -51,10 +47,8 @@ public:
   ASTTransformer(clang::ASTConsumer *passthrough) = 0;
 
   virtual void CommitPersistentDecls() {}
-
-protected:
 };
 
 } // namespace lldb_private
 
-#endif // liblldb_ClangExpression_h_
+#endif // LLDB_SOURCE_PLUGINS_EXPRESSIONPARSER_CLANG_CLANGEXPRESSIONHELPER_H

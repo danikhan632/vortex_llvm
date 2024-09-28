@@ -1,6 +1,6 @@
 //===- Lexer.h - Lexer for the Toy language -------------------------------===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -10,8 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef MLIR_TUTORIAL_TOY_LEXER_H_
-#define MLIR_TUTORIAL_TOY_LEXER_H_
+#ifndef TOY_LEXER_H
+#define TOY_LEXER_H
 
 #include "llvm/ADT/StringRef.h"
 
@@ -232,4 +232,4 @@ private:
 };
 } // namespace toy
 
-#endif // MLIR_TUTORIAL_TOY_LEXER_H_
+#endif // TOY_LEXER_H

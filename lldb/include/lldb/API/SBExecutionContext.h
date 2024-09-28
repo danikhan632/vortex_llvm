@@ -7,13 +7,19 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLDB_SBExecutionContext_h_
-#define LLDB_SBExecutionContext_h_
+#ifndef LLDB_API_SBEXECUTIONCONTEXT_H
+#define LLDB_API_SBEXECUTIONCONTEXT_H
 
 #include "lldb/API/SBDefines.h"
 
-#include <stdio.h>
+#include <cstdio>
 #include <vector>
+
+namespace lldb_private {
+namespace python {
+class SWIGBridge;
+}
+} // namespace lldb_private
 
 namespace lldb {
 
@@ -24,8 +30,6 @@ public:
   SBExecutionContext();
 
   SBExecutionContext(const lldb::SBExecutionContext &rhs);
-
-  SBExecutionContext(lldb::ExecutionContextRefSP exe_ctx_ref_sp);
 
   SBExecutionContext(const lldb::SBTarget &target);
 
@@ -50,9 +54,11 @@ public:
   SBFrame GetFrame() const;
 
 protected:
-  void reset(lldb::ExecutionContextRefSP &event_sp);
+  friend class lldb_private::python::SWIGBridge;
 
   lldb_private::ExecutionContextRef *get() const;
+
+  SBExecutionContext(lldb::ExecutionContextRefSP exe_ctx_ref_sp);
 
 private:
   mutable lldb::ExecutionContextRefSP m_exe_ctx_sp;
@@ -60,4 +66,4 @@ private:
 
 } // namespace lldb
 
-#endif // LLDB_SBExecutionContext_h_
+#endif // LLDB_API_SBEXECUTIONCONTEXT_H

@@ -6,13 +6,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLDB_SBLaunchInfo_h_
-#define LLDB_SBLaunchInfo_h_
+#ifndef LLDB_API_SBLAUNCHINFO_H
+#define LLDB_API_SBLAUNCHINFO_H
 
 #include "lldb/API/SBDefines.h"
 
 namespace lldb_private {
 class SBLaunchInfoImpl;
+class ScriptInterpreter;
 }
 
 namespace lldb {
@@ -25,6 +26,17 @@ public:
   SBLaunchInfo(const char **argv);
 
   ~SBLaunchInfo();
+
+#ifndef SWIG
+  // The copy constructor for SBLaunchInfo presents some problems on some
+  // supported versions of swig (e.g. 3.0.2). When trying to create an
+  // SBLaunchInfo from python with the argument `None`, swig will try to call
+  // the copy constructor instead of SBLaunchInfo(const char **). For that
+  // reason, we avoid exposing the copy constructor to python.
+  SBLaunchInfo(const SBLaunchInfo &rhs);
+#endif
+
+  SBLaunchInfo &operator=(const SBLaunchInfo &rhs);
 
   lldb::pid_t GetProcessID();
 
@@ -80,6 +92,25 @@ public:
   /// allows a different listener to be used to listen for process events.
   void SetListener(SBListener &listener);
 
+  /// Get the shadow listener that receive public process events,
+  /// additionally to the default process event listener.
+  ///
+  /// If no listener has been set via a call to
+  /// SBLaunchInfo::SetShadowListener(), then an invalid SBListener will
+  /// be returned (SBListener::IsValid() will return false). If a listener
+  /// has been set, then the valid listener object will be returned.
+  SBListener GetShadowListener();
+
+  /// Set the shadow listener that will receive public process events,
+  /// additionally to the default process event listener.
+  ///
+  /// By default a process have no shadow event listener.
+  /// Calling this function allows public process events to be broadcasted to an
+  /// additional listener on top of the default process event listener.
+  /// If the `listener` argument is invalid (SBListener::IsValid() will
+  /// return false), this will clear the shadow listener.
+  void SetShadowListener(SBListener &listener);
+
   uint32_t GetNumArguments();
 
   const char *GetArgumentAtIndex(uint32_t idx);
@@ -90,7 +121,40 @@ public:
 
   const char *GetEnvironmentEntryAtIndex(uint32_t idx);
 
+  /// Update this object with the given environment variables.
+  ///
+  /// If append is false, the provided environment will replace the existing
+  /// environment. Otherwise, existing values will be updated of left untouched
+  /// accordingly.
+  ///
+  /// \param [in] envp
+  ///     The new environment variables as a list of strings with the following
+  ///     format
+  ///         name=value
+  ///
+  /// \param [in] append
+  ///     Flag that controls whether to replace the existing environment.
   void SetEnvironmentEntries(const char **envp, bool append);
+
+  /// Update this object with the given environment variables.
+  ///
+  /// If append is false, the provided environment will replace the existing
+  /// environment. Otherwise, existing values will be updated of left untouched
+  /// accordingly.
+  ///
+  /// \param [in] env
+  ///     The new environment variables.
+  ///
+  /// \param [in] append
+  ///     Flag that controls whether to replace the existing environment.
+  void SetEnvironment(const SBEnvironment &env, bool append);
+
+  /// Return the environment variables of this object.
+  ///
+  /// \return
+  ///     An lldb::SBEnvironment object which is a copy of the SBLaunchInfo's
+  ///     environment.
+  SBEnvironment GetEnvironment();
 
   void Clear();
 
@@ -134,9 +198,19 @@ public:
 
   void SetDetachOnError(bool enable);
 
+  const char *GetScriptedProcessClassName() const;
+
+  void SetScriptedProcessClassName(const char *class_name);
+
+  lldb::SBStructuredData GetScriptedProcessDictionary() const;
+
+  void SetScriptedProcessDictionary(lldb::SBStructuredData dict);
+
 protected:
   friend class SBPlatform;
   friend class SBTarget;
+
+  friend class lldb_private::ScriptInterpreter;
 
   const lldb_private::ProcessLaunchInfo &ref() const;
   void set_ref(const lldb_private::ProcessLaunchInfo &info);
@@ -146,4 +220,4 @@ protected:
 
 } // namespace lldb
 
-#endif // LLDB_SBLaunchInfo_h_
+#endif // LLDB_API_SBLAUNCHINFO_H

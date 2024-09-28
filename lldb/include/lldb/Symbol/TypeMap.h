@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_TypeMap_h_
-#define liblldb_TypeMap_h_
+#ifndef LLDB_SYMBOL_TYPEMAP_H
+#define LLDB_SYMBOL_TYPEMAP_H
 
 #include "lldb/Symbol/Type.h"
 #include "lldb/Utility/Iterable.h"
@@ -26,7 +26,8 @@ public:
 
   void Clear();
 
-  void Dump(Stream *s, bool show_context);
+  void Dump(Stream *s, bool show_context,
+            lldb::DescriptionLevel level = lldb::eDescriptionLevelFull) const;
 
   TypeMap FindTypes(ConstString name);
 
@@ -40,10 +41,12 @@ public:
 
   lldb::TypeSP GetTypeAtIndex(uint32_t idx);
 
+  lldb::TypeSP FirstType() const;
+
   typedef std::multimap<lldb::user_id_t, lldb::TypeSP> collection;
   typedef AdaptedIterable<collection, lldb::TypeSP, map_adapter> TypeIterable;
 
-  TypeIterable Types() { return TypeIterable(m_types); }
+  TypeIterable Types() const { return TypeIterable(m_types); }
 
   void ForEach(
       std::function<bool(const lldb::TypeSP &type_sp)> const &callback) const;
@@ -52,13 +55,9 @@ public:
 
   bool Remove(const lldb::TypeSP &type_sp);
 
-  void RemoveMismatchedTypes(const char *qualified_typename, bool exact_match);
-
-  void RemoveMismatchedTypes(const std::string &type_scope,
-                             const std::string &type_basename,
+  void RemoveMismatchedTypes(llvm::StringRef type_scope,
+                             llvm::StringRef type_basename,
                              lldb::TypeClass type_class, bool exact_match);
-
-  void RemoveMismatchedTypes(lldb::TypeClass type_class);
 
 private:
   typedef collection::iterator iterator;
@@ -66,9 +65,10 @@ private:
 
   collection m_types;
 
-  DISALLOW_COPY_AND_ASSIGN(TypeMap);
+  TypeMap(const TypeMap &) = delete;
+  const TypeMap &operator=(const TypeMap &) = delete;
 };
 
 } // namespace lldb_private
 
-#endif // liblldb_TypeMap_h_
+#endif // LLDB_SYMBOL_TYPEMAP_H

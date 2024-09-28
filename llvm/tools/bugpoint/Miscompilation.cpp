@@ -308,7 +308,7 @@ ExtractLoops(BugDriver &BD,
                                       std::unique_ptr<Module>),
              std::vector<Function *> &MiscompiledFunctions) {
   bool MadeChange = false;
-  while (1) {
+  while (true) {
     if (BugpointIsInterrupted)
       return MadeChange;
 
@@ -389,7 +389,8 @@ ExtractLoops(BugDriver &BD,
 
       std::vector<std::pair<std::string, FunctionType *>> MisCompFunctions;
       for (Function *F : MiscompiledFunctions) {
-        MisCompFunctions.emplace_back(F->getName(), F->getFunctionType());
+        MisCompFunctions.emplace_back(std::string(F->getName()),
+                                      F->getFunctionType());
       }
 
       if (Linker::linkModules(*ToNotOptimize,
@@ -415,7 +416,8 @@ ExtractLoops(BugDriver &BD,
                           E = ToOptimizeLoopExtracted->end();
          I != E; ++I)
       if (!I->isDeclaration())
-        MisCompFunctions.emplace_back(I->getName(), I->getFunctionType());
+        MisCompFunctions.emplace_back(std::string(I->getName()),
+                                      I->getFunctionType());
 
     // Okay, great!  Now we know that we extracted a loop and that loop
     // extraction both didn't break the program, and didn't mask the problem.
@@ -586,7 +588,8 @@ ExtractBlocks(BugDriver &BD,
   for (Module::iterator I = Extracted->begin(), E = Extracted->end(); I != E;
        ++I)
     if (!I->isDeclaration())
-      MisCompFunctions.emplace_back(I->getName(), I->getFunctionType());
+      MisCompFunctions.emplace_back(std::string(I->getName()),
+                                    I->getFunctionType());
 
   if (Linker::linkModules(*ProgClone, std::move(Extracted)))
     exit(1);
@@ -827,8 +830,8 @@ CleanupAndPrepareModules(BugDriver &BD, std::unique_ptr<Module> Test,
   // Add the resolver to the Safe module.
   // Prototype: void *getPointerToNamedFunction(const char* Name)
   FunctionCallee resolverFunc = Safe->getOrInsertFunction(
-      "getPointerToNamedFunction", Type::getInt8PtrTy(Safe->getContext()),
-      Type::getInt8PtrTy(Safe->getContext()));
+      "getPointerToNamedFunction", PointerType::getUnqual(Safe->getContext()),
+      PointerType::getUnqual(Safe->getContext()));
 
   // Use the function we just added to get addresses of functions we need.
   for (Module::iterator F = Safe->begin(), E = Safe->end(); F != E; ++F) {
@@ -953,7 +956,7 @@ static Expected<bool> TestCodeGenerator(BugDriver &BD,
            << "Error making unique filename: " << EC.message() << "\n";
     exit(1);
   }
-  if (BD.writeProgramToFile(TestModuleBC.str(), TestModuleFD, *Test)) {
+  if (BD.writeProgramToFile(std::string(TestModuleBC), TestModuleFD, *Test)) {
     errs() << "Error writing bitcode to `" << TestModuleBC.str()
            << "'\nExiting.";
     exit(1);
@@ -972,7 +975,7 @@ static Expected<bool> TestCodeGenerator(BugDriver &BD,
     exit(1);
   }
 
-  if (BD.writeProgramToFile(SafeModuleBC.str(), SafeModuleFD, *Safe)) {
+  if (BD.writeProgramToFile(std::string(SafeModuleBC), SafeModuleFD, *Safe)) {
     errs() << "Error writing bitcode to `" << SafeModuleBC << "'\nExiting.";
     exit(1);
   }
@@ -980,7 +983,7 @@ static Expected<bool> TestCodeGenerator(BugDriver &BD,
   FileRemover SafeModuleBCRemover(SafeModuleBC.str(), !SaveTemps);
 
   Expected<std::string> SharedObject =
-      BD.compileSharedObject(SafeModuleBC.str());
+      BD.compileSharedObject(std::string(SafeModuleBC));
   if (Error E = SharedObject.takeError())
     return std::move(E);
 
@@ -988,8 +991,8 @@ static Expected<bool> TestCodeGenerator(BugDriver &BD,
 
   // Run the code generator on the `Test' code, loading the shared library.
   // The function returns whether or not the new output differs from reference.
-  Expected<bool> Result =
-      BD.diffProgram(BD.getProgram(), TestModuleBC.str(), *SharedObject, false);
+  Expected<bool> Result = BD.diffProgram(
+      BD.getProgram(), std::string(TestModuleBC), *SharedObject, false);
   if (Error E = Result.takeError())
     return std::move(E);
 
@@ -1046,7 +1049,7 @@ Error BugDriver::debugCodeGenerator() {
     exit(1);
   }
 
-  if (writeProgramToFile(TestModuleBC.str(), TestModuleFD, *ToCodeGen)) {
+  if (writeProgramToFile(std::string(TestModuleBC), TestModuleFD, *ToCodeGen)) {
     errs() << "Error writing bitcode to `" << TestModuleBC << "'\nExiting.";
     exit(1);
   }
@@ -1062,11 +1065,13 @@ Error BugDriver::debugCodeGenerator() {
     exit(1);
   }
 
-  if (writeProgramToFile(SafeModuleBC.str(), SafeModuleFD, *ToNotCodeGen)) {
+  if (writeProgramToFile(std::string(SafeModuleBC), SafeModuleFD,
+                         *ToNotCodeGen)) {
     errs() << "Error writing bitcode to `" << SafeModuleBC << "'\nExiting.";
     exit(1);
   }
-  Expected<std::string> SharedObject = compileSharedObject(SafeModuleBC.str());
+  Expected<std::string> SharedObject =
+      compileSharedObject(std::string(SafeModuleBC));
   if (Error E = SharedObject.takeError())
     return E;
 

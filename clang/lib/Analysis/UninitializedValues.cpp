@@ -24,28 +24,47 @@
 #include "clang/Analysis/AnalysisDeclContext.h"
 #include "clang/Analysis/CFG.h"
 #include "clang/Analysis/DomainSpecific/ObjCNoReturn.h"
+#include "clang/Analysis/FlowSensitive/DataflowWorklist.h"
 #include "clang/Basic/LLVM.h"
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/None.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/PackedVector.h"
 #include "llvm/ADT/SmallBitVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Casting.h"
 #include <algorithm>
 #include <cassert>
+#include <optional>
 
 using namespace clang;
 
 #define DEBUG_LOGGING 0
 
+static bool recordIsNotEmpty(const RecordDecl *RD) {
+  // We consider a record decl to be empty if it contains only unnamed bit-
+  // fields, zero-width fields, and fields of empty record type.
+  for (const auto *FD : RD->fields()) {
+    if (FD->isUnnamedBitfield())
+      continue;
+    if (FD->isZeroSize(FD->getASTContext()))
+      continue;
+    // The only case remaining to check is for a field declaration of record
+    // type and whether that record itself is empty.
+    if (const auto *FieldRD = FD->getType()->getAsRecordDecl();
+        !FieldRD || recordIsNotEmpty(FieldRD))
+      return true;
+  }
+  return false;
+}
+
 static bool isTrackedVar(const VarDecl *vd, const DeclContext *dc) {
   if (vd->isLocalVarDecl() && !vd->hasGlobalStorage() &&
-      !vd->isExceptionVariable() && !vd->isInitCapture() &&
-      !vd->isImplicit() && vd->getDeclContext() == dc) {
+      !vd->isExceptionVariable() && !vd->isInitCapture() && !vd->isImplicit() &&
+      vd->getDeclContext() == dc) {
     QualType ty = vd->getType();
-    return ty->isScalarType() || ty->isVectorType() || ty->isRecordType();
+    if (const auto *RD = ty->getAsRecordDecl())
+      return recordIsNotEmpty(RD);
+    return ty->isScalarType() || ty->isVectorType() || ty->isRVVSizelessBuiltinType();
   }
   return false;
 }
@@ -69,7 +88,7 @@ public:
   unsigned size() const { return map.size(); }
 
   /// Returns the bit vector index for a given declaration.
-  Optional<unsigned> getValueIndex(const VarDecl *d) const;
+  std::optional<unsigned> getValueIndex(const VarDecl *d) const;
 };
 
 } // namespace
@@ -85,10 +104,10 @@ void DeclToIndex::computeMap(const DeclContext &dc) {
   }
 }
 
-Optional<unsigned> DeclToIndex::getValueIndex(const VarDecl *d) const {
+std::optional<unsigned> DeclToIndex::getValueIndex(const VarDecl *d) const {
   llvm::DenseMap<const VarDecl *, unsigned>::const_iterator I = map.find(d);
   if (I == map.end())
-    return None;
+    return std::nullopt;
   return I->second;
 }
 
@@ -146,9 +165,8 @@ public:
 
   Value getValue(const CFGBlock *block, const CFGBlock *dstBlock,
                  const VarDecl *vd) {
-    const Optional<unsigned> &idx = declToIndex.getValueIndex(vd);
-    assert(idx.hasValue());
-    return getValueVector(block)[idx.getValue()];
+    std::optional<unsigned> idx = declToIndex.getValueIndex(vd);
+    return getValueVector(block)[*idx];
   }
 };
 
@@ -207,71 +225,7 @@ void CFGBlockValues::resetScratch() {
 }
 
 ValueVector::reference CFGBlockValues::operator[](const VarDecl *vd) {
-  const Optional<unsigned> &idx = declToIndex.getValueIndex(vd);
-  assert(idx.hasValue());
-  return scratch[idx.getValue()];
-}
-
-//------------------------------------------------------------------------====//
-// Worklist: worklist for dataflow analysis.
-//====------------------------------------------------------------------------//
-
-namespace {
-
-class DataflowWorklist {
-  PostOrderCFGView::iterator PO_I, PO_E;
-  SmallVector<const CFGBlock *, 20> worklist;
-  llvm::BitVector enqueuedBlocks;
-
-public:
-  DataflowWorklist(const CFG &cfg, PostOrderCFGView &view)
-      : PO_I(view.begin()), PO_E(view.end()),
-        enqueuedBlocks(cfg.getNumBlockIDs(), true) {
-    // Treat the first block as already analyzed.
-    if (PO_I != PO_E) {
-      assert(*PO_I == &cfg.getEntry());
-      enqueuedBlocks[(*PO_I)->getBlockID()] = false;
-      ++PO_I;
-    }
-  }
-
-  void enqueueSuccessors(const CFGBlock *block);
-  const CFGBlock *dequeue();
-};
-
-} // namespace
-
-void DataflowWorklist::enqueueSuccessors(const CFGBlock *block) {
-  for (CFGBlock::const_succ_iterator I = block->succ_begin(),
-       E = block->succ_end(); I != E; ++I) {
-    const CFGBlock *Successor = *I;
-    if (!Successor || enqueuedBlocks[Successor->getBlockID()])
-      continue;
-    worklist.push_back(Successor);
-    enqueuedBlocks[Successor->getBlockID()] = true;
-  }
-}
-
-const CFGBlock *DataflowWorklist::dequeue() {
-  const CFGBlock *B = nullptr;
-
-  // First dequeue from the worklist.  This can represent
-  // updates along backedges that we want propagated as quickly as possible.
-  if (!worklist.empty())
-    B = worklist.pop_back_val();
-
-  // Next dequeue from the initial reverse post order.  This is the
-  // theoretical ideal in the presence of no back edges.
-  else if (PO_I != PO_E) {
-    B = *PO_I;
-    ++PO_I;
-  }
-  else
-    return nullptr;
-
-  assert(enqueuedBlocks[B->getBlockID()] == true);
-  enqueuedBlocks[B->getBlockID()] = false;
-  return B;
+  return scratch[*declToIndex.getValueIndex(vd)];
 }
 
 //------------------------------------------------------------------------====//
@@ -329,6 +283,7 @@ public:
     Init,
     Use,
     SelfInit,
+    ConstRefUse,
     Ignore
   };
 
@@ -465,6 +420,15 @@ static bool isPointerToConst(const QualType &QT) {
   return QT->isAnyPointerType() && QT->getPointeeType().isConstQualified();
 }
 
+static bool hasTrivialBody(CallExpr *CE) {
+  if (FunctionDecl *FD = CE->getDirectCallee()) {
+    if (FunctionTemplateDecl *FTD = FD->getPrimaryTemplate())
+      return FTD->getTemplatedDecl()->hasTrivialBody();
+    return FD->hasTrivialBody();
+  }
+  return false;
+}
+
 void ClassifyRefs::VisitCallExpr(CallExpr *CE) {
   // Classify arguments to std::move as used.
   if (CE->isCallToStdMove()) {
@@ -473,15 +437,17 @@ void ClassifyRefs::VisitCallExpr(CallExpr *CE) {
       classify(CE->getArg(0), Use);
     return;
   }
-
-  // If a value is passed by const pointer or by const reference to a function,
+  bool isTrivialBody = hasTrivialBody(CE);
+  // If a value is passed by const pointer to a function,
   // we should not assume that it is initialized by the call, and we
   // conservatively do not assume that it is used.
+  // If a value is passed by const reference to a function,
+  // it should already be initialized.
   for (CallExpr::arg_iterator I = CE->arg_begin(), E = CE->arg_end();
        I != E; ++I) {
     if ((*I)->isGLValue()) {
       if ((*I)->getType().isConstQualified())
-        classify((*I), Ignore);
+        classify((*I), isTrivialBody ? Ignore : ConstRefUse);
     } else if (isPointerToConst((*I)->getType())) {
       const Expr *Ex = stripCasts(DC->getParentASTContext(), *I);
       const auto *UO = dyn_cast<UnaryOperator>(Ex);
@@ -530,12 +496,14 @@ public:
         handler(handler) {}
 
   void reportUse(const Expr *ex, const VarDecl *vd);
+  void reportConstRefUse(const Expr *ex, const VarDecl *vd);
 
   void VisitBinaryOperator(BinaryOperator *bo);
   void VisitBlockExpr(BlockExpr *be);
   void VisitCallExpr(CallExpr *ce);
   void VisitDeclRefExpr(DeclRefExpr *dr);
   void VisitDeclStmt(DeclStmt *ds);
+  void VisitGCCAsmStmt(GCCAsmStmt *as);
   void VisitObjCForCollectionStmt(ObjCForCollectionStmt *FS);
   void VisitObjCMessageExpr(ObjCMessageExpr *ME);
   void VisitOMPExecutableDirective(OMPExecutableDirective *ED);
@@ -705,6 +673,12 @@ void TransferFunctions::reportUse(const Expr *ex, const VarDecl *vd) {
     handler.handleUseOfUninitVariable(vd, getUninitUse(ex, vd, v));
 }
 
+void TransferFunctions::reportConstRefUse(const Expr *ex, const VarDecl *vd) {
+  Value v = vals[vd];
+  if (isAlwaysUninit(v))
+    handler.handleConstRefUseOfUninitVariable(vd, getUninitUse(ex, vd, v));
+}
+
 void TransferFunctions::VisitObjCForCollectionStmt(ObjCForCollectionStmt *FS) {
   // This represents an initialization of the 'element' value.
   if (const auto *DS = dyn_cast<DeclStmt>(FS->getElement())) {
@@ -772,7 +746,10 @@ void TransferFunctions::VisitDeclRefExpr(DeclRefExpr *dr) {
     vals[cast<VarDecl>(dr->getDecl())] = Initialized;
     break;
   case ClassifyRefs::SelfInit:
-      handler.handleSelfInit(cast<VarDecl>(dr->getDecl()));
+    handler.handleSelfInit(cast<VarDecl>(dr->getDecl()));
+    break;
+  case ClassifyRefs::ConstRefUse:
+    reportConstRefUse(dr, cast<VarDecl>(dr->getDecl()));
     break;
   }
 }
@@ -821,6 +798,29 @@ void TransferFunctions::VisitDeclStmt(DeclStmt *DS) {
   }
 }
 
+void TransferFunctions::VisitGCCAsmStmt(GCCAsmStmt *as) {
+  // An "asm goto" statement is a terminator that may initialize some variables.
+  if (!as->isAsmGoto())
+    return;
+
+  ASTContext &C = ac.getASTContext();
+  for (const Expr *O : as->outputs()) {
+    const Expr *Ex = stripCasts(C, O);
+
+    // Strip away any unary operators. Invalid l-values are reported by other
+    // semantic analysis passes.
+    while (const auto *UO = dyn_cast<UnaryOperator>(Ex))
+      Ex = stripCasts(C, UO->getSubExpr());
+
+    // Mark the variable as potentially uninitialized for those cases where
+    // it's used on an indirect path, where it's not guaranteed to be
+    // defined.
+    if (const VarDecl *VD = findVar(Ex).getDecl())
+      if (vals[VD] != Initialized)
+        vals[VD] = MayUninitialized;
+  }
+}
+
 void TransferFunctions::VisitObjCMessageExpr(ObjCMessageExpr *ME) {
   // If the Objective-C message expression is an implicit no-return that
   // is not modeled in the CFG, set the tracked dataflow values to Unknown.
@@ -855,9 +855,13 @@ static bool runOnBlock(const CFGBlock *block, const CFG &cfg,
   // Apply the transfer function.
   TransferFunctions tf(vals, cfg, block, ac, classification, handler);
   for (const auto &I : *block) {
-    if (Optional<CFGStmt> cs = I.getAs<CFGStmt>())
+    if (std::optional<CFGStmt> cs = I.getAs<CFGStmt>())
       tf.Visit(const_cast<Stmt *>(cs->getStmt()));
   }
+  CFGTerminator terminator = block->getTerminator();
+  if (auto *as = dyn_cast_or_null<GCCAsmStmt>(terminator.getStmt()))
+    if (as->isAsmGoto())
+      tf.Visit(as);
   return vals.updateValueVectorWithScratch(block);
 }
 
@@ -883,6 +887,12 @@ struct PruneBlocksHandler : public UninitVariablesHandler {
 
   void handleUseOfUninitVariable(const VarDecl *vd,
                                  const UninitUse &use) override {
+    hadUse[currentBlock] = true;
+    hadAnyUse = true;
+  }
+
+  void handleConstRefUseOfUninitVariable(const VarDecl *vd,
+                                         const UninitUse &use) override {
     hadUse[currentBlock] = true;
     hadAnyUse = true;
   }
@@ -924,7 +934,7 @@ void clang::runUninitializedVariablesAnalysis(
   }
 
   // Proceed with the workist.
-  DataflowWorklist worklist(cfg, *ac.getAnalysis<PostOrderCFGView>());
+  ForwardDataflowWorklist worklist(cfg, ac);
   llvm::BitVector previouslyVisited(cfg.getNumBlockIDs());
   worklist.enqueueSuccessors(&cfg.getEntry());
   llvm::BitVector wasAnalyzed(cfg.getNumBlockIDs(), false);

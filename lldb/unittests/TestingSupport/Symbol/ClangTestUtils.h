@@ -9,54 +9,63 @@
 #ifndef LLDB_UNITTESTS_TESTINGSUPPORT_SYMBOL_CLANGTESTUTILS_H
 #define LLDB_UNITTESTS_TESTINGSUPPORT_SYMBOL_CLANGTESTUTILS_H
 
+#include "Plugins/ExpressionParser/Clang/ClangUtil.h"
+#include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 #include "lldb/Host/HostInfo.h"
-#include "lldb/Symbol/ClangASTContext.h"
-#include "lldb/Symbol/ClangUtil.h"
 
 namespace lldb_private {
 namespace clang_utils {
-inline clang::DeclarationName getDeclarationName(ClangASTContext &ast,
+inline clang::DeclarationName getDeclarationName(TypeSystemClang &ast,
                                                  llvm::StringRef name) {
   clang::IdentifierInfo &II = ast.getASTContext().Idents.get(name);
   return ast.getASTContext().DeclarationNames.getIdentifier(&II);
 }
 
-inline std::unique_ptr<ClangASTContext> createAST() {
-  return std::make_unique<ClangASTContext>(HostInfo::GetTargetTriple());
-}
-
-inline CompilerType createRecord(ClangASTContext &ast, llvm::StringRef name) {
+inline CompilerType createRecord(TypeSystemClang &ast, llvm::StringRef name) {
   return ast.CreateRecordType(ast.getASTContext().getTranslationUnitDecl(),
+                              OptionalClangModuleID(),
                               lldb::AccessType::eAccessPublic, name, 0,
                               lldb::LanguageType::eLanguageTypeC);
 }
 
 /// Create a record with the given name and a field with the given type
 /// and name.
-inline CompilerType createRecordWithField(ClangASTContext &ast,
+inline CompilerType createRecordWithField(TypeSystemClang &ast,
                                           llvm::StringRef record_name,
                                           CompilerType field_type,
                                           llvm::StringRef field_name) {
   CompilerType t = createRecord(ast, record_name);
 
-  ClangASTContext::StartTagDeclarationDefinition(t);
+  TypeSystemClang::StartTagDeclarationDefinition(t);
   ast.AddFieldToRecordType(t, field_name, field_type,
                            lldb::AccessType::eAccessPublic, 7);
-  ClangASTContext::CompleteTagDeclarationDefinition(t);
+  TypeSystemClang::CompleteTagDeclarationDefinition(t);
 
   return t;
 }
 
-/// Constructs a ClangASTContext that contains a single RecordDecl that contains
+/// Simulates a Clang type system owned by a TypeSystemMap.
+class TypeSystemClangHolder {
+  std::shared_ptr<TypeSystemClang> m_ast;
+public:
+  TypeSystemClangHolder(const char *name)
+      : m_ast(std::make_shared<TypeSystemClang>(name,
+                                                HostInfo::GetTargetTriple())) {}
+  TypeSystemClang *GetAST() const { return m_ast.get(); }
+};
+  
+/// Constructs a TypeSystemClang that contains a single RecordDecl that contains
 /// a single FieldDecl. Utility class as this setup is a common starting point
 /// for unit test that exercise the ASTImporter.
 struct SourceASTWithRecord {
-  std::unique_ptr<ClangASTContext> ast;
+  std::unique_ptr<TypeSystemClangHolder> holder;
+  TypeSystemClang *ast;
   CompilerType record_type;
   clang::RecordDecl *record_decl = nullptr;
   clang::FieldDecl *field_decl = nullptr;
   SourceASTWithRecord() {
-    ast = createAST();
+    holder = std::make_unique<TypeSystemClangHolder>("test ASTContext");
+    ast = holder->GetAST();
     record_type = createRecordWithField(
         *ast, "Source", ast->GetBasicType(lldb::BasicType::eBasicTypeChar),
         "a_field");

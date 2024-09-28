@@ -19,11 +19,12 @@
 #include "llvm/ADT/SetVector.h"
 
 namespace polly {
-using namespace llvm;
+using llvm::GlobalValue;
+using llvm::GlobalVariable;
 
 /// This ParallelLoopGenerator subclass handles the generation of parallelized
 /// code, utilizing the LLVM OpenMP library.
-class ParallelLoopGeneratorKMP : public ParallelLoopGenerator {
+class ParallelLoopGeneratorKMP final : public ParallelLoopGenerator {
 public:
   /// Create a parallel loop generator for the current function.
   ParallelLoopGeneratorKMP(PollyIRBuilder &Builder, LoopInfo &LI,
@@ -69,10 +70,10 @@ public:
   void createCallSpawnThreads(Value *SubFn, Value *SubFnParam, Value *LB,
                               Value *UB, Value *Stride);
 
-  void deployParallelExecution(Value *SubFn, Value *SubFnParam, Value *LB,
+  void deployParallelExecution(Function *SubFn, Value *SubFnParam, Value *LB,
                                Value *UB, Value *Stride) override;
 
-  virtual Function *prepareSubFnDefinition(Function *F) const override;
+  Function *prepareSubFnDefinition(Function *F) const override;
 
   std::tuple<Value *, Function *> createSubFn(Value *Stride, AllocaInst *Struct,
                                               SetVector<Value *> UsedValues,

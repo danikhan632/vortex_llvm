@@ -119,7 +119,7 @@ Now we create the Importer and do the import:
   llvm::Expected<Decl *> ImportedOrErr = Importer.Import(From);
 
 The ``Import`` call returns with ``llvm::Expected``, so, we must check for any error.
-Please refer to the `error handling <http://llvm.org/docs/ProgrammersManual.html#recoverable-errors>`_ documentation for details.
+Please refer to the `error handling <https://llvm.org/docs/ProgrammersManual.html#recoverable-errors>`_ documentation for details.
 
 .. code-block:: cpp
 
@@ -468,7 +468,7 @@ Note, there may be several different ASTImporter objects which import into the s
         cxxRecordDecl(hasName("Y"), isDefinition()), ToUnit);
     ToYDef->dump();
     // An error is set for "ToYDef" in the shared state.
-    Optional<ImportError> OptErr =
+    Optional<ASTImportError> OptErr =
         ImporterState->getImportDeclErrorIfAny(ToYDef);
     assert(OptErr);
 

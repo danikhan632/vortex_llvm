@@ -1,36 +1,51 @@
-add_llvm_library(MLIRTestTransforms
-  TestCallGraph.cpp
+set(LLVM_OPTIONAL_SOURCES 
+  TestDialectConversion.cpp)
+set(MLIRTestTransformsPDLDep)
+set(MLIRTestTransformsPDLSrc)
+if(MLIR_ENABLE_PDL_IN_PATTERNMATCH)
+add_mlir_pdll_library(MLIRTestDialectConversionPDLLPatternsIncGen
+  TestDialectConversion.pdll
+  TestDialectConversionPDLLPatterns.h.inc
+
+  EXTRA_INCLUDES
+  ${CMAKE_CURRENT_SOURCE_DIR}/../Dialect/Test
+  ${CMAKE_CURRENT_BINARY_DIR}/../Dialect/Test
+  )
+  set(MLIRTestTransformsPDLSrc
+    TestDialectConversion.cpp)
+  set(MLIRTestTransformsPDLDep
+    MLIRTestDialectConversionPDLLPatternsIncGen)
+endif()
+
+# Exclude tests from libMLIR.so
+add_mlir_library(MLIRTestTransforms
+  TestCommutativityUtils.cpp
   TestConstantFold.cpp
-  TestLoopFusion.cpp
-  TestGpuMemoryPromotion.cpp
+  TestControlFlowSink.cpp
   TestInlining.cpp
-  TestLinalgTransforms.cpp
-  TestLiveness.cpp
-  TestLoopMapping.cpp
-  TestLoopParametricTiling.cpp
-  TestOpaqueLoc.cpp
-  TestMemRefStrideCalculation.cpp
-  TestVectorToLoopsConversion.cpp
-  TestVectorTransforms.cpp
-  TestVectorizationUtils.cpp
+  TestIntRangeInference.cpp
+  TestMakeIsolatedFromAbove.cpp
+  TestTopologicalSort.cpp
+  ${MLIRTestTransformsPDLSrc}
+
+  EXCLUDE_FROM_LIBMLIR
 
   ADDITIONAL_HEADER_DIRS
   ${MLIR_MAIN_INCLUDE_DIR}/mlir/Transforms
-  )
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../TestDialect)
-include_directories(${CMAKE_CURRENT_BINARY_DIR}/../TestDialect)
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../DeclarativeTransforms)
-include_directories(${CMAKE_CURRENT_BINARY_DIR}/../DeclarativeTransforms)
-add_dependencies(MLIRTestTransforms MLIRStandardOpsIncGen)
-add_dependencies(MLIRTestTransforms MLIRTestLinalgTransformPatternsIncGen)
-add_dependencies(MLIRTestTransforms MLIRTestVectorTransformPatternsIncGen)
-target_link_libraries(MLIRTestTransforms
-  MLIRAffineOps
+
+  DEPENDS
+  ${MLIRTestTransformsPDLDep}
+
+  LINK_LIBS PUBLIC
   MLIRAnalysis
-  MLIREDSC
-  MLIRGPU
-  MLIRLoopOps
-  MLIRPass
+  MLIRFuncDialect
+  MLIRInferIntRangeInterface
   MLIRTestDialect
-  MLIRVectorOps
+  MLIRTransforms
+  )
+
+target_include_directories(MLIRTestTransforms
+  PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../Dialect/Test
+  ${CMAKE_CURRENT_BINARY_DIR}/../Dialect/Test
   )

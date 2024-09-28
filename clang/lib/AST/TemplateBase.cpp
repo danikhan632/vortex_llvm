@@ -16,6 +16,7 @@
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclBase.h"
 #include "clang/AST/DeclTemplate.h"
+#include "clang/AST/DependenceFlags.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/PrettyPrinter.h"
@@ -28,8 +29,8 @@
 #include "clang/Basic/SourceLocation.h"
 #include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/FoldingSet.h"
-#include "llvm/ADT/None.h"
 #include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Compiler.h"
@@ -39,6 +40,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <optional>
 
 using namespace clang;
 
@@ -49,43 +51,137 @@ using namespace clang;
 /// \param Out the raw_ostream instance to use for printing.
 ///
 /// \param Policy the printing policy for EnumConstantDecl printing.
-static void printIntegral(const TemplateArgument &TemplArg,
-                          raw_ostream &Out, const PrintingPolicy& Policy) {
+///
+/// \param IncludeType If set, ensure that the type of the expression printed
+/// matches the type of the template argument.
+static void printIntegral(const TemplateArgument &TemplArg, raw_ostream &Out,
+                          const PrintingPolicy &Policy, bool IncludeType) {
   const Type *T = TemplArg.getIntegralType().getTypePtr();
   const llvm::APSInt &Val = TemplArg.getAsIntegral();
 
-  if (const EnumType *ET = T->getAs<EnumType>()) {
-    for (const EnumConstantDecl* ECD : ET->getDecl()->enumerators()) {
-      // In Sema::CheckTemplateArugment, enum template arguments value are
-      // extended to the size of the integer underlying the enum type.  This
-      // may create a size difference between the enum value and template
-      // argument value, requiring isSameValue here instead of operator==.
-      if (llvm::APSInt::isSameValue(ECD->getInitVal(), Val)) {
-        ECD->printQualifiedName(Out, Policy);
-        return;
+  if (Policy.UseEnumerators) {
+    if (const EnumType *ET = T->getAs<EnumType>()) {
+      for (const EnumConstantDecl *ECD : ET->getDecl()->enumerators()) {
+        // In Sema::CheckTemplateArugment, enum template arguments value are
+        // extended to the size of the integer underlying the enum type.  This
+        // may create a size difference between the enum value and template
+        // argument value, requiring isSameValue here instead of operator==.
+        if (llvm::APSInt::isSameValue(ECD->getInitVal(), Val)) {
+          ECD->printQualifiedName(Out, Policy);
+          return;
+        }
       }
     }
   }
 
-  if (T->isBooleanType() && !Policy.MSVCFormatting) {
-    Out << (Val.getBoolValue() ? "true" : "false");
+  if (Policy.MSVCFormatting)
+    IncludeType = false;
+
+  if (T->isBooleanType()) {
+    if (!Policy.MSVCFormatting)
+      Out << (Val.getBoolValue() ? "true" : "false");
+    else
+      Out << Val;
   } else if (T->isCharType()) {
-    const char Ch = Val.getZExtValue();
-    Out << ((Ch == '\'') ? "'\\" : "'");
-    Out.write_escaped(StringRef(&Ch, 1), /*UseHexEscapes=*/ true);
-    Out << "'";
-  } else {
+    if (IncludeType) {
+      if (T->isSpecificBuiltinType(BuiltinType::SChar))
+        Out << "(signed char)";
+      else if (T->isSpecificBuiltinType(BuiltinType::UChar))
+        Out << "(unsigned char)";
+    }
+    CharacterLiteral::print(Val.getZExtValue(), CharacterLiteralKind::Ascii,
+                            Out);
+  } else if (T->isAnyCharacterType() && !Policy.MSVCFormatting) {
+    CharacterLiteralKind Kind;
+    if (T->isWideCharType())
+      Kind = CharacterLiteralKind::Wide;
+    else if (T->isChar8Type())
+      Kind = CharacterLiteralKind::UTF8;
+    else if (T->isChar16Type())
+      Kind = CharacterLiteralKind::UTF16;
+    else if (T->isChar32Type())
+      Kind = CharacterLiteralKind::UTF32;
+    else
+      Kind = CharacterLiteralKind::Ascii;
+    CharacterLiteral::print(Val.getExtValue(), Kind, Out);
+  } else if (IncludeType) {
+    if (const auto *BT = T->getAs<BuiltinType>()) {
+      switch (BT->getKind()) {
+      case BuiltinType::ULongLong:
+        Out << Val << "ULL";
+        break;
+      case BuiltinType::LongLong:
+        Out << Val << "LL";
+        break;
+      case BuiltinType::ULong:
+        Out << Val << "UL";
+        break;
+      case BuiltinType::Long:
+        Out << Val << "L";
+        break;
+      case BuiltinType::UInt:
+        Out << Val << "U";
+        break;
+      case BuiltinType::Int:
+        Out << Val;
+        break;
+      default:
+        Out << "(" << T->getCanonicalTypeInternal().getAsString(Policy) << ")"
+            << Val;
+        break;
+      }
+    } else
+      Out << "(" << T->getCanonicalTypeInternal().getAsString(Policy) << ")"
+          << Val;
+  } else
     Out << Val;
+}
+
+static unsigned getArrayDepth(QualType type) {
+  unsigned count = 0;
+  while (const auto *arrayType = type->getAsArrayTypeUnsafe()) {
+    count++;
+    type = arrayType->getElementType();
   }
+  return count;
+}
+
+static bool needsAmpersandOnTemplateArg(QualType paramType, QualType argType) {
+  // Generally, if the parameter type is a pointer, we must be taking the
+  // address of something and need a &.  However, if the argument is an array,
+  // this could be implicit via array-to-pointer decay.
+  if (!paramType->isPointerType())
+    return paramType->isMemberPointerType();
+  if (argType->isArrayType())
+    return getArrayDepth(argType) == getArrayDepth(paramType->getPointeeType());
+  return true;
 }
 
 //===----------------------------------------------------------------------===//
 // TemplateArgument Implementation
 //===----------------------------------------------------------------------===//
 
-TemplateArgument::TemplateArgument(ASTContext &Ctx, const llvm::APSInt &Value,
-                                   QualType Type) {
+void TemplateArgument::initFromType(QualType T, bool IsNullPtr,
+                                    bool IsDefaulted) {
+  TypeOrValue.Kind = IsNullPtr ? NullPtr : Type;
+  TypeOrValue.IsDefaulted = IsDefaulted;
+  TypeOrValue.V = reinterpret_cast<uintptr_t>(T.getAsOpaquePtr());
+}
+
+void TemplateArgument::initFromDeclaration(ValueDecl *D, QualType QT,
+                                           bool IsDefaulted) {
+  assert(D && "Expected decl");
+  DeclArg.Kind = Declaration;
+  DeclArg.IsDefaulted = IsDefaulted;
+  DeclArg.QT = QT.getAsOpaquePtr();
+  DeclArg.D = D;
+}
+
+void TemplateArgument::initFromIntegral(const ASTContext &Ctx,
+                                        const llvm::APSInt &Value,
+                                        QualType Type, bool IsDefaulted) {
   Integer.Kind = Integral;
+  Integer.IsDefaulted = IsDefaulted;
   // Copy the APSInt value into our decomposed form.
   Integer.BitWidth = Value.getBitWidth();
   Integer.IsUnsigned = Value.isUnsigned();
@@ -102,6 +198,56 @@ TemplateArgument::TemplateArgument(ASTContext &Ctx, const llvm::APSInt &Value,
   Integer.Type = Type.getAsOpaquePtr();
 }
 
+void TemplateArgument::initFromStructural(const ASTContext &Ctx, QualType Type,
+                                          const APValue &V, bool IsDefaulted) {
+  Value.Kind = StructuralValue;
+  Value.IsDefaulted = IsDefaulted;
+  Value.Value = new (Ctx) APValue(V);
+  Ctx.addDestruction(Value.Value);
+  Value.Type = Type.getAsOpaquePtr();
+}
+
+TemplateArgument::TemplateArgument(const ASTContext &Ctx,
+                                   const llvm::APSInt &Value, QualType Type,
+                                   bool IsDefaulted) {
+  initFromIntegral(Ctx, Value, Type, IsDefaulted);
+}
+
+static const ValueDecl *getAsSimpleValueDeclRef(const ASTContext &Ctx,
+                                                QualType T, const APValue &V) {
+  // Pointers to members are relatively easy.
+  if (V.isMemberPointer() && V.getMemberPointerPath().empty())
+    return V.getMemberPointerDecl();
+
+  // We model class non-type template parameters as their template parameter
+  // object declaration.
+  if (V.isStruct() || V.isUnion())
+    return Ctx.getTemplateParamObjectDecl(T, V);
+
+  // Pointers and references with an empty path use the special 'Declaration'
+  // representation.
+  if (V.isLValue() && V.hasLValuePath() && V.getLValuePath().empty() &&
+      !V.isLValueOnePastTheEnd())
+    return V.getLValueBase().dyn_cast<const ValueDecl *>();
+
+  // Everything else uses the 'structural' representation.
+  return nullptr;
+}
+
+TemplateArgument::TemplateArgument(const ASTContext &Ctx, QualType Type,
+                                   const APValue &V, bool IsDefaulted) {
+  if (Type->isIntegralOrEnumerationType() && V.isInt())
+    initFromIntegral(Ctx, V.getInt(), Type, IsDefaulted);
+  else if ((V.isLValue() && V.isNullPointer()) ||
+           (V.isMemberPointer() && !V.getMemberPointerDecl()))
+    initFromType(Type, /*isNullPtr=*/true, IsDefaulted);
+  else if (const ValueDecl *VD = getAsSimpleValueDeclRef(Ctx, Type, V))
+    // FIXME: The Declaration form should expose a const ValueDecl*.
+    initFromDeclaration(const_cast<ValueDecl *>(VD), Type, IsDefaulted);
+  else
+    initFromStructural(Ctx, Type, V, IsDefaulted);
+}
+
 TemplateArgument
 TemplateArgument::CreatePackCopy(ASTContext &Context,
                                  ArrayRef<TemplateArgument> Args) {
@@ -111,84 +257,61 @@ TemplateArgument::CreatePackCopy(ASTContext &Context,
   return TemplateArgument(Args.copy(Context));
 }
 
-bool TemplateArgument::isDependent() const {
+TemplateArgumentDependence TemplateArgument::getDependence() const {
+  auto Deps = TemplateArgumentDependence::None;
   switch (getKind()) {
   case Null:
     llvm_unreachable("Should not have a NULL template argument");
 
   case Type:
-    return getAsType()->isDependentType() ||
-           isa<PackExpansionType>(getAsType());
+    Deps = toTemplateArgumentDependence(getAsType()->getDependence());
+    if (isa<PackExpansionType>(getAsType()))
+      Deps |= TemplateArgumentDependence::Dependent;
+    return Deps;
 
   case Template:
-    return getAsTemplate().isDependent();
+    return toTemplateArgumentDependence(getAsTemplate().getDependence());
 
   case TemplateExpansion:
-    return true;
+    return TemplateArgumentDependence::Dependent |
+           TemplateArgumentDependence::Instantiation;
 
-  case Declaration:
-    if (DeclContext *DC = dyn_cast<DeclContext>(getAsDecl()))
-      return DC->isDependentContext();
-    return getAsDecl()->getDeclContext()->isDependentContext();
+  case Declaration: {
+    auto *DC = dyn_cast<DeclContext>(getAsDecl());
+    if (!DC)
+      DC = getAsDecl()->getDeclContext();
+    if (DC->isDependentContext())
+      Deps = TemplateArgumentDependence::Dependent |
+             TemplateArgumentDependence::Instantiation;
+    return Deps;
+  }
 
   case NullPtr:
-    return false;
-
   case Integral:
-    // Never dependent
-    return false;
+  case StructuralValue:
+    return TemplateArgumentDependence::None;
 
   case Expression:
-    return (getAsExpr()->isTypeDependent() || getAsExpr()->isValueDependent() ||
-            isa<PackExpansionExpr>(getAsExpr()));
+    Deps = toTemplateArgumentDependence(getAsExpr()->getDependence());
+    if (isa<PackExpansionExpr>(getAsExpr()))
+      Deps |= TemplateArgumentDependence::Dependent |
+              TemplateArgumentDependence::Instantiation;
+    return Deps;
 
   case Pack:
     for (const auto &P : pack_elements())
-      if (P.isDependent())
-        return true;
-    return false;
+      Deps |= P.getDependence();
+    return Deps;
   }
+  llvm_unreachable("unhandled ArgKind");
+}
 
-  llvm_unreachable("Invalid TemplateArgument Kind!");
+bool TemplateArgument::isDependent() const {
+  return getDependence() & TemplateArgumentDependence::Dependent;
 }
 
 bool TemplateArgument::isInstantiationDependent() const {
-  switch (getKind()) {
-  case Null:
-    llvm_unreachable("Should not have a NULL template argument");
-
-  case Type:
-    return getAsType()->isInstantiationDependentType();
-
-  case Template:
-    return getAsTemplate().isInstantiationDependent();
-
-  case TemplateExpansion:
-    return true;
-
-  case Declaration:
-    if (DeclContext *DC = dyn_cast<DeclContext>(getAsDecl()))
-      return DC->isDependentContext();
-    return getAsDecl()->getDeclContext()->isDependentContext();
-
-  case NullPtr:
-    return false;
-
-  case Integral:
-    // Never dependent
-    return false;
-
-  case Expression:
-    return getAsExpr()->isInstantiationDependent();
-
-  case Pack:
-    for (const auto &P : pack_elements())
-      if (P.isInstantiationDependent())
-        return true;
-    return false;
-  }
-
-  llvm_unreachable("Invalid TemplateArgument Kind!");
+  return getDependence() & TemplateArgumentDependence::Instantiation;
 }
 
 bool TemplateArgument::isPackExpansion() const {
@@ -196,6 +319,7 @@ bool TemplateArgument::isPackExpansion() const {
   case Null:
   case Declaration:
   case Integral:
+  case StructuralValue:
   case Pack:
   case Template:
   case NullPtr:
@@ -215,46 +339,15 @@ bool TemplateArgument::isPackExpansion() const {
 }
 
 bool TemplateArgument::containsUnexpandedParameterPack() const {
-  switch (getKind()) {
-  case Null:
-  case Declaration:
-  case Integral:
-  case TemplateExpansion:
-  case NullPtr:
-    break;
-
-  case Type:
-    if (getAsType()->containsUnexpandedParameterPack())
-      return true;
-    break;
-
-  case Template:
-    if (getAsTemplate().containsUnexpandedParameterPack())
-      return true;
-    break;
-
-  case Expression:
-    if (getAsExpr()->containsUnexpandedParameterPack())
-      return true;
-    break;
-
-  case Pack:
-    for (const auto &P : pack_elements())
-      if (P.containsUnexpandedParameterPack())
-        return true;
-
-    break;
-  }
-
-  return false;
+  return getDependence() & TemplateArgumentDependence::UnexpandedPack;
 }
 
-Optional<unsigned> TemplateArgument::getNumTemplateExpansions() const {
+std::optional<unsigned> TemplateArgument::getNumTemplateExpansions() const {
   assert(getKind() == TemplateExpansion);
   if (TemplateArg.NumExpansions)
     return TemplateArg.NumExpansions - 1;
 
-  return None;
+  return std::nullopt;
 }
 
 QualType TemplateArgument::getNonTypeTemplateArgumentType() const {
@@ -277,6 +370,9 @@ QualType TemplateArgument::getNonTypeTemplateArgumentType() const {
 
   case TemplateArgument::NullPtr:
     return getNullPtrType();
+
+  case TemplateArgument::StructuralValue:
+    return getStructuralValueType();
   }
 
   llvm_unreachable("Invalid TemplateArgument Kind!");
@@ -298,30 +394,25 @@ void TemplateArgument::Profile(llvm::FoldingSetNodeID &ID,
     break;
 
   case Declaration:
-    ID.AddPointer(getAsDecl()? getAsDecl()->getCanonicalDecl() : nullptr);
+    getParamTypeForDecl().Profile(ID);
+    ID.AddPointer(getAsDecl());
     break;
 
+  case TemplateExpansion:
+    ID.AddInteger(TemplateArg.NumExpansions);
+    [[fallthrough]];
   case Template:
-  case TemplateExpansion: {
-    TemplateName Template = getAsTemplateOrTemplatePattern();
-    if (TemplateTemplateParmDecl *TTP
-          = dyn_cast_or_null<TemplateTemplateParmDecl>(
-                                                Template.getAsTemplateDecl())) {
-      ID.AddBoolean(true);
-      ID.AddInteger(TTP->getDepth());
-      ID.AddInteger(TTP->getPosition());
-      ID.AddBoolean(TTP->isParameterPack());
-    } else {
-      ID.AddBoolean(false);
-      ID.AddPointer(Context.getCanonicalTemplateName(Template)
-                                                          .getAsVoidPointer());
-    }
+    ID.AddPointer(TemplateArg.Name);
     break;
-  }
 
   case Integral:
-    getAsIntegral().Profile(ID);
     getIntegralType().Profile(ID);
+    getAsIntegral().Profile(ID);
+    break;
+
+  case StructuralValue:
+    getStructuralValueType().Profile(ID);
+    getAsStructuralValue().Profile(ID);
     break;
 
   case Expression:
@@ -342,17 +433,32 @@ bool TemplateArgument::structurallyEquals(const TemplateArgument &Other) const {
   case Null:
   case Type:
   case Expression:
-  case Template:
-  case TemplateExpansion:
   case NullPtr:
     return TypeOrValue.V == Other.TypeOrValue.V;
 
+  case Template:
+  case TemplateExpansion:
+    return TemplateArg.Name == Other.TemplateArg.Name &&
+           TemplateArg.NumExpansions == Other.TemplateArg.NumExpansions;
+
   case Declaration:
-    return getAsDecl() == Other.getAsDecl();
+    return getAsDecl() == Other.getAsDecl() &&
+           getParamTypeForDecl() == Other.getParamTypeForDecl();
 
   case Integral:
     return getIntegralType() == Other.getIntegralType() &&
            getAsIntegral() == Other.getAsIntegral();
+
+  case StructuralValue: {
+    if (getStructuralValueType().getCanonicalType() !=
+        Other.getStructuralValueType().getCanonicalType())
+      return false;
+
+    llvm::FoldingSetNodeID A, B;
+    getAsStructuralValue().Profile(A);
+    Other.getAsStructuralValue().Profile(B);
+    return A == B;
+  }
 
   case Pack:
     if (Args.NumArgs != Other.Args.NumArgs) return false;
@@ -380,6 +486,7 @@ TemplateArgument TemplateArgument::getPackExpansionPattern() const {
 
   case Declaration:
   case Integral:
+  case StructuralValue:
   case Pack:
   case Null:
   case Template:
@@ -390,8 +497,9 @@ TemplateArgument TemplateArgument::getPackExpansionPattern() const {
   llvm_unreachable("Invalid TemplateArgument Kind!");
 }
 
-void TemplateArgument::print(const PrintingPolicy &Policy,
-                             raw_ostream &Out) const {
+void TemplateArgument::print(const PrintingPolicy &Policy, raw_ostream &Out,
+                             bool IncludeType) const {
+
   switch (getKind()) {
   case Null:
     Out << "(no value)";
@@ -406,22 +514,32 @@ void TemplateArgument::print(const PrintingPolicy &Policy,
 
   case Declaration: {
     NamedDecl *ND = getAsDecl();
-    Out << '&';
-    if (ND->getDeclName()) {
-      // FIXME: distinguish between pointer and reference args?
-      ND->printQualifiedName(Out);
-    } else {
-      Out << "(anonymous)";
+    if (getParamTypeForDecl()->isRecordType()) {
+      if (auto *TPO = dyn_cast<TemplateParamObjectDecl>(ND)) {
+        TPO->getType().getUnqualifiedType().print(Out, Policy);
+        TPO->printAsInit(Out, Policy);
+        break;
+      }
     }
+    if (auto *VD = dyn_cast<ValueDecl>(ND)) {
+      if (needsAmpersandOnTemplateArg(getParamTypeForDecl(), VD->getType()))
+        Out << "&";
+    }
+    ND->printQualifiedName(Out);
     break;
   }
 
+  case StructuralValue:
+    getAsStructuralValue().printPretty(Out, Policy, getStructuralValueType());
+    break;
+
   case NullPtr:
+    // FIXME: Include the type if it's not obvious from the context.
     Out << "nullptr";
     break;
 
   case Template:
-    getAsTemplate().print(Out, Policy);
+    getAsTemplate().print(Out, Policy, TemplateName::Qualified::Fully);
     break;
 
   case TemplateExpansion:
@@ -430,7 +548,7 @@ void TemplateArgument::print(const PrintingPolicy &Policy,
     break;
 
   case Integral:
-    printIntegral(*this, Out, Policy);
+    printIntegral(*this, Out, Policy, IncludeType);
     break;
 
   case Expression:
@@ -446,7 +564,7 @@ void TemplateArgument::print(const PrintingPolicy &Policy,
       else
         Out << ", ";
 
-      P.print(Policy, Out);
+      P.print(Policy, Out, IncludeType);
     }
     Out << ">";
     break;
@@ -457,7 +575,7 @@ void TemplateArgument::dump(raw_ostream &Out) const {
   LangOptions LO; // FIXME! see also TemplateName::dump().
   LO.CPlusPlus = true;
   LO.Bool = true;
-  print(PrintingPolicy(LO), Out);
+  print(PrintingPolicy(LO), Out, /*IncludeType*/ true);
 }
 
 LLVM_DUMP_METHOD void TemplateArgument::dump() const { dump(llvm::errs()); }
@@ -498,6 +616,9 @@ SourceRange TemplateArgumentLoc::getSourceRange() const {
   case TemplateArgument::Integral:
     return getSourceIntegralExpression()->getSourceRange();
 
+  case TemplateArgument::StructuralValue:
+    return getSourceStructuralValueExpression()->getSourceRange();
+
   case TemplateArgument::Pack:
   case TemplateArgument::Null:
     return SourceRange();
@@ -506,8 +627,8 @@ SourceRange TemplateArgumentLoc::getSourceRange() const {
   llvm_unreachable("Invalid TemplateArgument Kind!");
 }
 
-const DiagnosticBuilder &clang::operator<<(const DiagnosticBuilder &DB,
-                                           const TemplateArgument &Arg) {
+template <typename T>
+static const T &DiagTemplateArg(const T &DB, const TemplateArgument &Arg) {
   switch (Arg.getKind()) {
   case TemplateArgument::Null:
     // This is bad, but not as bad as crashing because of argument
@@ -524,7 +645,19 @@ const DiagnosticBuilder &clang::operator<<(const DiagnosticBuilder &DB,
     return DB << "nullptr";
 
   case TemplateArgument::Integral:
-    return DB << Arg.getAsIntegral().toString(10);
+    return DB << toString(Arg.getAsIntegral(), 10);
+
+  case TemplateArgument::StructuralValue: {
+    // FIXME: We're guessing at LangOptions!
+    SmallString<32> Str;
+    llvm::raw_svector_ostream OS(Str);
+    LangOptions LangOpts;
+    LangOpts.CPlusPlus = true;
+    PrintingPolicy Policy(LangOpts);
+    Arg.getAsStructuralValue().printPretty(OS, Policy,
+                                           Arg.getStructuralValueType());
+    return DB << OS.str();
+  }
 
   case TemplateArgument::Template:
     return DB << Arg.getAsTemplate();
@@ -552,7 +685,7 @@ const DiagnosticBuilder &clang::operator<<(const DiagnosticBuilder &DB,
     LangOptions LangOpts;
     LangOpts.CPlusPlus = true;
     PrintingPolicy Policy(LangOpts);
-    Arg.print(Policy, OS);
+    Arg.print(Policy, OS, /*IncludeType*/ true);
     return DB << OS.str();
   }
   }
@@ -560,10 +693,37 @@ const DiagnosticBuilder &clang::operator<<(const DiagnosticBuilder &DB,
   llvm_unreachable("Invalid TemplateArgument Kind!");
 }
 
+const StreamingDiagnostic &clang::operator<<(const StreamingDiagnostic &DB,
+                                             const TemplateArgument &Arg) {
+  return DiagTemplateArg(DB, Arg);
+}
+
+clang::TemplateArgumentLocInfo::TemplateArgumentLocInfo(
+    ASTContext &Ctx, NestedNameSpecifierLoc QualifierLoc,
+    SourceLocation TemplateNameLoc, SourceLocation EllipsisLoc) {
+  TemplateTemplateArgLocInfo *Template = new (Ctx) TemplateTemplateArgLocInfo;
+  Template->Qualifier = QualifierLoc.getNestedNameSpecifier();
+  Template->QualifierLocData = QualifierLoc.getOpaqueData();
+  Template->TemplateNameLoc = TemplateNameLoc;
+  Template->EllipsisLoc = EllipsisLoc;
+  Pointer = Template;
+}
+
 const ASTTemplateArgumentListInfo *
 ASTTemplateArgumentListInfo::Create(const ASTContext &C,
                                     const TemplateArgumentListInfo &List) {
   std::size_t size = totalSizeToAlloc<TemplateArgumentLoc>(List.size());
+  void *Mem = C.Allocate(size, alignof(ASTTemplateArgumentListInfo));
+  return new (Mem) ASTTemplateArgumentListInfo(List);
+}
+
+const ASTTemplateArgumentListInfo *
+ASTTemplateArgumentListInfo::Create(const ASTContext &C,
+                                    const ASTTemplateArgumentListInfo *List) {
+  if (!List)
+    return nullptr;
+  std::size_t size =
+      totalSizeToAlloc<TemplateArgumentLoc>(List->getNumTemplateArgs());
   void *Mem = C.Allocate(size, alignof(ASTTemplateArgumentListInfo));
   return new (Mem) ASTTemplateArgumentListInfo(List);
 }
@@ -577,6 +737,17 @@ ASTTemplateArgumentListInfo::ASTTemplateArgumentListInfo(
   TemplateArgumentLoc *ArgBuffer = getTrailingObjects<TemplateArgumentLoc>();
   for (unsigned i = 0; i != NumTemplateArgs; ++i)
     new (&ArgBuffer[i]) TemplateArgumentLoc(Info[i]);
+}
+
+ASTTemplateArgumentListInfo::ASTTemplateArgumentListInfo(
+    const ASTTemplateArgumentListInfo *Info) {
+  LAngleLoc = Info->getLAngleLoc();
+  RAngleLoc = Info->getRAngleLoc();
+  NumTemplateArgs = Info->getNumTemplateArgs();
+
+  TemplateArgumentLoc *ArgBuffer = getTrailingObjects<TemplateArgumentLoc>();
+  for (unsigned i = 0; i != NumTemplateArgs; ++i)
+    new (&ArgBuffer[i]) TemplateArgumentLoc((*Info)[i]);
 }
 
 void ASTTemplateKWAndArgsInfo::initializeFrom(
@@ -601,20 +772,14 @@ void ASTTemplateKWAndArgsInfo::initializeFrom(SourceLocation TemplateKWLoc) {
 
 void ASTTemplateKWAndArgsInfo::initializeFrom(
     SourceLocation TemplateKWLoc, const TemplateArgumentListInfo &Info,
-    TemplateArgumentLoc *OutArgArray, bool &Dependent,
-    bool &InstantiationDependent, bool &ContainsUnexpandedParameterPack) {
+    TemplateArgumentLoc *OutArgArray, TemplateArgumentDependence &Deps) {
   this->TemplateKWLoc = TemplateKWLoc;
   LAngleLoc = Info.getLAngleLoc();
   RAngleLoc = Info.getRAngleLoc();
   NumTemplateArgs = Info.size();
 
   for (unsigned i = 0; i != NumTemplateArgs; ++i) {
-    Dependent = Dependent || Info[i].getArgument().isDependent();
-    InstantiationDependent = InstantiationDependent ||
-                             Info[i].getArgument().isInstantiationDependent();
-    ContainsUnexpandedParameterPack =
-        ContainsUnexpandedParameterPack ||
-        Info[i].getArgument().containsUnexpandedParameterPack();
+    Deps |= Info[i].getArgument().getDependence();
 
     new (&OutArgArray[i]) TemplateArgumentLoc(Info[i]);
   }

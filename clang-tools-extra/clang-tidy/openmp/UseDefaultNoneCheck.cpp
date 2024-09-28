@@ -17,22 +17,15 @@
 
 using namespace clang::ast_matchers;
 
-namespace clang {
-namespace tidy {
-namespace openmp {
+namespace clang::tidy::openmp {
 
 void UseDefaultNoneCheck::registerMatchers(MatchFinder *Finder) {
-  // Don't register the check if OpenMP is not enabled; the OpenMP pragmas are
-  // completely ignored then, so no OpenMP entires will be present in the AST.
-  if (!getLangOpts().OpenMP)
-    return;
-
   Finder->addMatcher(
       ompExecutableDirective(
-          allOf(isAllowedToContainClauseKind(OMPC_default),
-                anyOf(unless(hasAnyClause(ompDefaultClause())),
-                      hasAnyClause(ompDefaultClause(unless(isNoneKind()))
-                                       .bind("clause")))))
+          isAllowedToContainClauseKind(llvm::omp::OMPC_default),
+          anyOf(unless(hasAnyClause(ompDefaultClause())),
+                hasAnyClause(
+                    ompDefaultClause(unless(isNoneKind())).bind("clause"))))
           .bind("directive"),
       this);
 }
@@ -48,7 +41,7 @@ void UseDefaultNoneCheck::check(const MatchFinder::MatchResult &Result) {
          "'default(none)' clause instead")
         << getOpenMPDirectiveName(Directive->getDirectiveKind())
         << getOpenMPSimpleClauseTypeName(Clause->getClauseKind(),
-                                         Clause->getDefaultKind());
+                                         unsigned(Clause->getDefaultKind()));
     diag(Clause->getBeginLoc(), "existing 'default' clause specified here",
          DiagnosticIDs::Note);
     return;
@@ -60,6 +53,4 @@ void UseDefaultNoneCheck::check(const MatchFinder::MatchResult &Result) {
       << getOpenMPDirectiveName(Directive->getDirectiveKind());
 }
 
-} // namespace openmp
-} // namespace tidy
-} // namespace clang
+} // namespace clang::tidy::openmp

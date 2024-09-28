@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_RegisterContextMinidump_x86_32_h_
-#define liblldb_RegisterContextMinidump_x86_32_h_
+#ifndef LLDB_SOURCE_PLUGINS_PROCESS_MINIDUMP_REGISTERCONTEXTMINIDUMP_X86_32_H
+#define LLDB_SOURCE_PLUGINS_PROCESS_MINIDUMP_REGISTERCONTEXTMINIDUMP_X86_32_H
 
 #include "MinidumpTypes.h"
 
@@ -99,7 +99,7 @@ struct MinidumpContext_x86_32 {
 
   // The next field is included with
   // MinidumpContext_x86_32_Flags::ExtendedRegisters
-  // It contains vector (MMX/SSE) registers.  It it laid out in the
+  // It contains vector (MMX/SSE) registers.  It is laid out in the
   // format used by the fxsave and fsrstor instructions, so it includes
   // a copy of the x87 floating-point registers as well.  See FXSAVE in
   // "Intel Architecture Software Developer's Manual, Volume 2."
@@ -132,4 +132,4 @@ enum class MinidumpContext_x86_32_Flags : uint32_t {
 
 } // end namespace minidump
 } // end namespace lldb_private
-#endif // liblldb_RegisterContextMinidump_x86_32_h_
+#endif // LLDB_SOURCE_PLUGINS_PROCESS_MINIDUMP_REGISTERCONTEXTMINIDUMP_X86_32_H

@@ -20,6 +20,7 @@
 #include "clang/Format/Format.h"
 #include "llvm/Support/Regex.h"
 #include <map>
+#include <optional>
 #include <tuple>
 
 namespace clang {
@@ -41,9 +42,9 @@ struct RawStringFormatStyleManager {
 
   RawStringFormatStyleManager(const FormatStyle &CodeStyle);
 
-  llvm::Optional<FormatStyle> getDelimiterStyle(StringRef Delimiter) const;
+  std::optional<FormatStyle> getDelimiterStyle(StringRef Delimiter) const;
 
-  llvm::Optional<FormatStyle>
+  std::optional<FormatStyle>
   getEnclosingFunctionStyle(StringRef EnclosingFunction) const;
 };
 
@@ -120,8 +121,8 @@ private:
 
   /// If \p Current is a raw string that is configured to be reformatted,
   /// return the style to be used.
-  llvm::Optional<FormatStyle> getRawStringStyle(const FormatToken &Current,
-                                                const LineState &State);
+  std::optional<FormatStyle> getRawStringStyle(const FormatToken &Current,
+                                               const LineState &State);
 
   /// If the current token sticks out over the end of the line, break
   /// it if possible.
@@ -202,13 +203,16 @@ struct ParenState {
   ParenState(const FormatToken *Tok, unsigned Indent, unsigned LastSpace,
              bool AvoidBinPacking, bool NoLineBreak)
       : Tok(Tok), Indent(Indent), LastSpace(LastSpace),
-        NestedBlockIndent(Indent), BreakBeforeClosingBrace(false),
+        NestedBlockIndent(Indent), IsAligned(false),
+        BreakBeforeClosingBrace(false), BreakBeforeClosingParen(false),
         AvoidBinPacking(AvoidBinPacking), BreakBeforeParameter(false),
         NoLineBreak(NoLineBreak), NoLineBreakInOperand(false),
         LastOperatorWrapped(true), ContainsLineBreak(false),
         ContainsUnwrappedBuilder(false), AlignColons(true),
         ObjCSelectorNameFound(false), HasMultipleNestedBlocks(false),
-        NestedBlockInlined(false), IsInsideObjCArrayLiteral(false) {}
+        NestedBlockInlined(false), IsInsideObjCArrayLiteral(false),
+        IsCSharpGenericTypeConstraint(false), IsChainedConditional(false),
+        IsWrappedConditional(false), UnindentOperator(false) {}
 
   /// \brief The token opening this parenthesis level, or nullptr if this level
   /// is opened by fake parenthesis.
@@ -264,12 +268,22 @@ struct ParenState {
   /// Used to align further variables if necessary.
   unsigned VariablePos = 0;
 
+  /// Whether this block's indentation is used for alignment.
+  bool IsAligned : 1;
+
   /// Whether a newline needs to be inserted before the block's closing
   /// brace.
   ///
   /// We only want to insert a newline before the closing brace if there also
   /// was a newline after the beginning left brace.
   bool BreakBeforeClosingBrace : 1;
+
+  /// Whether a newline needs to be inserted before the block's closing
+  /// paren.
+  ///
+  /// We only want to insert a newline before the closing paren if there also
+  /// was a newline after the beginning left paren.
+  bool BreakBeforeClosingParen : 1;
 
   /// Avoid bin packing, i.e. multiple parameters/elements on multiple
   /// lines, in this context.
@@ -329,6 +343,20 @@ struct ParenState {
   /// array literal.
   bool IsInsideObjCArrayLiteral : 1;
 
+  bool IsCSharpGenericTypeConstraint : 1;
+
+  /// \brief true if the current \c ParenState represents the false branch of
+  /// a chained conditional expression (e.g. else-if)
+  bool IsChainedConditional : 1;
+
+  /// \brief true if there conditionnal was wrapped on the first operator (the
+  /// question mark)
+  bool IsWrappedConditional : 1;
+
+  /// \brief Indicates the indent should be reduced by the length of the
+  /// operator.
+  bool UnindentOperator : 1;
+
   bool operator<(const ParenState &Other) const {
     if (Indent != Other.Indent)
       return Indent < Other.Indent;
@@ -338,8 +366,12 @@ struct ParenState {
       return NestedBlockIndent < Other.NestedBlockIndent;
     if (FirstLessLess != Other.FirstLessLess)
       return FirstLessLess < Other.FirstLessLess;
+    if (IsAligned != Other.IsAligned)
+      return IsAligned;
     if (BreakBeforeClosingBrace != Other.BreakBeforeClosingBrace)
       return BreakBeforeClosingBrace;
+    if (BreakBeforeClosingParen != Other.BreakBeforeClosingParen)
+      return BreakBeforeClosingParen;
     if (QuestionColumn != Other.QuestionColumn)
       return QuestionColumn < Other.QuestionColumn;
     if (AvoidBinPacking != Other.AvoidBinPacking)
@@ -366,6 +398,14 @@ struct ParenState {
       return ContainsUnwrappedBuilder;
     if (NestedBlockInlined != Other.NestedBlockInlined)
       return NestedBlockInlined;
+    if (IsCSharpGenericTypeConstraint != Other.IsCSharpGenericTypeConstraint)
+      return IsCSharpGenericTypeConstraint;
+    if (IsChainedConditional != Other.IsChainedConditional)
+      return IsChainedConditional;
+    if (IsWrappedConditional != Other.IsWrappedConditional)
+      return IsWrappedConditional;
+    if (UnindentOperator != Other.UnindentOperator)
+      return UnindentOperator;
     return false;
   }
 };
@@ -380,9 +420,6 @@ struct LineState {
   /// The token that needs to be next formatted.
   FormatToken *NextToken;
 
-  /// \c true if this line contains a continued for-loop section.
-  bool LineContainsContinuedForLoopSection;
-
   /// \c true if \p NextToken should not continue this line.
   bool NoContinuation;
 
@@ -396,9 +433,12 @@ struct LineState {
   /// literal sequence, 0 otherwise.
   unsigned StartOfStringLiteral;
 
+  /// Disallow line breaks for this line.
+  bool NoLineBreak;
+
   /// A stack keeping track of properties applying to parenthesis
   /// levels.
-  std::vector<ParenState> Stack;
+  SmallVector<ParenState> Stack;
 
   /// Ignore the stack of \c ParenStates for state comparison.
   ///
@@ -429,9 +469,6 @@ struct LineState {
       return NextToken < Other.NextToken;
     if (Column != Other.Column)
       return Column < Other.Column;
-    if (LineContainsContinuedForLoopSection !=
-        Other.LineContainsContinuedForLoopSection)
-      return LineContainsContinuedForLoopSection;
     if (NoContinuation != Other.NoContinuation)
       return NoContinuation;
     if (StartOfLineLevel != Other.StartOfLineLevel)

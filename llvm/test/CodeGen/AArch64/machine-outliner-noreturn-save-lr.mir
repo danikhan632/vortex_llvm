@@ -27,11 +27,11 @@ body:             |
     ; CHECK-LABEL: name: save_lr_1
     ; CHECK: liveins: $lr
     ; CHECK: $x0 = ORRXrs $xzr, $lr, 0
-    ; CHECK: BL @OUTLINED_FUNCTION_0, implicit-def $lr, implicit $sp, implicit-def $lr, implicit-def $lr, implicit-def $w3, implicit-def $w4, implicit-def $w5, implicit-def $w6
+    ; CHECK: BL @OUTLINED_FUNCTION_0, implicit-def $lr, implicit $sp, implicit-def $lr, implicit-def $w3, implicit-def $w4, implicit-def $w5, implicit-def $w6, implicit $sp, implicit $wzr, implicit $xzr, implicit $x0
     ; CHECK: $lr = ORRXrs $xzr, $x0, 0
     $w3 = ORRWri $wzr, 1
     $w4 = ORRWri $wzr, 1
-    BRK 1
+    HINT 0
     $w5 = ORRWri $wzr, 1
     $w6 = ORRWri $wzr, 1
 ...
@@ -49,11 +49,11 @@ body:             |
     ; CHECK-LABEL: name: save_lr_2
     ; CHECK: liveins: $lr
     ; CHECK: $x0 = ORRXrs $xzr, $lr, 0
-    ; CHECK: BL @OUTLINED_FUNCTION_0, implicit-def $lr, implicit $sp, implicit-def $lr, implicit-def $lr, implicit-def $w3, implicit-def $w4, implicit-def $w5, implicit-def $w6
+    ; CHECK: BL @OUTLINED_FUNCTION_0, implicit-def $lr, implicit $sp, implicit-def $lr, implicit-def $w3, implicit-def $w4, implicit-def $w5, implicit-def $w6, implicit $sp, implicit $wzr, implicit $xzr, implicit $x0
     ; CHECK: $lr = ORRXrs $xzr, $x0, 0
     $w3 = ORRWri $wzr, 1
     $w4 = ORRWri $wzr, 1
-    BRK 1
+    HINT 0
     $w5 = ORRWri $wzr, 1
     $w6 = ORRWri $wzr, 1
 ...
@@ -71,11 +71,11 @@ body:             |
     ; CHECK-LABEL: name: save_lr_3
     ; CHECK: liveins: $lr
     ; CHECK: $x0 = ORRXrs $xzr, $lr, 0
-    ; CHECK: BL @OUTLINED_FUNCTION_0, implicit-def $lr, implicit $sp, implicit-def $lr, implicit-def $lr, implicit-def $w3, implicit-def $w4, implicit-def $w5, implicit-def $w6
+    ; CHECK: BL @OUTLINED_FUNCTION_0, implicit-def $lr, implicit $sp, implicit-def $lr, implicit-def $w3, implicit-def $w4, implicit-def $w5, implicit-def $w6, implicit $sp, implicit $wzr, implicit $xzr, implicit $x0
     ; CHECK: $lr = ORRXrs $xzr, $x0, 0
     $w3 = ORRWri $wzr, 1
     $w4 = ORRWri $wzr, 1
-    BRK 1
+    HINT 0
     $w5 = ORRWri $wzr, 1
     $w6 = ORRWri $wzr, 1
 ...
@@ -93,11 +93,11 @@ body:             |
     ; CHECK-LABEL: name: save_lr_4
     ; CHECK: liveins: $lr
     ; CHECK: $x0 = ORRXrs $xzr, $lr, 0
-    ; CHECK: BL @OUTLINED_FUNCTION_0, implicit-def $lr, implicit $sp, implicit-def $lr, implicit-def $lr, implicit-def $w3, implicit-def $w4, implicit-def $w5, implicit-def $w6
+    ; CHECK: BL @OUTLINED_FUNCTION_0, implicit-def $lr, implicit $sp, implicit-def $lr, implicit-def $w3, implicit-def $w4, implicit-def $w5, implicit-def $w6, implicit $sp, implicit $wzr, implicit $xzr, implicit $x0
     ; CHECK: $lr = ORRXrs $xzr, $x0, 0
     $w3 = ORRWri $wzr, 1
     $w4 = ORRWri $wzr, 1
-    BRK 1
+    HINT 0
     $w5 = ORRWri $wzr, 1
     $w6 = ORRWri $wzr, 1
 ...

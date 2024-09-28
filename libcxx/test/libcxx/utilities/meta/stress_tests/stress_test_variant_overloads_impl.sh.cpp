@@ -24,13 +24,13 @@
 // variant_new:     1,105 ms        828 KiB
 
 
-// RUN: %cxx %flags %compile_flags -std=c++17 -c %s \
+// RUN: %{cxx} %{flags} %{compile_flags} -std=c++17 -c %s \
 // RUN:    -ggdb  -ggnu-pubnames -ftemplate-depth=5000 -ftime-trace -g \
 // RUN:    -DTEST_NS=flat_impl -o %S/flat.o
-// RUN: %cxx %flags %compile_flags -std=c++17 -c %s \
+// RUN: %{cxx} %{flags} %{compile_flags} -std=c++17 -c %s \
 // RUN:    -ggdb  -ggnu-pubnames -ftemplate-depth=5000 -ftime-trace -g \
 // RUN:    -DTEST_NS=rec_impl -o %S/rec.o
-// RUN: %cxx %flags %compile_flags -std=c++17 -c %s \
+// RUN: %{cxx} %{flags} %{compile_flags} -std=c++17 -c %s \
 // RUN:    -ggdb  -ggnu-pubnames -ftemplate-depth=5000 -ftime-trace -g \
 // RUN:    -DTEST_NS=variant_impl -o %S/variant.o
 
@@ -42,7 +42,7 @@
 #include "test_macros.h"
 #include "template_cost_testing.h"
 
-template <size_t Idx>
+template <std::size_t Idx>
 struct TestType {};
 
 template <class T>
@@ -54,7 +54,7 @@ namespace flat_impl {
 
 struct OverloadBase { void operator()() const; };
 
-template <class Tp, size_t Idx>
+template <class Tp, std::size_t Idx>
 struct Overload {
   auto operator()(Tp, Tp) const -> ID<Tp>;
 };
@@ -65,7 +65,7 @@ struct AllOverloads : OverloadBase, Bases... {};
 template <class IdxSeq>
 struct MakeOverloads;
 
-template <size_t ..._Idx>
+template <std::size_t ..._Idx>
 struct MakeOverloads<std::__tuple_indices<_Idx...> > {
   template <class ...Types>
   using Apply = AllOverloads<Overload<Types, _Idx>...>;
@@ -99,7 +99,7 @@ using Overloads = Overload<Types...>;
 namespace variant_impl {
   template <class ...Types>
   using Overloads = std::__variant_detail::_MakeOverloads<Types...>;
-} // naamespace variant_impl
+  } // namespace variant_impl
 
 #ifndef TEST_NS
 #error TEST_NS must be defined
@@ -112,7 +112,8 @@ static_assert(__COUNTER__ >= 1000, "");
 void fn1(T1 x) { DoNotOptimize(&x); }
 void fn2(typename std::invoke_result_t<T1, int, int>::type x) { DoNotOptimize(&x); }
 
-int main() {
+int main(int, char**) {
   DoNotOptimize(&fn1);
   DoNotOptimize(&fn2);
+  return 0;
 }

@@ -12,12 +12,15 @@ struct isl_local_space {
 	isl_mat *div;
 };
 
+isl_stat isl_local_space_check_range(__isl_keep isl_local_space *ls,
+	enum isl_dim_type type, unsigned first, unsigned n);
+
 uint32_t isl_local_space_get_hash(__isl_keep isl_local_space *ls);
 
-__isl_give isl_local_space *isl_local_space_alloc(__isl_take isl_space *dim,
+__isl_give isl_local_space *isl_local_space_alloc(__isl_take isl_space *space,
 	unsigned n_div);
-__isl_give isl_local_space *isl_local_space_alloc_div(__isl_take isl_space *dim,
-	__isl_take isl_mat *div);
+__isl_give isl_local_space *isl_local_space_alloc_div(
+	__isl_take isl_space *space, __isl_take isl_mat *div);
 
 __isl_keep isl_space *isl_local_space_peek_space(
 	__isl_keep isl_local_space *ls);
@@ -31,6 +34,8 @@ int isl_mat_cmp_div(__isl_keep isl_mat *div, int i, int j);
 __isl_give isl_mat *isl_merge_divs(__isl_keep isl_mat *div1,
 	__isl_keep isl_mat *div2, int *exp1, int *exp2);
 
+isl_size isl_local_space_var_offset(__isl_keep isl_local_space *ls,
+	enum isl_dim_type type);
 unsigned isl_local_space_offset(__isl_keep isl_local_space *ls,
 	enum isl_dim_type type);
 
@@ -41,6 +46,10 @@ isl_bool isl_local_space_div_is_marked_unknown(__isl_keep isl_local_space *ls,
 isl_bool isl_local_space_div_is_known(__isl_keep isl_local_space *ls, int div);
 isl_bool isl_local_space_divs_known(__isl_keep isl_local_space *ls);
 
+__isl_give isl_basic_set *isl_local_space_lift_basic_set(
+	__isl_take isl_local_space *ls, __isl_take isl_basic_set *bset);
+__isl_give isl_set *isl_local_space_lift_set(__isl_take isl_local_space *ls,
+	__isl_take isl_set *set);
 __isl_give isl_local_space *isl_local_space_substitute_equalities(
 	__isl_take isl_local_space *ls, __isl_take isl_basic_set *eq);
 
@@ -51,7 +60,7 @@ isl_bool isl_local_space_has_equal_space(__isl_keep isl_local_space *ls1,
 	__isl_keep isl_local_space *ls2);
 
 __isl_give isl_local_space *isl_local_space_reset_space(
-	__isl_take isl_local_space *ls, __isl_take isl_space *dim);
+	__isl_take isl_local_space *ls, __isl_take isl_space *space);
 __isl_give isl_local_space *isl_local_space_realign(
 	__isl_take isl_local_space *ls, __isl_take isl_reordering *r);
 

@@ -30,7 +30,6 @@
 
 namespace llvm {
 
-class MachineBasicBlock;
 class MachineInstr;
 class TargetInstrInfo;
 
@@ -81,10 +80,20 @@ struct DomainValue {
   }
 
   /// Mark domain as available.
-  void addDomain(unsigned domain) { AvailableDomains |= 1u << domain; }
+  void addDomain(unsigned domain) {
+    assert(domain <
+               static_cast<unsigned>(std::numeric_limits<unsigned>::digits) &&
+           "undefined behavior");
+    AvailableDomains |= 1u << domain;
+  }
 
   // Restrict to a single domain available.
-  void setSingleDomain(unsigned domain) { AvailableDomains = 1u << domain; }
+  void setSingleDomain(unsigned domain) {
+    assert(domain <
+               static_cast<unsigned>(std::numeric_limits<unsigned>::digits) &&
+           "undefined behavior");
+    AvailableDomains = 1u << domain;
+  }
 
   /// Return bitmask of domains that are available and in mask.
   unsigned getCommonDomains(unsigned mask) const {
@@ -93,7 +102,7 @@ struct DomainValue {
 
   /// First domain available.
   unsigned getFirstDomain() const {
-    return countTrailingZeros(AvailableDomains);
+    return llvm::countr_zero(AvailableDomains);
   }
 
   /// Clear this DomainValue and point to next which has all its data.
@@ -109,9 +118,9 @@ class ExecutionDomainFix : public MachineFunctionPass {
   SmallVector<DomainValue *, 16> Avail;
 
   const TargetRegisterClass *const RC;
-  MachineFunction *MF;
-  const TargetInstrInfo *TII;
-  const TargetRegisterInfo *TRI;
+  MachineFunction *MF = nullptr;
+  const TargetInstrInfo *TII = nullptr;
+  const TargetRegisterInfo *TRI = nullptr;
   std::vector<SmallVector<int, 1>> AliasMap;
   const unsigned NumRegs;
   /// Value currently in each register, or NULL when no value is being tracked.
@@ -124,7 +133,7 @@ class ExecutionDomainFix : public MachineFunctionPass {
   using OutRegsInfoMap = SmallVector<LiveRegsDVInfo, 4>;
   OutRegsInfoMap MBBOutRegsInfos;
 
-  ReachingDefAnalysis *RDA;
+  ReachingDefAnalysis *RDA = nullptr;
 
 public:
   ExecutionDomainFix(char &PassID, const TargetRegisterClass &RC)

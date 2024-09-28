@@ -6,11 +6,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_UnwindTable_h
-#define liblldb_UnwindTable_h
+#ifndef LLDB_SYMBOL_UNWINDTABLE_H
+#define LLDB_SYMBOL_UNWINDTABLE_H
 
 #include <map>
 #include <mutex>
+#include <optional>
 
 #include "lldb/lldb-private.h"
 
@@ -52,7 +53,7 @@ public:
   // problem.
   lldb::FuncUnwindersSP
   GetUncachedFuncUnwindersContainingAddress(const Address &addr,
-                                            SymbolContext &sc);
+                                            const SymbolContext &sc);
 
   ArchSpec GetArchitecture();
 
@@ -60,8 +61,8 @@ private:
   void Dump(Stream &s);
 
   void Initialize();
-  llvm::Optional<AddressRange> GetAddressRange(const Address &addr,
-                                               SymbolContext &sc);
+  std::optional<AddressRange> GetAddressRange(const Address &addr,
+                                              const SymbolContext &sc);
 
   typedef std::map<lldb::addr_t, lldb::FuncUnwindersSP> collection;
   typedef collection::iterator iterator;
@@ -79,9 +80,10 @@ private:
   std::unique_ptr<CompactUnwindInfo> m_compact_unwind_up;
   std::unique_ptr<ArmUnwindInfo> m_arm_unwind_up;
 
-  DISALLOW_COPY_AND_ASSIGN(UnwindTable);
+  UnwindTable(const UnwindTable &) = delete;
+  const UnwindTable &operator=(const UnwindTable &) = delete;
 };
 
 } // namespace lldb_private
 
-#endif // liblldb_UnwindTable_h
+#endif // LLDB_SYMBOL_UNWINDTABLE_H

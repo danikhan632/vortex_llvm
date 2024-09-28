@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_ThreadElfCore_h_
-#define liblldb_ThreadElfCore_h_
+#ifndef LLDB_SOURCE_PLUGINS_PROCESS_ELF_CORE_THREADELFCORE_H
+#define LLDB_SOURCE_PLUGINS_PROCESS_ELF_CORE_THREADELFCORE_H
 
 #include "Plugins/Process/elf-core/RegisterUtilities.h"
 #include "lldb/Target/Thread.h"
@@ -128,6 +128,7 @@ struct ThreadData {
   std::vector<lldb_private::CoreNote> notes;
   lldb::tid_t tid;
   int signo = 0;
+  int code = 0;
   int prstatus_sig = 0;
   std::string name;
 };
@@ -166,6 +167,7 @@ protected:
   lldb::RegisterContextSP m_thread_reg_ctx_sp;
 
   int m_signo;
+  int m_code;
 
   lldb_private::DataExtractor m_gpregset_data;
   std::vector<lldb_private::CoreNote> m_notes;
@@ -173,4 +175,4 @@ protected:
   bool CalculateStopInfo() override;
 };
 
-#endif // liblldb_ThreadElfCore_h_
+#endif // LLDB_SOURCE_PLUGINS_PROCESS_ELF_CORE_THREADELFCORE_H

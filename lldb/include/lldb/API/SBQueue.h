@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLDB_SBQueue_h_
-#define LLDB_SBQueue_h_
+#ifndef LLDB_API_SBQUEUE_H
+#define LLDB_API_SBQUEUE_H
 
 #include <vector>
 
@@ -19,8 +19,6 @@ namespace lldb {
 class LLDB_API SBQueue {
 public:
   SBQueue();
-
-  SBQueue(const QueueSP &queue_sp);
 
   SBQueue(const SBQueue &rhs);
 
@@ -58,6 +56,8 @@ protected:
   friend class SBProcess;
   friend class SBThread;
 
+  SBQueue(const QueueSP &queue_sp);
+
   void SetQueue(const lldb::QueueSP &queue_sp);
 
 private:
@@ -66,4 +66,4 @@ private:
 
 } // namespace lldb
 
-#endif // LLDB_SBQueue_h_
+#endif // LLDB_API_SBQUEUE_H

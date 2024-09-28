@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-// UNSUPPORTED: c++98, c++03, c++11, c++14
+// UNSUPPORTED: c++03, c++11, c++14
 
 // <unordered_map>
 
@@ -40,7 +40,7 @@ struct throw_hasher
 
     throw_hasher(bool& should_throw) : should_throw_(should_throw) {}
 
-    size_t operator()(const T& p) const
+    std::size_t operator()(const T& p) const
     {
         if (should_throw_)
             throw 0;
@@ -95,7 +95,7 @@ int main(int, char**)
     struct hasher
     {
         hasher() = default;
-        size_t operator()(const Counter<int>& p) const
+        std::size_t operator()(const Counter<int>& p) const
         {
             return std::hash<Counter<int>>()(p);
         }

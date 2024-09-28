@@ -27,13 +27,14 @@ namespace {
 class Action : public clang::ASTFrontendAction {
 public:
   explicit Action(SymbolIndexManager &SymbolIndexMgr, bool MinimizeIncludePaths)
-      : SemaSource(SymbolIndexMgr, MinimizeIncludePaths,
-                   /*GenerateDiagnostics=*/false) {}
+      : SemaSource(new IncludeFixerSemaSource(SymbolIndexMgr,
+                                              MinimizeIncludePaths,
+                                              /*GenerateDiagnostics=*/false)) {}
 
   std::unique_ptr<clang::ASTConsumer>
   CreateASTConsumer(clang::CompilerInstance &Compiler,
                     StringRef InFile) override {
-    SemaSource.setFilePath(InFile);
+    SemaSource->setFilePath(InFile);
     return std::make_unique<clang::ASTConsumer>();
   }
 
@@ -51,8 +52,8 @@ public:
       CompletionConsumer = &Compiler->getCodeCompletionConsumer();
 
     Compiler->createSema(getTranslationUnitKind(), CompletionConsumer);
-    SemaSource.setCompilerInstance(Compiler);
-    Compiler->getSema().addExternalSource(&SemaSource);
+    SemaSource->setCompilerInstance(Compiler);
+    Compiler->getSema().addExternalSource(SemaSource.get());
 
     clang::ParseAST(Compiler->getSema(), Compiler->getFrontendOpts().ShowStats,
                     Compiler->getFrontendOpts().SkipFunctionBodies);
@@ -61,12 +62,12 @@ public:
   IncludeFixerContext
   getIncludeFixerContext(const clang::SourceManager &SourceManager,
                          clang::HeaderSearch &HeaderSearch) const {
-    return SemaSource.getIncludeFixerContext(SourceManager, HeaderSearch,
-                                             SemaSource.getMatchedSymbols());
+    return SemaSource->getIncludeFixerContext(SourceManager, HeaderSearch,
+                                              SemaSource->getMatchedSymbols());
   }
 
 private:
-  IncludeFixerSemaSource SemaSource;
+  IntrusiveRefCntPtr<IncludeFixerSemaSource> SemaSource;
 };
 
 } // namespace
@@ -245,7 +246,7 @@ clang::TypoCorrection IncludeFixerSemaSource::CorrectTypo(
     // parent_path.
     // FIXME: Don't rely on source text.
     const char *End = Source.end();
-    while (isIdentifierBody(*End) || *End == ':')
+    while (isAsciiIdentifierContinue(*End) || *End == ':')
       ++End;
 
     return std::string(Source.begin(), End);
@@ -302,22 +303,23 @@ std::string IncludeFixerSemaSource::minimizeInclude(
     StringRef Include, const clang::SourceManager &SourceManager,
     clang::HeaderSearch &HeaderSearch) const {
   if (!MinimizeIncludePaths)
-    return Include;
+    return std::string(Include);
 
   // Get the FileEntry for the include.
   StringRef StrippedInclude = Include.trim("\"<>");
-  auto Entry = SourceManager.getFileManager().getFile(StrippedInclude);
+  auto Entry =
+      SourceManager.getFileManager().getOptionalFileRef(StrippedInclude);
 
   // If the file doesn't exist return the path from the database.
   // FIXME: This should never happen.
   if (!Entry)
-    return Include;
+    return std::string(Include);
 
-  bool IsSystem = false;
+  bool IsAngled = false;
   std::string Suggestion =
-      HeaderSearch.suggestPathToFileForDiagnostics(*Entry, "", &IsSystem);
+      HeaderSearch.suggestPathToFileForDiagnostics(*Entry, "", &IsAngled);
 
-  return IsSystem ? '<' + Suggestion + '>' : '"' + Suggestion + '"';
+  return IsAngled ? '<' + Suggestion + '>' : '"' + Suggestion + '"';
 }
 
 /// Get the include fixer context for the queried symbol.
@@ -352,7 +354,8 @@ IncludeFixerSemaSource::query(StringRef Query, StringRef ScopedQualifiers,
   if (!GenerateDiagnostics && !QuerySymbolInfos.empty()) {
     if (ScopedQualifiers == QuerySymbolInfos.front().ScopedQualifiers &&
         Query == QuerySymbolInfos.front().RawIdentifier) {
-      QuerySymbolInfos.push_back({Query.str(), ScopedQualifiers, Range});
+      QuerySymbolInfos.push_back(
+          {Query.str(), std::string(ScopedQualifiers), Range});
     }
     return {};
   }
@@ -367,7 +370,8 @@ IncludeFixerSemaSource::query(StringRef Query, StringRef ScopedQualifiers,
       CI->getSourceManager().getLocForStartOfFile(
           CI->getSourceManager().getMainFileID()));
 
-  QuerySymbolInfos.push_back({Query.str(), ScopedQualifiers, Range});
+  QuerySymbolInfos.push_back(
+      {Query.str(), std::string(ScopedQualifiers), Range});
 
   // Query the symbol based on C++ name Lookup rules.
   // Firstly, lookup the identifier with scoped namespace contexts;

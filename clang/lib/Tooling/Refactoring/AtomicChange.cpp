@@ -150,7 +150,7 @@ createReplacementsForHeaders(llvm::StringRef FilePath, llvm::StringRef Code,
   for (const auto &Change : Changes) {
     for (llvm::StringRef Header : Change.getInsertedHeaders()) {
       std::string EscapedHeader =
-          Header.startswith("<") || Header.startswith("\"")
+          Header.starts_with("<") || Header.starts_with("\"")
               ? Header.str()
               : ("\"" + Header + "\"").str();
       std::string ReplacementText = "#include " + EscapedHeader;
@@ -198,10 +198,16 @@ AtomicChange::AtomicChange(const SourceManager &SM,
   const FullSourceLoc FullKeyPosition(KeyPosition, SM);
   std::pair<FileID, unsigned> FileIDAndOffset =
       FullKeyPosition.getSpellingLoc().getDecomposedLoc();
-  const FileEntry *FE = SM.getFileEntryForID(FileIDAndOffset.first);
+  OptionalFileEntryRef FE = SM.getFileEntryRefForID(FileIDAndOffset.first);
   assert(FE && "Cannot create AtomicChange with invalid location.");
-  FilePath = FE->getName();
+  FilePath = std::string(FE->getName());
   Key = FilePath + ":" + std::to_string(FileIDAndOffset.second);
+}
+
+AtomicChange::AtomicChange(const SourceManager &SM, SourceLocation KeyPosition,
+                           llvm::Any M)
+    : AtomicChange(SM, KeyPosition) {
+  Metadata = std::move(M);
 }
 
 AtomicChange::AtomicChange(std::string Key, std::string FilePath,
@@ -284,11 +290,11 @@ llvm::Error AtomicChange::insert(const SourceManager &SM, SourceLocation Loc,
 }
 
 void AtomicChange::addHeader(llvm::StringRef Header) {
-  InsertedHeaders.push_back(Header);
+  InsertedHeaders.push_back(std::string(Header));
 }
 
 void AtomicChange::removeHeader(llvm::StringRef Header) {
-  RemovedHeaders.push_back(Header);
+  RemovedHeaders.push_back(std::string(Header));
 }
 
 llvm::Expected<std::string>

@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_IRDynamicChecks_h_
-#define liblldb_IRDynamicChecks_h_
+#ifndef LLDB_SOURCE_PLUGINS_EXPRESSIONPARSER_CLANG_IRDYNAMICCHECKS_H
+#define LLDB_SOURCE_PLUGINS_EXPRESSIONPARSER_CLANG_IRDYNAMICCHECKS_H
 
 #include "lldb/Expression/DynamicCheckerFunctions.h"
 #include "lldb/lldb-types.h"
@@ -30,7 +30,7 @@ public:
   ClangDynamicCheckerFunctions();
 
   /// Destructor
-  virtual ~ClangDynamicCheckerFunctions();
+  ~ClangDynamicCheckerFunctions() override;
 
   static bool classof(const DynamicCheckerFunctions *checker_funcs) {
     return checker_funcs->GetKind() == DCF_Clang;
@@ -46,10 +46,10 @@ public:
   ///     The execution context to install the functions into.
   ///
   /// \return
-  ///     True on success; false on failure, or if the functions have
-  ///     already been installed.
-  bool Install(DiagnosticManager &diagnostic_manager,
-               ExecutionContext &exe_ctx) override;
+  ///     Either llvm::ErrorSuccess or Error with llvm::ErrorInfo
+  ///
+  llvm::Error Install(DiagnosticManager &diagnostic_manager,
+                      ExecutionContext &exe_ctx) override;
 
   bool DoCheckersExplainStop(lldb::addr_t addr, Stream &message) override;
 
@@ -124,4 +124,4 @@ private:
 
 } // namespace lldb_private
 
-#endif // liblldb_IRDynamicChecks_h_
+#endif // LLDB_SOURCE_PLUGINS_EXPRESSIONPARSER_CLANG_IRDYNAMICCHECKS_H

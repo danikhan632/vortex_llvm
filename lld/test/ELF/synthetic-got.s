@@ -2,13 +2,13 @@
 # RUN: llvm-mc -filetype=obj -triple=x86_64-unknown-linux %s -o %t.o
 # RUN: echo "SECTIONS { }" > %t0.script
 # RUN: ld.lld --hash-style=sysv -shared %t.o -o %t0.out --script %t0.script
-# RUN: llvm-objdump -section-headers %t0.out | FileCheck %s --check-prefix=GOT
-# RUN: llvm-objdump -s -section=.got -section=.got.plt %t0.out \
+# RUN: llvm-objdump --section-headers %t0.out | FileCheck %s --check-prefix=GOT
+# RUN: llvm-objdump -s --section=.got --section=.got.plt %t0.out \
 # RUN:   | FileCheck %s --check-prefix=GOTDATA
 
 # GOT:     Sections:
-# GOT:       9 .got         00000008 00000000000001b0 DATA
-# GOT:      10 .got.plt     00000020 00000000000001b8 DATA
+# GOT:       .got         00000008 00000000000001b0 DATA
+# GOT:       .got.plt     00000020 00000000000001b8 DATA
 # GOTDATA:      Contents of section .got:
 # GOTDATA-NEXT:  01b0 00000000 00000000
 # GOTDATA-NEXT: Contents of section .got.plt:
@@ -17,8 +17,8 @@
 
 # RUN: echo "SECTIONS { .mygot : { *(.got) *(.got.plt) } }" > %t1.script
 # RUN: ld.lld --hash-style=sysv -shared %t.o -o %t1.out --script %t1.script
-# RUN: llvm-objdump -section-headers %t1.out | FileCheck %s --check-prefix=MYGOT
-# RUN: llvm-objdump -s -section=.mygot %t1.out | FileCheck %s --check-prefix=MYGOTDATA
+# RUN: llvm-objdump --section-headers %t1.out | FileCheck %s --check-prefix=MYGOT
+# RUN: llvm-objdump -s --section=.mygot %t1.out | FileCheck %s --check-prefix=MYGOTDATA
 
 # MYGOT:     Sections:
 # MYGOT:      8  .mygot     00000028 00000000000000e0 DATA

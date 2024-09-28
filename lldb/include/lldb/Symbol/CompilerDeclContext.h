@@ -6,11 +6,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_CompilerDeclContext_h_
-#define liblldb_CompilerDeclContext_h_
+#ifndef LLDB_SYMBOL_COMPILERDECLCONTEXT_H
+#define LLDB_SYMBOL_COMPILERDECLCONTEXT_H
 
 #include <vector>
 
+#include "lldb/Symbol/Type.h"
 #include "lldb/Utility/ConstString.h"
 #include "lldb/lldb-private.h"
 
@@ -38,7 +39,7 @@ public:
   /// This constructor should only be called from the respective TypeSystem
   /// implementation.
   ///
-  /// \see lldb_private::ClangASTContext::CreateDeclContext(clang::DeclContext*)
+  /// \see lldb_private::TypeSystemClang::CreateDeclContext(clang::DeclContext*)
   CompilerDeclContext(TypeSystem *type_system, void *decl_ctx)
       : m_type_system(type_system), m_opaque_decl_ctx(decl_ctx) {}
 
@@ -56,32 +57,25 @@ public:
     return m_type_system != nullptr && m_opaque_decl_ctx != nullptr;
   }
 
+  /// Populate a valid compiler context from the current decl context.
+  ///
+  /// \returns A valid vector of CompilerContext entries that describes
+  /// this declaration context. The first entry in the vector is the parent of
+  /// the subsequent entry, so the topmost entry is the global namespace.
+  std::vector<lldb_private::CompilerContext> GetCompilerContext() const;
+
   std::vector<CompilerDecl> FindDeclByName(ConstString name,
                                            const bool ignore_using_decls);
 
   /// Checks if this decl context represents a method of a class.
   ///
-  /// \param[out] language_ptr
-  ///     If non NULL and \b true is returned from this function,
-  ///     this will indicate if the language that respresents the method.
-  ///
-  /// \param[out] is_instance_method_ptr
-  ///     If non NULL and \b true is returned from this function,
-  ///     this will indicate if the method is an instance function (true)
-  ///     or a class method (false indicating the function is static, or
-  ///     doesn't require an instance of the class to be called).
-  ///
-  /// \param[out] language_object_name_ptr
-  ///     If non NULL and \b true is returned from this function,
-  ///     this will indicate if implicit object name for the language
-  ///     like "this" for C++, and "self" for Objective C.
-  ///
   /// \return
   ///     Returns true if this is a decl context that represents a method
   ///     in a struct, union or class.
-  bool IsClassMethod(lldb::LanguageType *language_ptr,
-                     bool *is_instance_method_ptr,
-                     ConstString *language_object_name_ptr);
+  bool IsClassMethod();
+
+  /// Determines the original language of the decl context.
+  lldb::LanguageType GetLanguage();
 
   /// Check if the given other decl context is contained in the lookup
   /// of this decl context (for example because the other context is a nested
@@ -126,4 +120,4 @@ bool operator!=(const CompilerDeclContext &lhs, const CompilerDeclContext &rhs);
 
 } // namespace lldb_private
 
-#endif // #ifndef liblldb_CompilerDeclContext_h_
+#endif // LLDB_SYMBOL_COMPILERDECLCONTEXT_H

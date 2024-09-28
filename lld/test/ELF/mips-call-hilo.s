@@ -3,12 +3,12 @@
 
 # RUN: llvm-mc -filetype=obj -triple=mips-unknown-linux %s -o %t.o
 # RUN: ld.lld %t.o -shared -o %t.so
-# RUN: llvm-objdump -d --no-show-raw-insn %t.so | FileCheck %s
+# RUN: llvm-objdump --no-print-imm-hex -d --no-show-raw-insn %t.so | FileCheck %s
 # RUN: llvm-readelf -r -s -A %t.so | FileCheck -check-prefix=GOT %s
 
 # CHECK:      Disassembly of section .text:
 # CHECK-EMPTY:
-# CHECK-NEXT: foo:
+# CHECK-NEXT: <foo>:
 # CHECK-NEXT:    {{.*}}:  lui  $2, 0
 # CHECK-NEXT:    {{.*}}:  lw   $2, -32736($2)
 # CHECK-NEXT:    {{.*}}:  lui  $2, 0

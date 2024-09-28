@@ -1,5 +1,4 @@
-//===-- LibCxxAtomic.cpp ------------------------------------------*- C++
-//-*-===//
+//===-- LibCxxAtomic.cpp --------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -8,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "LibCxxAtomic.h"
+#include "lldb/DataFormatters/FormattersHelpers.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -55,13 +55,12 @@ lldb_private::formatters::GetLibCxxAtomicValue(ValueObject &valobj) {
   if (!non_sythetic)
     return {};
 
-  ValueObjectSP member__a_ =
-      non_sythetic->GetChildMemberWithName(ConstString("__a_"), true);
+  ValueObjectSP member__a_ = non_sythetic->GetChildMemberWithName("__a_");
   if (!member__a_)
     return {};
 
   ValueObjectSP member__a_value =
-      member__a_->GetChildMemberWithName(ConstString("__a_value"), true);
+      member__a_->GetChildMemberWithName("__a_value");
   if (!member__a_value)
     return member__a_;
 
@@ -101,17 +100,15 @@ public:
 
   size_t GetIndexOfChildWithName(ConstString name) override;
 
-  lldb::ValueObjectSP GetSyntheticValue() override;
-
 private:
-  ValueObject *m_real_child;
+  ValueObject *m_real_child = nullptr;
 };
 } // namespace formatters
 } // namespace lldb_private
 
 lldb_private::formatters::LibcxxStdAtomicSyntheticFrontEnd::
     LibcxxStdAtomicSyntheticFrontEnd(lldb::ValueObjectSP valobj_sp)
-    : SyntheticChildrenFrontEnd(*valobj_sp), m_real_child(nullptr) {}
+    : SyntheticChildrenFrontEnd(*valobj_sp) {}
 
 bool lldb_private::formatters::LibcxxStdAtomicSyntheticFrontEnd::Update() {
   ValueObjectSP atomic_value = GetLibCxxAtomicValue(m_backend);
@@ -128,26 +125,20 @@ bool lldb_private::formatters::LibcxxStdAtomicSyntheticFrontEnd::
 
 size_t lldb_private::formatters::LibcxxStdAtomicSyntheticFrontEnd::
     CalculateNumChildren() {
-  return m_real_child ? m_real_child->GetNumChildren() : 0;
+  return m_real_child ? 1 : 0;
 }
 
 lldb::ValueObjectSP
 lldb_private::formatters::LibcxxStdAtomicSyntheticFrontEnd::GetChildAtIndex(
     size_t idx) {
-  return m_real_child ? m_real_child->GetChildAtIndex(idx, true) : nullptr;
+  if (idx == 0)
+    return m_real_child->GetSP()->Clone(ConstString("Value"));
+  return nullptr;
 }
 
 size_t lldb_private::formatters::LibcxxStdAtomicSyntheticFrontEnd::
     GetIndexOfChildWithName(ConstString name) {
-  return m_real_child ? m_real_child->GetIndexOfChildWithName(name)
-                      : UINT32_MAX;
-}
-
-lldb::ValueObjectSP lldb_private::formatters::LibcxxStdAtomicSyntheticFrontEnd::
-    GetSyntheticValue() {
-  if (m_real_child && m_real_child->CanProvideValue())
-    return m_real_child->GetSP();
-  return nullptr;
+  return name == "Value" ? 0 : UINT32_MAX;
 }
 
 SyntheticChildrenFrontEnd *

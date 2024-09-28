@@ -6,47 +6,25 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "FormatTestUtils.h"
-#include "clang/Format/Format.h"
-#include "llvm/Support/Debug.h"
-#include "gtest/gtest.h"
+#include "FormatTestBase.h"
 
 #define DEBUG_TYPE "format-test"
 
 namespace clang {
 namespace format {
+namespace test {
+namespace {
 
-class FormatTestJava : public ::testing::Test {
+class FormatTestJava : public test::FormatTestBase {
 protected:
-  static std::string format(llvm::StringRef Code, unsigned Offset,
-                            unsigned Length, const FormatStyle &Style) {
-    LLVM_DEBUG(llvm::errs() << "---\n");
-    LLVM_DEBUG(llvm::errs() << Code << "\n\n");
-    std::vector<tooling::Range> Ranges(1, tooling::Range(Offset, Length));
-    tooling::Replacements Replaces = reformat(Style, Code, Ranges);
-    auto Result = applyAllReplacements(Code, Replaces);
-    EXPECT_TRUE(static_cast<bool>(Result));
-    LLVM_DEBUG(llvm::errs() << "\n" << *Result << "\n\n");
-    return *Result;
-  }
-
-  static std::string
-  format(llvm::StringRef Code,
-         const FormatStyle &Style = getGoogleStyle(FormatStyle::LK_Java)) {
-    return format(Code, 0, Code.size(), Style);
+  FormatStyle getDefaultStyle() const override {
+    return getGoogleStyle(FormatStyle::LK_Java);
   }
 
   static FormatStyle getStyleWithColumns(unsigned ColumnLimit) {
     FormatStyle Style = getGoogleStyle(FormatStyle::LK_Java);
     Style.ColumnLimit = ColumnLimit;
     return Style;
-  }
-
-  static void verifyFormat(
-      llvm::StringRef Code,
-      const FormatStyle &Style = getGoogleStyle(FormatStyle::LK_Java)) {
-    EXPECT_EQ(Code.str(), format(Code, Style)) << "Expected code is not stable";
-    EXPECT_EQ(Code.str(), format(test::messUp(Code), Style));
   }
 };
 
@@ -198,6 +176,8 @@ TEST_F(FormatTestJava, EnumDeclarations) {
                "  void f() {}\n"
                "}");
   verifyFormat("enum SomeThing {\n"
+               "  void f() {}");
+  verifyFormat("enum SomeThing {\n"
                "  ABC(1, \"ABC\"),\n"
                "  CDE(2, \"CDE\");\n"
                "  Something(int i, String s) {}\n"
@@ -241,7 +221,7 @@ TEST_F(FormatTestJava, EnumDeclarations) {
                "\"cccccccccccccccccccccccc\"),\n"
                "  SECOND_ENUM(\"a\", \"b\", \"c\");\n"
                "  private VeryLongEnum(String a, String b, String c) {}\n"
-               "}\n");
+               "}");
 }
 
 TEST_F(FormatTestJava, ArrayInitializers) {
@@ -337,12 +317,12 @@ TEST_F(FormatTestJava, Annotations) {
                "List<Integer> list;");
 
   verifyFormat(
-    "@Test\n"
-    "@Feature({\"Android-TabSwitcher\"})\n"
-    "@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})\n"
-    "@Features.EnableFeatures({FEATURE})\n"
-    "public void test(@Foo.bar(\"baz\") @Quux.Qoob int theFirstParaaaaam,\n"
-    "    @Foo.bar(\"baz\") @Quux.Qoob int theSecondParaaaaaaaaaaaaaaaam) {}");
+      "@Test\n"
+      "@Feature({\"Android-TabSwitcher\"})\n"
+      "@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})\n"
+      "@Features.EnableFeatures({FEATURE})\n"
+      "public void test(@Foo.bar(\"baz\") @Quux.Qoob int theFirstParaaaaam,\n"
+      "    @Foo.bar(\"baz\") @Quux.Qoob int theSecondParaaaaaaaaaaaaaaaam) {}");
 }
 
 TEST_F(FormatTestJava, Generics) {
@@ -431,6 +411,24 @@ TEST_F(FormatTestJava, SynchronizedKeyword) {
   verifyFormat("synchronized (mData) {\n"
                "  // ...\n"
                "}");
+
+  FormatStyle Style = getLLVMStyle(FormatStyle::LK_Java);
+  Style.BreakBeforeBraces = FormatStyle::BS_Custom;
+
+  Style.BraceWrapping.AfterControlStatement = FormatStyle::BWACS_Always;
+  Style.BraceWrapping.AfterFunction = false;
+  verifyFormat("synchronized (mData)\n"
+               "{\n"
+               "  // ...\n"
+               "}",
+               Style);
+
+  Style.BraceWrapping.AfterControlStatement = FormatStyle::BWACS_Never;
+  Style.BraceWrapping.AfterFunction = true;
+  verifyFormat("synchronized (mData) {\n"
+               "  // ...\n"
+               "}",
+               Style);
 }
 
 TEST_F(FormatTestJava, AssertKeyword) {
@@ -460,19 +458,18 @@ TEST_F(FormatTestJava, MethodDeclarations) {
 }
 
 TEST_F(FormatTestJava, MethodReference) {
-  EXPECT_EQ(
-      "private void foo() {\n"
-      "  f(this::methodReference);\n"
-      "  f(C.super::methodReference);\n"
-      "  Consumer<String> c = System.out::println;\n"
-      "  Iface<Integer> mRef = Ty::<Integer>meth;\n"
-      "}",
-      format("private void foo() {\n"
-             "  f(this ::methodReference);\n"
-             "  f(C.super ::methodReference);\n"
-             "  Consumer<String> c = System.out ::println;\n"
-             "  Iface<Integer> mRef = Ty :: <Integer> meth;\n"
-             "}"));
+  EXPECT_EQ("private void foo() {\n"
+            "  f(this::methodReference);\n"
+            "  f(C.super::methodReference);\n"
+            "  Consumer<String> c = System.out::println;\n"
+            "  Iface<Integer> mRef = Ty::<Integer>meth;\n"
+            "}",
+            format("private void foo() {\n"
+                   "  f(this ::methodReference);\n"
+                   "  f(C.super ::methodReference);\n"
+                   "  Consumer<String> c = System.out ::println;\n"
+                   "  Iface<Integer> mRef = Ty :: <Integer> meth;\n"
+                   "}"));
 }
 
 TEST_F(FormatTestJava, CppKeywords) {
@@ -546,10 +543,9 @@ TEST_F(FormatTestJava, FormatsLambdas) {
 }
 
 TEST_F(FormatTestJava, BreaksStringLiterals) {
-  // FIXME: String literal breaking is currently disabled for Java and JS, as it
-  // requires strings to be merged using "+" which we don't support.
-  EXPECT_EQ("\"some text other\";",
-            format("\"some text other\";", getStyleWithColumns(14)));
+  verifyFormat("x = \"some text \"\n"
+               "    + \"other\";",
+               "x = \"some text other\";", getStyleWithColumns(18));
 }
 
 TEST_F(FormatTestJava, AlignsBlockComments) {
@@ -565,6 +561,17 @@ TEST_F(FormatTestJava, AlignsBlockComments) {
                    "  void f() {}"));
 }
 
+TEST_F(FormatTestJava, AlignDeclarations) {
+  FormatStyle Style = getLLVMStyle(FormatStyle::LK_Java);
+  Style.AlignConsecutiveDeclarations.Enabled = true;
+  verifyFormat("private final String[]       args;\n"
+               "private final A_ParserHelper parserHelper;\n"
+               "private final int            numOfCmdArgs;\n"
+               "private int                  numOfCmdArgs;\n"
+               "private String[]             args;",
+               Style);
+}
+
 TEST_F(FormatTestJava, KeepsDelimitersOnOwnLineInJavaDocComments) {
   EXPECT_EQ("/**\n"
             " * javadoc line 1\n"
@@ -575,16 +582,43 @@ TEST_F(FormatTestJava, KeepsDelimitersOnOwnLineInJavaDocComments) {
 }
 
 TEST_F(FormatTestJava, RetainsLogicalShifts) {
-    verifyFormat("void f() {\n"
-                 "  int a = 1;\n"
-                 "  a >>>= 1;\n"
-                 "}");
-    verifyFormat("void f() {\n"
-                 "  int a = 1;\n"
-                 "  a = a >>> 1;\n"
-                 "}");
+  verifyFormat("void f() {\n"
+               "  int a = 1;\n"
+               "  a >>>= 1;\n"
+               "}");
+  verifyFormat("void f() {\n"
+               "  int a = 1;\n"
+               "  a = a >>> 1;\n"
+               "}");
 }
 
+TEST_F(FormatTestJava, ShortFunctions) {
+  FormatStyle Style = getLLVMStyle(FormatStyle::LK_Java);
+  Style.AllowShortFunctionsOnASingleLine = FormatStyle::SFS_Inline;
+  verifyFormat("enum Enum {\n"
+               "  E1,\n"
+               "  E2;\n"
+               "  void f() { return; }\n"
+               "}",
+               Style);
+}
 
-} // end namespace tooling
-} // end namespace clang
+TEST_F(FormatTestJava, ConfigurableSpacesInSquareBrackets) {
+  FormatStyle Spaces = getLLVMStyle(FormatStyle::LK_Java);
+
+  verifyFormat("Object[] arguments", Spaces);
+  verifyFormat("final Class<?>[] types = new Class<?>[numElements];", Spaces);
+  verifyFormat("types[i] = arguments[i].getClass();", Spaces);
+
+  Spaces.SpacesInSquareBrackets = true;
+
+  verifyFormat("Object[ ] arguments", Spaces);
+  verifyFormat("final Class<?>[ ] types = new Class<?>[ numElements ];",
+               Spaces);
+  verifyFormat("types[ i ] = arguments[ i ].getClass();", Spaces);
+}
+
+} // namespace
+} // namespace test
+} // namespace format
+} // namespace clang

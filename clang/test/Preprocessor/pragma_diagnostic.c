@@ -1,6 +1,5 @@
 // RUN: %clang_cc1 -fsyntax-only -verify -Wno-undef %s
 // RUN: %clang_cc1 -fsyntax-only -verify -Wno-undef -Wno-unknown-warning-option -DAVOID_UNKNOWN_WARNING %s
-// rdar://2362963
 
 #if FOO    // ok.
 #endif
@@ -34,20 +33,25 @@
 // expected-warning@-2 {{unknown warning group '-Winvalid-name', ignored}}
 #endif
 
+// From GH13920
+#pragma clang diagnostic push ignored "-Wdeprecated-declarations" // expected-warning {{unexpected token in pragma diagnostic}}
+#pragma clang diagnostic pop ignored "-Wdeprecated-declarations"  // expected-warning {{unexpected token in pragma diagnostic}}
+
+
 // Testing pragma clang diagnostic with -Weverything
-void ppo(){} // First test that we do not diagnose on this.
+void ppo(void){} // First test that we do not diagnose on this.
 
 #pragma clang diagnostic warning "-Weverything"
-void ppp(){} // expected-warning {{no previous prototype for function 'ppp'}}
+void ppp(void){} // expected-warning {{no previous prototype for function 'ppp'}}
 // expected-note@-1{{declare 'static' if the function is not intended to be used outside of this translation unit}}
 
 #pragma clang diagnostic ignored "-Weverything" // Reset it.
-void ppq(){}
+void ppq(void){}
 
 #pragma clang diagnostic error "-Weverything" // Now set to error
-void ppr(){} // expected-error {{no previous prototype for function 'ppr'}}
+void ppr(void){} // expected-error {{no previous prototype for function 'ppr'}}
 // expected-note@-1{{declare 'static' if the function is not intended to be used outside of this translation unit}}
 
 #pragma clang diagnostic warning "-Weverything" // This should not be effective
-void pps(){} // expected-error {{no previous prototype for function 'pps'}}
+void pps(void){} // expected-error {{no previous prototype for function 'pps'}}
 // expected-note@-1{{declare 'static' if the function is not intended to be used outside of this translation unit}}

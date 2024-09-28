@@ -43,15 +43,16 @@ TEST(HTMLGeneratorTest, emitNamespaceHTML) {
   I.Name = "Namespace";
   I.Namespace.emplace_back(EmptySID, "A", InfoType::IT_namespace);
 
-  I.ChildNamespaces.emplace_back(EmptySID, "ChildNamespace",
-                                 InfoType::IT_namespace, "Namespace");
-  I.ChildRecords.emplace_back(EmptySID, "ChildStruct", InfoType::IT_record,
-                              "Namespace");
-  I.ChildFunctions.emplace_back();
-  I.ChildFunctions.back().Access = AccessSpecifier::AS_none;
-  I.ChildFunctions.back().Name = "OneFunction";
-  I.ChildEnums.emplace_back();
-  I.ChildEnums.back().Name = "OneEnum";
+  I.Children.Namespaces.emplace_back(EmptySID, "ChildNamespace",
+                                     InfoType::IT_namespace,
+                                     "Namespace::ChildNamespace", "Namespace");
+  I.Children.Records.emplace_back(EmptySID, "ChildStruct", InfoType::IT_record,
+                                  "Namespace::ChildStruct", "Namespace");
+  I.Children.Functions.emplace_back();
+  I.Children.Functions.back().Access = AccessSpecifier::AS_none;
+  I.Children.Functions.back().Name = "OneFunction";
+  I.Children.Enums.emplace_back();
+  I.Children.Enums.back().Name = "OneEnum";
 
   auto G = getHTMLGenerator();
   assert(G);
@@ -63,24 +64,24 @@ TEST(HTMLGeneratorTest, emitNamespaceHTML) {
   std::string Expected = R"raw(<!DOCTYPE html>
 <meta charset="utf-8"/>
 <title>namespace Namespace</title>
-<link rel="stylesheet" href="clang-doc-default-stylesheet.css"/>
-<link rel="stylesheet" href="user-provided-stylesheet.css"/>
-<script src="index.js"></script>
+<link rel="stylesheet" href="../clang-doc-default-stylesheet.css"/>
+<link rel="stylesheet" href="../user-provided-stylesheet.css"/>
+<script src="../index.js"></script>
 <header id="project-title">test-project</header>
 <main>
-  <div id="sidebar-left" path="" class="col-xs-6 col-sm-3 col-md-2 sidebar sidebar-offcanvas-left"></div>
+  <div id="sidebar-left" path="Namespace" class="col-xs-6 col-sm-3 col-md-2 sidebar sidebar-offcanvas-left"></div>
   <div id="main-content" class="col-xs-12 col-sm-9 col-md-8 main-content">
     <h1>namespace Namespace</h1>
     <h2 id="Namespaces">Namespaces</h2>
     <ul>
       <li>
-        <a href="Namespace/ChildNamespace.html">ChildNamespace</a>
+        <a href="ChildNamespace/index.html">ChildNamespace</a>
       </li>
     </ul>
     <h2 id="Records">Records</h2>
     <ul>
       <li>
-        <a href="Namespace/ChildStruct.html">ChildStruct</a>
+        <a href="ChildStruct.html">ChildStruct</a>
       </li>
     </ul>
     <h2 id="Functions">Functions</h2>
@@ -152,17 +153,17 @@ TEST(HTMLGeneratorTest, emitRecordHTML) {
 
   SmallString<16> PathTo;
   llvm::sys::path::native("path/to", PathTo);
-  I.Members.emplace_back("int", "X/Y", "X", AccessSpecifier::AS_private);
-  I.TagType = TagTypeKind::TTK_Class;
-  I.Parents.emplace_back(EmptySID, "F", InfoType::IT_record, PathTo);
+  I.Members.emplace_back(TypeInfo("int"), "X", AccessSpecifier::AS_private);
+  I.TagType = TagTypeKind::Class;
+  I.Parents.emplace_back(EmptySID, "F", InfoType::IT_record, "F", PathTo);
   I.VirtualParents.emplace_back(EmptySID, "G", InfoType::IT_record);
 
-  I.ChildRecords.emplace_back(EmptySID, "ChildStruct", InfoType::IT_record,
-                              "X/Y/Z/r");
-  I.ChildFunctions.emplace_back();
-  I.ChildFunctions.back().Name = "OneFunction";
-  I.ChildEnums.emplace_back();
-  I.ChildEnums.back().Name = "OneEnum";
+  I.Children.Records.emplace_back(EmptySID, "ChildStruct", InfoType::IT_record,
+                                  "X::Y::Z::r::ChildStruct", "X/Y/Z/r");
+  I.Children.Functions.emplace_back();
+  I.Children.Functions.back().Name = "OneFunction";
+  I.Children.Enums.emplace_back();
+  I.Children.Enums.back().Name = "OneEnum";
 
   auto G = getHTMLGenerator();
   assert(G);
@@ -194,16 +195,12 @@ TEST(HTMLGeneratorTest, emitRecordHTML) {
     </p>
     <h2 id="Members">Members</h2>
     <ul>
-      <li>
-        private 
-        <a href="../int.html">int</a>
-         X
-      </li>
+      <li>private int X</li>
     </ul>
     <h2 id="Records">Records</h2>
     <ul>
       <li>
-        <a href="r/ChildStruct.html">ChildStruct</a>
+        <a href="../../../X/Y/Z/r/ChildStruct.html">ChildStruct</a>
       </li>
     </ul>
     <h2 id="Functions">Functions</h2>
@@ -276,8 +273,9 @@ TEST(HTMLGeneratorTest, emitFunctionHTML) {
 
   SmallString<16> PathTo;
   llvm::sys::path::native("path/to", PathTo);
-  I.ReturnType = TypeInfo(EmptySID, "float", InfoType::IT_default, PathTo);
-  I.Params.emplace_back("int", PathTo, "P");
+  I.ReturnType = TypeInfo(
+      Reference(EmptySID, "float", InfoType::IT_default, "float", PathTo));
+  I.Params.emplace_back(TypeInfo("int", PathTo), "P");
   I.IsMethod = true;
   I.Parent = Reference(EmptySID, "Parent", InfoType::IT_record);
 
@@ -370,9 +368,9 @@ TEST(HTMLGeneratorTest, emitCommentHTML) {
   FunctionInfo I;
   I.Name = "f";
   I.DefLoc = Location(10, llvm::SmallString<16>{"test.cpp"});
-  I.ReturnType = TypeInfo(EmptySID, "void", InfoType::IT_default);
-  I.Params.emplace_back("int", "I");
-  I.Params.emplace_back("int", "J");
+  I.ReturnType = TypeInfo("void");
+  I.Params.emplace_back(TypeInfo("int"), "I");
+  I.Params.emplace_back(TypeInfo("int"), "J");
   I.Access = AccessSpecifier::AS_none;
 
   CommentInfo Top;

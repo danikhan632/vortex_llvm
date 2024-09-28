@@ -54,7 +54,7 @@ void clang::EmitClangCommentHTMLNamedCharacterReferences(RecordKeeper &Records,
   for (std::vector<Record *>::iterator I = Tags.begin(), E = Tags.end();
        I != E; ++I) {
     Record &Tag = **I;
-    std::string Spelling = Tag.getValueAsString("Spelling");
+    std::string Spelling = std::string(Tag.getValueAsString("Spelling"));
     uint64_t CodePoint = Tag.getValueAsInt("CodePoint");
     CLiteral.clear();
     CLiteral.append("return ");
@@ -66,12 +66,12 @@ void clang::EmitClangCommentHTMLNamedCharacterReferences(RecordKeeper &Records,
     }
     CLiteral.append(";");
 
-    StringMatcher::StringPair Match(Spelling, CLiteral.str());
+    StringMatcher::StringPair Match(Spelling, std::string(CLiteral));
     NameToUTF8.push_back(Match);
   }
 
-  emitSourceFileHeader("HTML named character reference to UTF-8 "
-                       "translation", OS);
+  emitSourceFileHeader("HTML named character reference to UTF-8 translation",
+                       OS, Records);
 
   OS << "StringRef translateHTMLNamedCharacterReferenceToUTF8(\n"
         "                                             StringRef Name) {\n";

@@ -86,13 +86,13 @@ Symbols: []
 # RUN: llvm-objcopy --add-symbol='abs1=1' %t3.no %t3.not.dynstr
 # RUN: llvm-readobj -S %t3.not.dynstr | FileCheck --check-prefix=SEC3 %s
 
-# SEC3:      Index: 1
+# SEC3:      Index: 3
 # SEC3-NEXT: Name: .shstrtab
 # SEC3-NEXT: Type: SHT_STRTAB
 # SEC3:      Name: .symtab
 # SEC3-NEXT: Type: SHT_SYMTAB
 # SEC3-NOT:  }
-# SEC3:      Link: 1
+# SEC3:      Link: 3
 
 --- !ELF
 FileHeader:
@@ -104,4 +104,27 @@ DynamicSymbols:
   - Name:    dummy
     Binding: STB_GLOBAL
 Symbols: []
+...
+
+## Check the created .symtab is correct when there are program headers.
+# RUN: yaml2obj --docnum=4 %s -o %t4
+# RUN: llvm-objcopy %t4 %t4.add --add-symbol foo=1234
+# RUN: llvm-readelf -s %t4.add | FileCheck --check-prefix=SEC4 %s
+
+# SEC4:      0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT   UND 
+# SEC4-NEXT: 1: 00000000000004d2     0 NOTYPE  GLOBAL DEFAULT   ABS foo
+
+--- !ELF
+FileHeader:
+  Class:   ELFCLASS64
+  Data:    ELFDATA2LSB
+  Type:    ET_DYN
+  Machine: EM_X86_64
+Sections:
+  - Name:    .foo
+    Type:    SHT_PROGBITS
+ProgramHeaders:
+  - Type:     PT_LOAD
+    FirstSec: .foo
+    LastSec:  .foo
 ...

@@ -42,7 +42,7 @@ private:
 
   /// The AST address space where this (non-abstract) initializer is going.
   /// Used for generating appropriate placeholders.
-  LangAS DestAddressSpace;
+  LangAS DestAddressSpace = LangAS::Default;
 
   llvm::SmallVector<std::pair<llvm::Constant *, llvm::GlobalVariable*>, 4>
     PlaceholderAddresses;
@@ -66,6 +66,9 @@ public:
   bool isAbstract() const {
     return Abstract;
   }
+
+  bool isInConstantContext() const { return InConstantContext; }
+  void setInConstantContext(bool var) { InConstantContext = var; }
 
   /// Try to emit the initiaizer of the given declaration as an abstract
   /// constant.  If this succeeds, the emission must be finalized.
@@ -109,6 +112,8 @@ public:
 
   llvm::Constant *tryEmitAbstract(const APValue &value, QualType T);
   llvm::Constant *tryEmitAbstractForMemory(const APValue &value, QualType T);
+
+  llvm::Constant *tryEmitConstantExpr(const ConstantExpr *CE);
 
   llvm::Constant *emitNullForMemory(QualType T) {
     return emitNullForMemory(CGM, T);

@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLDB_SBBreakpointName_h_
-#define LLDB_SBBreakpointName_h_
+#ifndef LLDB_API_SBBREAKPOINTNAME_H
+#define LLDB_API_SBBREAKPOINTNAME_H
 
 #include "lldb/API/SBDefines.h"
 
@@ -81,7 +81,9 @@ public:
 
   const char *GetQueueName() const;
 
+#ifndef SWIG
   void SetCallback(SBBreakpointHitCallback callback, void *baton);
+#endif
 
   void SetScriptCallbackFunction(const char *callback_function_name);
 
@@ -119,4 +121,4 @@ private:
 
 } // namespace lldb
 
-#endif // LLDB_SBBreakpointName_h_
+#endif // LLDB_API_SBBREAKPOINTNAME_H

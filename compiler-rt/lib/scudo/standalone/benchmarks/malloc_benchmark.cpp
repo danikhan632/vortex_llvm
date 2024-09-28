@@ -13,16 +13,22 @@
 #include "benchmark/benchmark.h"
 
 #include <memory>
+#include <vector>
+
+void *CurrentAllocator;
+template <typename Config> void PostInitCallback() {
+  reinterpret_cast<scudo::Allocator<Config> *>(CurrentAllocator)->initGwpAsan();
+}
 
 template <typename Config> static void BM_malloc_free(benchmark::State &State) {
-  using AllocatorT = scudo::Allocator<Config>;
+  using AllocatorT = scudo::Allocator<Config, PostInitCallback<Config>>;
   auto Deleter = [](AllocatorT *A) {
     A->unmapTestOnly();
     delete A;
   };
   std::unique_ptr<AllocatorT, decltype(Deleter)> Allocator(new AllocatorT,
                                                            Deleter);
-  Allocator->reset();
+  CurrentAllocator = Allocator.get();
 
   const size_t NBytes = State.range(0);
   size_t PageSize = scudo::getPageSizeCached();
@@ -46,8 +52,6 @@ static const size_t MaxSize = 128 * 1024;
 // cleanly.
 BENCHMARK_TEMPLATE(BM_malloc_free, scudo::AndroidConfig)
     ->Range(MinSize, MaxSize);
-BENCHMARK_TEMPLATE(BM_malloc_free, scudo::AndroidSvelteConfig)
-    ->Range(MinSize, MaxSize);
 #if SCUDO_CAN_USE_PRIMARY64
 BENCHMARK_TEMPLATE(BM_malloc_free, scudo::FuchsiaConfig)
     ->Range(MinSize, MaxSize);
@@ -55,26 +59,28 @@ BENCHMARK_TEMPLATE(BM_malloc_free, scudo::FuchsiaConfig)
 
 template <typename Config>
 static void BM_malloc_free_loop(benchmark::State &State) {
-  using AllocatorT = scudo::Allocator<Config>;
+  using AllocatorT = scudo::Allocator<Config, PostInitCallback<Config>>;
   auto Deleter = [](AllocatorT *A) {
     A->unmapTestOnly();
     delete A;
   };
   std::unique_ptr<AllocatorT, decltype(Deleter)> Allocator(new AllocatorT,
                                                            Deleter);
-  Allocator->reset();
+  CurrentAllocator = Allocator.get();
 
   const size_t NumIters = State.range(0);
   size_t PageSize = scudo::getPageSizeCached();
-  void *Ptrs[NumIters];
+  std::vector<void *> Ptrs(NumIters);
 
   for (auto _ : State) {
+    size_t SizeLog2 = 0;
     for (void *&Ptr : Ptrs) {
-      Ptr = Allocator->allocate(8192, scudo::Chunk::Origin::Malloc);
+      Ptr = Allocator->allocate(1 << SizeLog2, scudo::Chunk::Origin::Malloc);
       auto *Data = reinterpret_cast<uint8_t *>(Ptr);
-      for (size_t I = 0; I < 8192; I += PageSize)
+      for (size_t I = 0; I < 1 << SizeLog2; I += PageSize)
         Data[I] = 1;
       benchmark::DoNotOptimize(Ptr);
+      SizeLog2 = (SizeLog2 + 1) % 16;
     }
     for (void *&Ptr : Ptrs)
       Allocator->deallocate(Ptr, scudo::Chunk::Origin::Malloc);
@@ -90,8 +96,6 @@ static const size_t MaxIters = 32 * 1024;
 // FIXME: Add DefaultConfig here once we can tear down the exclusive TSD
 // cleanly.
 BENCHMARK_TEMPLATE(BM_malloc_free_loop, scudo::AndroidConfig)
-    ->Range(MinIters, MaxIters);
-BENCHMARK_TEMPLATE(BM_malloc_free_loop, scudo::AndroidSvelteConfig)
     ->Range(MinIters, MaxIters);
 #if SCUDO_CAN_USE_PRIMARY64
 BENCHMARK_TEMPLATE(BM_malloc_free_loop, scudo::FuchsiaConfig)

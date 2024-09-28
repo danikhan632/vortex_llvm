@@ -1,76 +1,21 @@
 //===- IRPrinting.cpp -----------------------------------------------------===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 #include "PassDetail.h"
-#include "mlir/IR/Module.h"
+#include "mlir/IR/SymbolTable.h"
 #include "mlir/Pass/PassManager.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/FormatVariadic.h"
-#include "llvm/Support/SHA1.h"
 
 using namespace mlir;
 using namespace mlir::detail;
 
 namespace {
-//===----------------------------------------------------------------------===//
-// OperationFingerPrint
-//===----------------------------------------------------------------------===//
-
-/// A unique fingerprint for a specific operation, and all of it's internal
-/// operations.
-class OperationFingerPrint {
-public:
-  OperationFingerPrint(Operation *topOp) {
-    llvm::SHA1 hasher;
-
-    // Hash each of the operations based upon their mutable bits:
-    topOp->walk([&](Operation *op) {
-      //   - Operation pointer
-      addDataToHash(hasher, op);
-      //   - Attributes
-      addDataToHash(hasher,
-                    op->getAttrList().getDictionary().getAsOpaquePointer());
-      //   - Blocks in Regions
-      for (Region &region : op->getRegions()) {
-        for (Block &block : region) {
-          addDataToHash(hasher, &block);
-          for (BlockArgument arg : block.getArguments())
-            addDataToHash(hasher, arg);
-        }
-      }
-      //   - Location
-      addDataToHash(hasher, op->getLoc().getAsOpaquePointer());
-      //   - Operands
-      for (Value operand : op->getOperands())
-        addDataToHash(hasher, operand);
-      //   - Successors
-      for (unsigned i = 0, e = op->getNumSuccessors(); i != e; ++i)
-        addDataToHash(hasher, op->getSuccessor(i));
-    });
-    hash = hasher.result();
-  }
-
-  bool operator==(const OperationFingerPrint &other) const {
-    return hash == other.hash;
-  }
-  bool operator!=(const OperationFingerPrint &other) const {
-    return !(*this == other);
-  }
-
-private:
-  template <typename T> void addDataToHash(llvm::SHA1 &hasher, const T &data) {
-    hasher.update(
-        ArrayRef<uint8_t>(reinterpret_cast<const uint8_t *>(&data), sizeof(T)));
-  }
-
-  SmallString<20> hash;
-};
-
 //===----------------------------------------------------------------------===//
 // IRPrinter
 //===----------------------------------------------------------------------===//
@@ -94,62 +39,54 @@ private:
   /// configuration asked for change detection.
   DenseMap<Pass *, OperationFingerPrint> beforePassFingerPrints;
 };
-} // end anonymous namespace
-
-/// Returns true if the given pass is hidden from IR printing.
-static bool isHiddenPass(Pass *pass) {
-  return isAdaptorPass(pass) || isa<VerifierPass>(pass);
-}
+} // namespace
 
 static void printIR(Operation *op, bool printModuleScope, raw_ostream &out,
                     OpPrintingFlags flags) {
-  // Check to see if we are printing the top-level module.
-  auto module = dyn_cast<ModuleOp>(op);
-  if (module && !op->getBlock())
-    return module.print(out << "\n", flags);
-
   // Otherwise, check to see if we are not printing at module scope.
   if (!printModuleScope)
-    return op->print(out << "\n", flags.useLocalScope());
+    return op->print(out << " //----- //\n",
+                     op->getBlock() ? flags.useLocalScope() : flags);
 
   // Otherwise, we are printing at module scope.
   out << " ('" << op->getName() << "' operation";
   if (auto symbolName =
           op->getAttrOfType<StringAttr>(SymbolTable::getSymbolAttrName()))
     out << ": @" << symbolName.getValue();
-  out << ")\n";
+  out << ") //----- //\n";
 
-  // Find the top-level module operation.
+  // Find the top-level operation.
   auto *topLevelOp = op;
   while (auto *parentOp = topLevelOp->getParentOp())
     topLevelOp = parentOp;
-
-  // Check to see if the top-level operation is actually a module in the case of
-  // invalid-ir.
-  if (auto module = dyn_cast<ModuleOp>(topLevelOp))
-    module.print(out, flags);
-  else
-    topLevelOp->print(out, flags);
+  topLevelOp->print(out, flags);
 }
 
 /// Instrumentation hooks.
 void IRPrinterInstrumentation::runBeforePass(Pass *pass, Operation *op) {
-  if (isHiddenPass(pass))
+  if (isa<OpToOpPassAdaptor>(pass))
     return;
   // If the config asked to detect changes, record the current fingerprint.
   if (config->shouldPrintAfterOnlyOnChange())
     beforePassFingerPrints.try_emplace(pass, op);
 
   config->printBeforeIfEnabled(pass, op, [&](raw_ostream &out) {
-    out << formatv("*** IR Dump Before {0} ***", pass->getName());
-    printIR(op, config->shouldPrintAtModuleScope(), out, OpPrintingFlags());
+    out << "// -----// IR Dump Before " << pass->getName() << " ("
+        << pass->getArgument() << ")";
+    printIR(op, config->shouldPrintAtModuleScope(), out,
+            config->getOpPrintingFlags());
     out << "\n\n";
   });
 }
 
 void IRPrinterInstrumentation::runAfterPass(Pass *pass, Operation *op) {
-  if (isHiddenPass(pass))
+  if (isa<OpToOpPassAdaptor>(pass))
     return;
+
+  // Check to see if we are only printing on failure.
+  if (config->shouldPrintAfterOnlyOnFailure())
+    return;
+
   // If the config asked to detect changes, compare the current fingerprint with
   // the previous.
   if (config->shouldPrintAfterOnlyOnChange()) {
@@ -165,22 +102,25 @@ void IRPrinterInstrumentation::runAfterPass(Pass *pass, Operation *op) {
   }
 
   config->printAfterIfEnabled(pass, op, [&](raw_ostream &out) {
-    out << formatv("*** IR Dump After {0} ***", pass->getName());
-    printIR(op, config->shouldPrintAtModuleScope(), out, OpPrintingFlags());
+    out << "// -----// IR Dump After " << pass->getName() << " ("
+        << pass->getArgument() << ")";
+    printIR(op, config->shouldPrintAtModuleScope(), out,
+            config->getOpPrintingFlags());
     out << "\n\n";
   });
 }
 
 void IRPrinterInstrumentation::runAfterPassFailed(Pass *pass, Operation *op) {
-  if (isAdaptorPass(pass))
+  if (isa<OpToOpPassAdaptor>(pass))
     return;
   if (config->shouldPrintAfterOnlyOnChange())
     beforePassFingerPrints.erase(pass);
 
   config->printAfterIfEnabled(pass, op, [&](raw_ostream &out) {
-    out << formatv("*** IR Dump After {0} Failed ***", pass->getName());
+    out << formatv("// -----// IR Dump After {0} Failed ({1})", pass->getName(),
+                   pass->getArgument());
     printIR(op, config->shouldPrintAtModuleScope(), out,
-            OpPrintingFlags().printGenericOpForm());
+            config->getOpPrintingFlags());
     out << "\n\n";
   });
 }
@@ -191,10 +131,14 @@ void IRPrinterInstrumentation::runAfterPassFailed(Pass *pass, Operation *op) {
 
 /// Initialize the configuration.
 PassManager::IRPrinterConfig::IRPrinterConfig(bool printModuleScope,
-                                              bool printAfterOnlyOnChange)
+                                              bool printAfterOnlyOnChange,
+                                              bool printAfterOnlyOnFailure,
+                                              OpPrintingFlags opPrintingFlags)
     : printModuleScope(printModuleScope),
-      printAfterOnlyOnChange(printAfterOnlyOnChange) {}
-PassManager::IRPrinterConfig::~IRPrinterConfig() {}
+      printAfterOnlyOnChange(printAfterOnlyOnChange),
+      printAfterOnlyOnFailure(printAfterOnlyOnFailure),
+      opPrintingFlags(opPrintingFlags) {}
+PassManager::IRPrinterConfig::~IRPrinterConfig() = default;
 
 /// A hook that may be overridden by a derived config that checks if the IR
 /// of 'operation' should be dumped *before* the pass 'pass' has been
@@ -224,11 +168,14 @@ struct BasicIRPrinterConfig : public PassManager::IRPrinterConfig {
   BasicIRPrinterConfig(
       std::function<bool(Pass *, Operation *)> shouldPrintBeforePass,
       std::function<bool(Pass *, Operation *)> shouldPrintAfterPass,
-      bool printModuleScope, bool printAfterOnlyOnChange, raw_ostream &out)
-      : IRPrinterConfig(printModuleScope, printAfterOnlyOnChange),
-        shouldPrintBeforePass(shouldPrintBeforePass),
-        shouldPrintAfterPass(shouldPrintAfterPass), out(out) {
-    assert((shouldPrintBeforePass || shouldPrintAfterPass) &&
+      bool printModuleScope, bool printAfterOnlyOnChange,
+      bool printAfterOnlyOnFailure, OpPrintingFlags opPrintingFlags,
+      raw_ostream &out)
+      : IRPrinterConfig(printModuleScope, printAfterOnlyOnChange,
+                        printAfterOnlyOnFailure, opPrintingFlags),
+        shouldPrintBeforePass(std::move(shouldPrintBeforePass)),
+        shouldPrintAfterPass(std::move(shouldPrintAfterPass)), out(out) {
+    assert((this->shouldPrintBeforePass || this->shouldPrintAfterPass) &&
            "expected at least one valid filter function");
   }
 
@@ -251,11 +198,15 @@ struct BasicIRPrinterConfig : public PassManager::IRPrinterConfig {
   /// The stream to output to.
   raw_ostream &out;
 };
-} // end anonymous namespace
+} // namespace
 
 /// Add an instrumentation to print the IR before and after pass execution,
 /// using the provided configuration.
 void PassManager::enableIRPrinting(std::unique_ptr<IRPrinterConfig> config) {
+  if (config->shouldPrintAtModuleScope() &&
+      getContext()->isMultithreadingEnabled())
+    llvm::report_fatal_error("IR printing can't be setup on a pass-manager "
+                             "without disabling multi-threading first.");
   addInstrumentation(
       std::make_unique<IRPrinterInstrumentation>(std::move(config)));
 }
@@ -264,8 +215,11 @@ void PassManager::enableIRPrinting(std::unique_ptr<IRPrinterConfig> config) {
 void PassManager::enableIRPrinting(
     std::function<bool(Pass *, Operation *)> shouldPrintBeforePass,
     std::function<bool(Pass *, Operation *)> shouldPrintAfterPass,
-    bool printModuleScope, bool printAfterOnlyOnChange, raw_ostream &out) {
+    bool printModuleScope, bool printAfterOnlyOnChange,
+    bool printAfterOnlyOnFailure, raw_ostream &out,
+    OpPrintingFlags opPrintingFlags) {
   enableIRPrinting(std::make_unique<BasicIRPrinterConfig>(
       std::move(shouldPrintBeforePass), std::move(shouldPrintAfterPass),
-      printModuleScope, printAfterOnlyOnChange, out));
+      printModuleScope, printAfterOnlyOnChange, printAfterOnlyOnFailure,
+      opPrintingFlags, out));
 }

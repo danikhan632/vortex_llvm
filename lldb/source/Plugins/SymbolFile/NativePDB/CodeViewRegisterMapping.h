@@ -6,17 +6,18 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef lldb_Plugins_SymbolFile_PDB_CodeViewRegisterMapping_h_
-#define lldb_Plugins_SymbolFile_PDB_CodeViewRegisterMapping_h_
+#ifndef LLDB_SOURCE_PLUGINS_SYMBOLFILE_NATIVEPDB_CODEVIEWREGISTERMAPPING_H
+#define LLDB_SOURCE_PLUGINS_SYMBOLFILE_NATIVEPDB_CODEVIEWREGISTERMAPPING_H
 
-#include "llvm/ADT/Triple.h"
 #include "llvm/DebugInfo/CodeView/CodeView.h"
+#include "llvm/TargetParser/Triple.h"
 
 namespace lldb_private {
 namespace npdb {
 
 uint32_t GetLLDBRegisterNumber(llvm::Triple::ArchType arch_type,
                                llvm::codeview::RegisterId register_id);
+uint32_t GetRegisterSize(llvm::codeview::RegisterId register_id);
 
 } // namespace npdb
 } // namespace lldb_private

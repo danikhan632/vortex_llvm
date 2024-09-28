@@ -21,7 +21,7 @@
 #include "clang/StaticAnalyzer/Core/BugReporter/BugReporter.h"
 #include "clang/StaticAnalyzer/Core/Checker.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/AnalysisManager.h"
-#include "llvm/ADT/SmallSet.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -64,7 +64,7 @@ private:
 class ObjCSuperCallChecker : public Checker<
                                       check::ASTDecl<ObjCImplementationDecl> > {
 public:
-  ObjCSuperCallChecker() : IsInitialized(false) {}
+  ObjCSuperCallChecker() = default;
 
   void checkASTDecl(const ObjCImplementationDecl *D, AnalysisManager &Mgr,
                     BugReporter &BR) const;
@@ -74,8 +74,8 @@ private:
   void initializeSelectors(ASTContext &Ctx) const;
   void fillSelectors(ASTContext &Ctx, ArrayRef<SelectorDescriptor> Sel,
                      StringRef ClassName) const;
-  mutable llvm::StringMap<llvm::SmallSet<Selector, 16> > SelectorsForClass;
-  mutable bool IsInitialized;
+  mutable llvm::StringMap<llvm::SmallPtrSet<Selector, 16>> SelectorsForClass;
+  mutable bool IsInitialized = false;
 };
 
 }
@@ -100,11 +100,10 @@ bool ObjCSuperCallChecker::isCheckableClass(const ObjCImplementationDecl *D,
 void ObjCSuperCallChecker::fillSelectors(ASTContext &Ctx,
                                          ArrayRef<SelectorDescriptor> Sel,
                                          StringRef ClassName) const {
-  llvm::SmallSet<Selector, 16> &ClassSelectors = SelectorsForClass[ClassName];
+  llvm::SmallPtrSet<Selector, 16> &ClassSelectors =
+      SelectorsForClass[ClassName];
   // Fill the Selectors SmallSet with all selectors we want to check.
-  for (ArrayRef<SelectorDescriptor>::iterator I = Sel.begin(), E = Sel.end();
-       I != E; ++I) {
-    SelectorDescriptor Descriptor = *I;
+  for (SelectorDescriptor Descriptor : Sel) {
     assert(Descriptor.ArgumentCount <= 1); // No multi-argument selectors yet.
 
     // Get the selector.
@@ -221,7 +220,7 @@ void ento::registerObjCSuperCallChecker(CheckerManager &Mgr) {
   Mgr.registerChecker<ObjCSuperCallChecker>();
 }
 
-bool ento::shouldRegisterObjCSuperCallChecker(const LangOptions &LO) {
+bool ento::shouldRegisterObjCSuperCallChecker(const CheckerManager &mgr) {
   return true;
 }
 

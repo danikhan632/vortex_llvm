@@ -1,14 +1,11 @@
 set(LLVM_LINK_COMPONENTS
+  Core
+  FrontendHLSL
   FrontendOpenMP
+  MC
   Support
+  TargetParser
   )
-
-if (MSVC)
-  set_source_files_properties(SemaDeclAttr.cpp PROPERTIES COMPILE_FLAGS /bigobj)
-  set_source_files_properties(SemaExpr.cpp PROPERTIES COMPILE_FLAGS /bigobj)
-  set_source_files_properties(SemaExprCXX.cpp PROPERTIES COMPILE_FLAGS /bigobj)
-  set_source_files_properties(SemaTemplate.cpp PROPERTIES COMPILE_FLAGS /bigobj)
-endif()
 
 clang_tablegen(OpenCLBuiltins.inc -gen-clang-opencl-builtins
   SOURCE OpenCLBuiltins.td
@@ -20,6 +17,7 @@ add_clang_library(clangSema
   CodeCompleteConsumer.cpp
   DeclSpec.cpp
   DelayedDiagnostic.cpp
+  HLSLExternalSemaSource.cpp
   IdentifierResolver.cpp
   JumpDiagnostics.cpp
   MultiplexExternalSemaSource.cpp
@@ -29,6 +27,7 @@ add_clang_library(clangSema
   Sema.cpp
   SemaAccess.cpp
   SemaAttr.cpp
+  SemaAvailability.cpp
   SemaCXXScopeSpec.cpp
   SemaCast.cpp
   SemaChecking.cpp
@@ -47,6 +46,7 @@ add_clang_library(clangSema
   SemaExprMember.cpp
   SemaExprObjC.cpp
   SemaFixItUtils.cpp
+  SemaHLSL.cpp
   SemaInit.cpp
   SemaLambda.cpp
   SemaLookup.cpp
@@ -55,9 +55,11 @@ add_clang_library(clangSema
   SemaOpenMP.cpp
   SemaOverload.cpp
   SemaPseudoObject.cpp
+  SemaRISCVVectorLookup.cpp
   SemaStmt.cpp
   SemaStmtAsm.cpp
   SemaStmtAttr.cpp
+  SemaSYCL.cpp
   SemaTemplate.cpp
   SemaTemplateDeduction.cpp
   SemaTemplateInstantiate.cpp
@@ -68,11 +70,15 @@ add_clang_library(clangSema
 
   DEPENDS
   ClangOpenCLBuiltinsImpl
+  omp_gen
+  ClangDriverOptions
 
   LINK_LIBS
+  clangAPINotes
   clangAST
   clangAnalysis
   clangBasic
   clangEdit
   clangLex
+  clangSupport
   )

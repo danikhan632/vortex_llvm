@@ -21,6 +21,7 @@
 #include "llvm/Target/CodeGenCWrappers.h"
 #include "llvm/Target/TargetOptions.h"
 #include <cstring>
+#include <optional>
 
 using namespace llvm;
 
@@ -137,8 +138,8 @@ LLVMBool LLVMCreateJITCompilerForModule(LLVMExecutionEngineRef *OutJIT,
   std::string Error;
   EngineBuilder builder(std::unique_ptr<Module>(unwrap(M)));
   builder.setEngineKind(EngineKind::JIT)
-         .setErrorStr(&Error)
-         .setOptLevel((CodeGenOpt::Level)OptLevel);
+      .setErrorStr(&Error)
+      .setOptLevel((CodeGenOptLevel)OptLevel);
   if (ExecutionEngine *JIT = builder.create()) {
     *OutJIT = wrap(JIT);
     return 0;
@@ -188,19 +189,18 @@ LLVMBool LLVMCreateMCJITCompilerForModule(
     for (auto &F : *Mod) {
       auto Attrs = F.getAttributes();
       StringRef Value = options.NoFramePointerElim ? "all" : "none";
-      Attrs = Attrs.addAttribute(F.getContext(), AttributeList::FunctionIndex,
-                                 "frame-pointer", Value);
+      Attrs = Attrs.addFnAttribute(F.getContext(), "frame-pointer", Value);
       F.setAttributes(Attrs);
     }
 
   std::string Error;
   EngineBuilder builder(std::move(Mod));
   builder.setEngineKind(EngineKind::JIT)
-         .setErrorStr(&Error)
-         .setOptLevel((CodeGenOpt::Level)options.OptLevel)
-         .setTargetOptions(targetOptions);
+      .setErrorStr(&Error)
+      .setOptLevel((CodeGenOptLevel)options.OptLevel)
+      .setTargetOptions(targetOptions);
   bool JIT;
-  if (Optional<CodeModel::Model> CM = unwrap(options.CodeModel, JIT))
+  if (std::optional<CodeModel::Model> CM = unwrap(options.CodeModel, JIT))
     builder.setCodeModel(*CM);
   if (options.MCJMM)
     builder.setMCJITMemoryManager(
@@ -306,6 +306,18 @@ uint64_t LLVMGetGlobalValueAddress(LLVMExecutionEngineRef EE, const char *Name) 
 
 uint64_t LLVMGetFunctionAddress(LLVMExecutionEngineRef EE, const char *Name) {
   return unwrap(EE)->getFunctionAddress(Name);
+}
+
+LLVMBool LLVMExecutionEngineGetErrMsg(LLVMExecutionEngineRef EE,
+                                      char **OutError) {
+  assert(OutError && "OutError must be non-null");
+  auto *ExecEngine = unwrap(EE);
+  if (ExecEngine->hasError()) {
+    *OutError = strdup(ExecEngine->getErrorMessage().c_str());
+    ExecEngine->clearErrorMessage();
+    return true;
+  }
+  return false;
 }
 
 /*===-- Operations on memory managers -------------------------------------===*/

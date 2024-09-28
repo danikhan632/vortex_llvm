@@ -8,7 +8,7 @@
 # RUN: llvm-readelf -S -s %t | FileCheck --check-prefixes=SEC,NM %s
 # RUN: llvm-readobj -r %t | FileCheck --check-prefix=RELOC %s
 # RUN: llvm-readelf -x .got.plt %t | FileCheck --check-prefix=GOTPLT %s
-# RUN: llvm-objdump -d --no-show-raw-insn %t | FileCheck --check-prefixes=DIS %s
+# RUN: llvm-objdump --no-print-imm-hex -d --no-show-raw-insn %t | FileCheck --check-prefixes=DIS %s
 
 # SEC: .plt PROGBITS {{0*}}00020040
 
@@ -27,7 +27,7 @@
 # GOTPLT-NEXT: 0x00040068 00000000 00000000 00000000 00000000
 # GOTPLT-NEXT: 0x00040078 00000000 00000000
 
-# DIS:      _start:
+# DIS:      <_start>:
 ## Direct call
 ## Call foo directly
 # DIS-NEXT:   { call 0x2003c }
@@ -56,13 +56,13 @@
 ## Call weak via plt
 # DIS-NEXT: r0 = #0 ; jump 0x20070 }
 
-# DIS:      foo:
+# DIS:      <foo>:
 # DIS-NEXT:   2003c:
 
 
 # DIS: Disassembly of section .plt:
 
-# DIS: 00020040 .plt:
+# DIS: 00020040 <.plt>:
 # DIS-NEXT:   20040: { 	immext(#131072)
 # DIS-NEXT:   20044:   	r28 = add(pc,##131112) }
 # DIS-NEXT:   20048: { 	r14 -= add(r28,#16)

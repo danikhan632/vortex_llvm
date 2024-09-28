@@ -1,4 +1,4 @@
-; RUN: opt -hotcoldsplit -hotcoldsplit-threshold=2 -S < %s | FileCheck %s
+; RUN: opt -passes=hotcoldsplit -hotcoldsplit-threshold=2 -S < %s | FileCheck %s
 
 target datalayout = "e-m:o-i64:64-f80:128-n8:16:32:64-S128"
 target triple = "x86_64-apple-macosx10.14.0"
@@ -47,6 +47,16 @@ if.then:                                          ; preds = %entry
   br label %if.end
 
 if.end:                                           ; preds = %entry
+  ret void
+}
+
+; Make sure we don't try to outline the entire function, especially when the
+; entry block is cold.
+; CHECK: define void @cold_entry_block() [[COLD_ATTR:#[0-9]+]]
+; CHECK-NOT: cold_entry_block.cold.1
+define void @cold_entry_block() {
+entry:
+  call void @sink()
   ret void
 }
 
@@ -181,6 +191,8 @@ if.then:                                          ; preds = %entry
 if.end:                                           ; preds = %entry
   ret void
 }
+
+; CHECK: attributes [[COLD_ATTR]] = { {{.*}}cold
 
 declare void @llvm.dbg.value(metadata, metadata, metadata)
 

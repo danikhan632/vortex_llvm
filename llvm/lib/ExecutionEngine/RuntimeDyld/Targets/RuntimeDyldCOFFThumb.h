@@ -14,6 +14,7 @@
 #define LLVM_LIB_EXECUTIONENGINE_RUNTIMEDYLD_TARGETS_RUNTIMEDYLDCOFFTHUMB_H
 
 #include "../RuntimeDyldCOFF.h"
+#include "llvm/ADT/SmallString.h"
 #include "llvm/BinaryFormat/COFF.h"
 #include "llvm/Object/COFF.h"
 
@@ -29,8 +30,7 @@ static bool isThumbFunc(object::symbol_iterator Symbol,
     std::string Buf;
     raw_string_ostream OS(Buf);
     logAllUnhandledErrors(SymTypeOrErr.takeError(), OS);
-    OS.flush();
-    report_fatal_error(Buf);
+    report_fatal_error(Twine(OS.str()));
   }
 
   if (*SymTypeOrErr != object::SymbolRef::ST_Function)
@@ -48,13 +48,35 @@ class RuntimeDyldCOFFThumb : public RuntimeDyldCOFF {
 public:
   RuntimeDyldCOFFThumb(RuntimeDyld::MemoryManager &MM,
                        JITSymbolResolver &Resolver)
-      : RuntimeDyldCOFF(MM, Resolver) {}
+      : RuntimeDyldCOFF(MM, Resolver, 4, COFF::IMAGE_REL_ARM_ADDR32) {}
 
   unsigned getMaxStubSize() const override {
     return 16; // 8-byte load instructions, 4-byte jump, 4-byte padding
   }
 
-  unsigned getStubAlignment() override { return 1; }
+  Expected<JITSymbolFlags> getJITSymbolFlags(const SymbolRef &SR) override {
+
+    auto Flags = RuntimeDyldImpl::getJITSymbolFlags(SR);
+
+    if (!Flags) {
+      return Flags.takeError();
+    }
+    auto SectionIterOrErr = SR.getSection();
+    if (!SectionIterOrErr) {
+      return SectionIterOrErr.takeError();
+    }
+    SectionRef Sec = *SectionIterOrErr.get();
+    const object::COFFObjectFile *COFFObjPtr =
+        cast<object::COFFObjectFile>(Sec.getObject());
+    const coff_section *CoffSec = COFFObjPtr->getCOFFSection(Sec);
+    bool isThumb = CoffSec->Characteristics & COFF::IMAGE_SCN_MEM_16BIT;
+
+    Flags->getTargetFlags() = isThumb;
+
+    return Flags;
+  }
+
+  Align getStubAlignment() override { return Align(1); }
 
   Expected<object::relocation_iterator>
   processRelocationRef(unsigned SectionID,
@@ -103,16 +125,29 @@ public:
                       << " RelType: " << RelTypeName << " TargetName: "
                       << TargetName << " Addend " << Addend << "\n");
 
+    bool IsExtern = Section == Obj.section_end();
     unsigned TargetSectionID = -1;
-    if (Section == Obj.section_end()) {
-      RelocationEntry RE(SectionID, Offset, RelType, 0, -1, 0, 0, 0, false, 0);
-      addRelocationForSymbol(RE, TargetName);
-    } else {
+    uint64_t TargetOffset = -1;
+
+    if (TargetName.starts_with(getImportSymbolPrefix())) {
+      TargetSectionID = SectionID;
+      TargetOffset = getDLLImportOffset(SectionID, Stubs, TargetName, true);
+      TargetName = StringRef();
+      IsExtern = false;
+    } else if (!IsExtern) {
       if (auto TargetSectionIDOrErr =
           findOrEmitSection(Obj, *Section, Section->isText(), ObjSectionToID))
         TargetSectionID = *TargetSectionIDOrErr;
       else
         return TargetSectionIDOrErr.takeError();
+      if (RelType != COFF::IMAGE_REL_ARM_SECTION)
+        TargetOffset = getSymbolOffset(*Symbol);
+    }
+
+    if (IsExtern) {
+      RelocationEntry RE(SectionID, Offset, RelType, 0, -1, 0, 0, 0, false, 0);
+      addRelocationForSymbol(RE, TargetName);
+    } else {
 
       // We need to find out if the relocation is relative to a thumb function
       // so that we include the ISA selection bit when resolve the relocation
@@ -124,16 +159,16 @@ public:
         // This relocation is ignored.
         break;
       case COFF::IMAGE_REL_ARM_ADDR32: {
-        RelocationEntry RE = RelocationEntry(
-            SectionID, Offset, RelType, Addend, TargetSectionID,
-            getSymbolOffset(*Symbol), 0, 0, false, 0, IsTargetThumbFunc);
+        RelocationEntry RE =
+            RelocationEntry(SectionID, Offset, RelType, Addend, TargetSectionID,
+                            TargetOffset, 0, 0, false, 0, IsTargetThumbFunc);
         addRelocationForSection(RE, TargetSectionID);
         break;
       }
       case COFF::IMAGE_REL_ARM_ADDR32NB: {
         RelocationEntry RE =
             RelocationEntry(SectionID, Offset, RelType, Addend, TargetSectionID,
-                            getSymbolOffset(*Symbol), 0, 0, false, 0);
+                            TargetOffset, 0, 0, false, 0);
         addRelocationForSection(RE, TargetSectionID);
         break;
       }
@@ -144,24 +179,23 @@ public:
         break;
       }
       case COFF::IMAGE_REL_ARM_SECREL: {
-        RelocationEntry RE = RelocationEntry(SectionID, Offset, RelType,
-                                             getSymbolOffset(*Symbol) + Addend);
+        RelocationEntry RE =
+            RelocationEntry(SectionID, Offset, RelType, TargetOffset + Addend);
         addRelocationForSection(RE, TargetSectionID);
         break;
       }
       case COFF::IMAGE_REL_ARM_MOV32T: {
-        RelocationEntry RE = RelocationEntry(
-            SectionID, Offset, RelType, Addend, TargetSectionID,
-            getSymbolOffset(*Symbol), 0, 0, false, 0, IsTargetThumbFunc);
+        RelocationEntry RE =
+            RelocationEntry(SectionID, Offset, RelType, Addend, TargetSectionID,
+                            TargetOffset, 0, 0, false, 0, IsTargetThumbFunc);
         addRelocationForSection(RE, TargetSectionID);
         break;
       }
       case COFF::IMAGE_REL_ARM_BRANCH20T:
       case COFF::IMAGE_REL_ARM_BRANCH24T:
       case COFF::IMAGE_REL_ARM_BLX23T: {
-        RelocationEntry RE =
-            RelocationEntry(SectionID, Offset, RelType,
-                            getSymbolOffset(*Symbol) + Addend, true, 0);
+        RelocationEntry RE = RelocationEntry(SectionID, Offset, RelType,
+                                             TargetOffset + Addend, true, 0);
         addRelocationForSection(RE, TargetSectionID);
         break;
       }
@@ -256,7 +290,6 @@ public:
       EncodeImmediate(&Target[0],
                       (static_cast<uint32_t>(Result) >> 00) | ISASelectionBit);
       EncodeImmediate(&Target[4], static_cast<uint32_t>(Result) >> 16);
-
       break;
     }
     case COFF::IMAGE_REL_ARM_BRANCH20T: {

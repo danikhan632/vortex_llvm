@@ -13,9 +13,9 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/DebugInfo/DWARF/DWARFContext.h"
 #include "llvm/Object/ELF.h"
+#include <optional>
 
-namespace lld {
-namespace elf {
+namespace lld::elf {
 
 class InputSection;
 
@@ -30,6 +30,14 @@ public:
   void forEachInfoSections(
       llvm::function_ref<void(const llvm::DWARFSection &)> f) const override {
     f(infoSection);
+  }
+
+  InputSection *getInfoSection() const {
+    return cast<InputSection>(infoSection.sec);
+  }
+
+  const llvm::DWARFSection &getLoclistsSection() const override {
+    return loclistsSection;
   }
 
   const llvm::DWARFSection &getRangesSection() const override {
@@ -52,11 +60,11 @@ public:
     return addrSection;
   }
 
-  const llvm::DWARFSection &getGnuPubnamesSection() const override {
+  const LLDDWARFSection &getGnuPubnamesSection() const override {
     return gnuPubnamesSection;
   }
 
-  const llvm::DWARFSection &getGnuPubtypesSection() const override {
+  const LLDDWARFSection &getGnuPubtypesSection() const override {
     return gnuPubtypesSection;
   }
 
@@ -66,21 +74,22 @@ public:
   StringRef getLineStrSection() const override { return lineStrSection; }
 
   bool isLittleEndian() const override {
-    return ELFT::TargetEndianness == llvm::support::little;
+    return ELFT::TargetEndianness == llvm::endianness::little;
   }
 
-  llvm::Optional<llvm::RelocAddrEntry> find(const llvm::DWARFSection &sec,
-                                            uint64_t pos) const override;
+  std::optional<llvm::RelocAddrEntry> find(const llvm::DWARFSection &sec,
+                                           uint64_t pos) const override;
 
 private:
   template <class RelTy>
-  llvm::Optional<llvm::RelocAddrEntry> findAux(const InputSectionBase &sec,
-                                               uint64_t pos,
-                                               ArrayRef<RelTy> rels) const;
+  std::optional<llvm::RelocAddrEntry> findAux(const InputSectionBase &sec,
+                                              uint64_t pos,
+                                              ArrayRef<RelTy> rels) const;
 
   LLDDWARFSection gnuPubnamesSection;
   LLDDWARFSection gnuPubtypesSection;
   LLDDWARFSection infoSection;
+  LLDDWARFSection loclistsSection;
   LLDDWARFSection rangesSection;
   LLDDWARFSection rnglistsSection;
   LLDDWARFSection strOffsetsSection;
@@ -91,7 +100,6 @@ private:
   StringRef lineStrSection;
 };
 
-} // namespace elf
-} // namespace lld
+} // namespace lld::elf
 
 #endif

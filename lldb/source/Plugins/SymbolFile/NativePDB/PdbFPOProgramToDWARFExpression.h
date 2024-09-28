@@ -6,11 +6,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef lldb_Plugins_SymbolFile_PDB_PDBFPOProgramToDWARFExpression_h_
-#define lldb_Plugins_SymbolFile_PDB_PDBFPOProgramToDWARFExpression_h_
+#ifndef LLDB_SOURCE_PLUGINS_SYMBOLFILE_NATIVEPDB_PDBFPOPROGRAMTODWARFEXPRESSION_H
+#define LLDB_SOURCE_PLUGINS_SYMBOLFILE_NATIVEPDB_PDBFPOPROGRAMTODWARFEXPRESSION_H
 
 #include "llvm/ADT/StringRef.h"
-#include "llvm/ADT/Triple.h"
+#include "llvm/TargetParser/Triple.h"
 
 namespace lldb_private {
 class Stream;

@@ -2,14 +2,14 @@
 // RUN: llvm-mc -filetype=obj -triple=x86_64-unknown-linux %s -o %t.o
 // RUN: ld.lld %t.o -o %t1
 // RUN: llvm-readobj -r %t1 | FileCheck --check-prefix=NORELOC %s
-// RUN: llvm-objdump -d %t1 | FileCheck --check-prefix=DISASM %s
+// RUN: llvm-objdump --no-print-imm-hex -d %t1 | FileCheck --check-prefix=DISASM %s
 
 // NORELOC:      Relocations [
 // NORELOC-NEXT: ]
 
 // DISASM:      Disassembly of section .text:
 // DISASM-EMPTY:
-// DISASM-NEXT: _start:
+// DISASM-NEXT: <_start>:
 // DISASM-NEXT:   movq $-8, %rax
 // DISASM-NEXT:   movq $-8, %r15
 // DISASM-NEXT:   leaq -8(%rax), %rax

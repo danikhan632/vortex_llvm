@@ -6,7 +6,19 @@ add_llvm_component_library(LLVMPowerPCDesc
   PPCMCCodeEmitter.cpp
   PPCMCExpr.cpp
   PPCPredicates.cpp
-  PPCMachObjectWriter.cpp
   PPCELFObjectWriter.cpp
   PPCXCOFFObjectWriter.cpp
+  PPCELFStreamer.cpp
+  PPCXCOFFStreamer.cpp
+
+  LINK_COMPONENTS
+  BinaryFormat
+  CodeGenTypes
+  MC
+  PowerPCInfo
+  Support
+  TargetParser
+
+  ADD_TO_COMPONENT
+  PowerPC
   )

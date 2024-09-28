@@ -1,7 +1,7 @@
 // REQUIRES: arm
 // RUN: llvm-mc -filetype=obj -triple=armv7a-linux-gnueabihf --arm-add-build-attributes %s -o %t.o
 // RUN: ld.lld --fix-cortex-a8 --shared %t.o -o %t2
-// RUN: llvm-objdump -d --no-show-raw-insn %t2 | FileCheck %s
+// RUN: llvm-objdump --no-print-imm-hex -d --no-show-raw-insn %t2 | FileCheck %s
 
 /// Test case that for an OutputSection larger than the ThunkSectionSpacing
 /// --fix-cortex-a8 will cause the size of the ThunkSection to be rounded up to
@@ -22,13 +22,13 @@ thumb_target:
   b.w thumb_target
 
 /// Expect thunk and patch to be inserted here
-// CHECK:  00003004 __ThumbV7PILongThunk_arm_func:
-// CHECK-NEXT: 3004: movw    r12, #4088
-// CHECK-NEXT:       movt    r12, #256
-// CHECK-NEXT:       add     r12, pc
-// CHECK-NEXT:       bx      r12
-// CHECK:  00004004 __CortexA8657417_2FFE:
-// CHECK-NEXT: 4004: b.w     #-8196
+// CHECK:  00012004 <__ThumbV7PILongThunk_arm_func>:
+// CHECK-NEXT: 12004: movw    r12, #4088
+// CHECK-NEXT:        movt    r12, #256
+// CHECK-NEXT:        add     r12, pc
+// CHECK-NEXT:        bx      r12
+// CHECK:  00013004 <__CortexA8657417_11FFE>:
+// CHECK-NEXT: 13004: b.w     0x11004 <thumb_target>
  .section .text.02
  /// Take us over thunk section spacing
  .space 16 * 1024 * 1024

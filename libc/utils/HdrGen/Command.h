@@ -1,4 +1,4 @@
-//===-------- Base class for header generation commands ---------*- C++ -*-===//
+//===-- Base class for header generation commands ---------------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -36,7 +36,7 @@ public:
   public:
     ErrorReporter(llvm::SMLoc L, llvm::SourceMgr &SM) : Loc(L), SrcMgr(SM) {}
 
-    void printFatalError(llvm::Twine Msg) const {
+    [[noreturn]] void printFatalError(llvm::Twine Msg) const {
       SrcMgr.PrintMessage(Loc, llvm::SourceMgr::DK_Error, Msg);
       std::exit(1);
     }

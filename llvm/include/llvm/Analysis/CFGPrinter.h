@@ -18,114 +18,221 @@
 #ifndef LLVM_ANALYSIS_CFGPRINTER_H
 #define LLVM_ANALYSIS_CFGPRINTER_H
 
+#include "llvm/Analysis/BlockFrequencyInfo.h"
+#include "llvm/Analysis/BranchProbabilityInfo.h"
+#include "llvm/Analysis/HeatUtils.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/PassManager.h"
-#include "llvm/Support/GraphWriter.h"
+#include "llvm/IR/ProfDataUtils.h"
+#include "llvm/Support/DOTGraphTraits.h"
+#include "llvm/Support/FormatVariadic.h"
 
 namespace llvm {
-class CFGViewerPass
-    : public PassInfoMixin<CFGViewerPass> {
+template <class GraphType> struct GraphTraits;
+class CFGViewerPass : public PassInfoMixin<CFGViewerPass> {
 public:
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
+  static bool isRequired() { return true; }
 };
 
-class CFGOnlyViewerPass
-    : public PassInfoMixin<CFGOnlyViewerPass> {
+class CFGOnlyViewerPass : public PassInfoMixin<CFGOnlyViewerPass> {
 public:
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
+  static bool isRequired() { return true; }
 };
 
-class CFGPrinterPass
-    : public PassInfoMixin<CFGPrinterPass> {
+class CFGPrinterPass : public PassInfoMixin<CFGPrinterPass> {
 public:
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
+  static bool isRequired() { return true; }
 };
 
-class CFGOnlyPrinterPass
-    : public PassInfoMixin<CFGOnlyPrinterPass> {
+class CFGOnlyPrinterPass : public PassInfoMixin<CFGOnlyPrinterPass> {
 public:
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
+  static bool isRequired() { return true; }
 };
 
-template<>
-struct DOTGraphTraits<const Function*> : public DefaultDOTGraphTraits {
+class DOTFuncInfo {
+private:
+  const Function *F;
+  const BlockFrequencyInfo *BFI;
+  const BranchProbabilityInfo *BPI;
+  uint64_t MaxFreq;
+  bool ShowHeat;
+  bool EdgeWeights;
+  bool RawWeights;
 
-  DOTGraphTraits (bool isSimple=false) : DefaultDOTGraphTraits(isSimple) {}
+public:
+  DOTFuncInfo(const Function *F) : DOTFuncInfo(F, nullptr, nullptr, 0) {}
 
-  static std::string getGraphName(const Function *F) {
-    return "CFG for '" + F->getName().str() + "' function";
+  DOTFuncInfo(const Function *F, const BlockFrequencyInfo *BFI,
+              const BranchProbabilityInfo *BPI, uint64_t MaxFreq)
+      : F(F), BFI(BFI), BPI(BPI), MaxFreq(MaxFreq) {
+    ShowHeat = false;
+    EdgeWeights = !!BPI; // Print EdgeWeights when BPI is available.
+    RawWeights = !!BFI;  // Print RawWeights when BFI is available.
   }
 
-  static std::string getSimpleNodeLabel(const BasicBlock *Node,
-                                        const Function *) {
-    if (!Node->getName().empty())
-      return Node->getName().str();
+  const BlockFrequencyInfo *getBFI() const { return BFI; }
 
-    std::string Str;
-    raw_string_ostream OS(Str);
+  const BranchProbabilityInfo *getBPI() const { return BPI; }
 
-    Node->printAsOperand(OS, false);
-    return OS.str();
+  const Function *getFunction() const { return this->F; }
+
+  uint64_t getMaxFreq() const { return MaxFreq; }
+
+  uint64_t getFreq(const BasicBlock *BB) const {
+    return BFI->getBlockFreq(BB).getFrequency();
   }
 
-  static std::string getCompleteNodeLabel(const BasicBlock *Node,
-                                          const Function *) {
-    enum { MaxColumns = 80 };
-    std::string Str;
-    raw_string_ostream OS(Str);
+  void setHeatColors(bool ShowHeat) { this->ShowHeat = ShowHeat; }
 
-    if (Node->getName().empty()) {
-      Node->printAsOperand(OS, false);
-      OS << ":";
-    }
+  bool showHeatColors() { return ShowHeat; }
 
-    OS << *Node;
-    std::string OutStr = OS.str();
-    if (OutStr[0] == '\n') OutStr.erase(OutStr.begin());
+  void setRawEdgeWeights(bool RawWeights) { this->RawWeights = RawWeights; }
 
-    // Process string output to make it nicer...
-    unsigned ColNum = 0;
-    unsigned LastSpace = 0;
-    for (unsigned i = 0; i != OutStr.length(); ++i) {
-      if (OutStr[i] == '\n') {                            // Left justify
-        OutStr[i] = '\\';
-        OutStr.insert(OutStr.begin()+i+1, 'l');
-        ColNum = 0;
-        LastSpace = 0;
-      } else if (OutStr[i] == ';') {                      // Delete comments!
-        unsigned Idx = OutStr.find('\n', i+1);            // Find end of line
-        OutStr.erase(OutStr.begin()+i, OutStr.begin()+Idx);
-        --i;
-      } else if (ColNum == MaxColumns) {                  // Wrap lines.
-        // Wrap very long names even though we can't find a space.
-        if (!LastSpace)
-          LastSpace = i;
-        OutStr.insert(LastSpace, "\\l...");
-        ColNum = i - LastSpace;
-        LastSpace = 0;
-        i += 3; // The loop will advance 'i' again.
-      }
-      else
-        ++ColNum;
-      if (OutStr[i] == ' ')
+  bool useRawEdgeWeights() { return RawWeights; }
+
+  void setEdgeWeights(bool EdgeWeights) { this->EdgeWeights = EdgeWeights; }
+
+  bool showEdgeWeights() { return EdgeWeights; }
+};
+
+template <>
+struct GraphTraits<DOTFuncInfo *> : public GraphTraits<const BasicBlock *> {
+  static NodeRef getEntryNode(DOTFuncInfo *CFGInfo) {
+    return &(CFGInfo->getFunction()->getEntryBlock());
+  }
+
+  // nodes_iterator/begin/end - Allow iteration over all nodes in the graph
+  using nodes_iterator = pointer_iterator<Function::const_iterator>;
+
+  static nodes_iterator nodes_begin(DOTFuncInfo *CFGInfo) {
+    return nodes_iterator(CFGInfo->getFunction()->begin());
+  }
+
+  static nodes_iterator nodes_end(DOTFuncInfo *CFGInfo) {
+    return nodes_iterator(CFGInfo->getFunction()->end());
+  }
+
+  static size_t size(DOTFuncInfo *CFGInfo) {
+    return CFGInfo->getFunction()->size();
+  }
+};
+
+template <typename BasicBlockT>
+std::string SimpleNodeLabelString(const BasicBlockT *Node) {
+  if (!Node->getName().empty())
+    return Node->getName().str();
+
+  std::string Str;
+  raw_string_ostream OS(Str);
+
+  Node->printAsOperand(OS, false);
+  return OS.str();
+}
+
+template <typename BasicBlockT>
+std::string CompleteNodeLabelString(
+    const BasicBlockT *Node,
+    function_ref<void(raw_string_ostream &, const BasicBlockT &)>
+        HandleBasicBlock,
+    function_ref<void(std::string &, unsigned &, unsigned)>
+        HandleComment) {
+
+  enum { MaxColumns = 80 };
+  std::string Str;
+  raw_string_ostream OS(Str);
+  HandleBasicBlock(OS, *Node);
+  std::string OutStr = OS.str();
+  // Remove "%" from BB name
+  if (OutStr[0] == '%') {
+    OutStr.erase(OutStr.begin());
+  }
+  // Place | after BB name to separate it into header
+  OutStr.insert(OutStr.find_first_of('\n') + 1, "\\|");
+
+  unsigned ColNum = 0;
+  unsigned LastSpace = 0;
+  for (unsigned i = 0; i != OutStr.length(); ++i) {
+    if (OutStr[i] == '\n') { // Left justify
+      OutStr[i] = '\\';
+      OutStr.insert(OutStr.begin() + i + 1, 'l');
+      ColNum = 0;
+      LastSpace = 0;
+    } else if (OutStr[i] == ';') {             // Delete comments!
+      unsigned Idx = OutStr.find('\n', i + 1); // Find end of line
+      HandleComment(OutStr, i, Idx);
+    } else if (ColNum == MaxColumns) { // Wrap lines.
+      // Wrap very long names even though we can't find a space.
+      if (!LastSpace)
         LastSpace = i;
-    }
-    return OutStr;
+      OutStr.insert(LastSpace, "\\l...");
+      ColNum = i - LastSpace;
+      LastSpace = 0;
+      i += 3; // The loop will advance 'i' again.
+    } else
+      ++ColNum;
+    if (OutStr[i] == ' ')
+      LastSpace = i;
+  }
+  return OutStr;
+}
+
+template <>
+struct DOTGraphTraits<DOTFuncInfo *> : public DefaultDOTGraphTraits {
+
+  // Cache for is hidden property
+  DenseMap<const BasicBlock *, bool> isOnDeoptOrUnreachablePath;
+
+  DOTGraphTraits(bool isSimple = false) : DefaultDOTGraphTraits(isSimple) {}
+
+  static void eraseComment(std::string &OutStr, unsigned &I, unsigned Idx) {
+    OutStr.erase(OutStr.begin() + I, OutStr.begin() + Idx);
+    --I;
   }
 
-  std::string getNodeLabel(const BasicBlock *Node,
-                           const Function *Graph) {
+  static std::string getGraphName(DOTFuncInfo *CFGInfo) {
+    return "CFG for '" + CFGInfo->getFunction()->getName().str() + "' function";
+  }
+
+  static std::string getSimpleNodeLabel(const BasicBlock *Node, DOTFuncInfo *) {
+    return SimpleNodeLabelString(Node);
+  }
+
+  static void printBasicBlock(raw_string_ostream &OS, const BasicBlock &Node) {
+    // Prepend label name
+    Node.printAsOperand(OS, false);
+    OS << ":\n";
+    for (auto J = Node.begin(), JE = Node.end(); J != JE; ++J) {
+      const Instruction *Inst = &*J;
+      OS << *Inst << "\n";
+    }
+  }
+
+  static std::string getCompleteNodeLabel(
+      const BasicBlock *Node, DOTFuncInfo *,
+      function_ref<void(raw_string_ostream &, const BasicBlock &)>
+          HandleBasicBlock = printBasicBlock,
+      function_ref<void(std::string &, unsigned &, unsigned)>
+          HandleComment = eraseComment) {
+    return CompleteNodeLabelString(Node, HandleBasicBlock, HandleComment);
+  }
+
+  std::string getNodeLabel(const BasicBlock *Node, DOTFuncInfo *CFGInfo) {
+
     if (isSimple())
-      return getSimpleNodeLabel(Node, Graph);
+      return getSimpleNodeLabel(Node, CFGInfo);
     else
-      return getCompleteNodeLabel(Node, Graph);
+      return getCompleteNodeLabel(Node, CFGInfo);
   }
 
   static std::string getEdgeSourceLabel(const BasicBlock *Node,
-                                        succ_const_iterator I) {
+                                        const_succ_iterator I) {
     // Label source of conditional branches with "T" or "F"
     if (const BranchInst *BI = dyn_cast<BranchInst>(Node->getTerminator()))
       if (BI->isConditional())
@@ -135,7 +242,8 @@ struct DOTGraphTraits<const Function*> : public DefaultDOTGraphTraits {
     if (const SwitchInst *SI = dyn_cast<SwitchInst>(Node->getTerminator())) {
       unsigned SuccNo = I.getSuccessorIndex();
 
-      if (SuccNo == 0) return "def";
+      if (SuccNo == 0)
+        return "def";
 
       std::string Str;
       raw_string_ostream OS(Str);
@@ -146,40 +254,92 @@ struct DOTGraphTraits<const Function*> : public DefaultDOTGraphTraits {
     return "";
   }
 
+  static std::string getBBName(const BasicBlock *Node) {
+    std::string NodeName = Node->getName().str();
+    if (NodeName.empty()) {
+      raw_string_ostream NodeOS(NodeName);
+      Node->printAsOperand(NodeOS, false);
+      NodeName = NodeOS.str();
+      // Removing %
+      NodeName.erase(NodeName.begin());
+    }
+    return NodeName;
+  }
+
   /// Display the raw branch weights from PGO.
-  std::string getEdgeAttributes(const BasicBlock *Node, succ_const_iterator I,
-                                const Function *F) {
+  std::string getEdgeAttributes(const BasicBlock *Node, const_succ_iterator I,
+                                DOTFuncInfo *CFGInfo) {
+    unsigned OpNo = I.getSuccessorIndex();
     const Instruction *TI = Node->getTerminator();
+    BasicBlock *SuccBB = TI->getSuccessor(OpNo);
+    auto BranchProb = CFGInfo->getBPI()->getEdgeProbability(Node, SuccBB);
+    double WeightPercent = ((double)BranchProb.getNumerator()) /
+                           ((double)BranchProb.getDenominator());
+
+    std::string TTAttr =
+        formatv("tooltip=\"{0} -> {1}\\nProbability {2:P}\" ", getBBName(Node),
+                getBBName(SuccBB), WeightPercent);
+    if (!CFGInfo->showEdgeWeights())
+      return TTAttr;
+
     if (TI->getNumSuccessors() == 1)
-      return "";
+      return TTAttr + "penwidth=2";
 
-    MDNode *WeightsNode = TI->getMetadata(LLVMContext::MD_prof);
-    if (!WeightsNode)
-      return "";
+    if (OpNo >= TI->getNumSuccessors())
+      return TTAttr;
 
-    MDString *MDName = cast<MDString>(WeightsNode->getOperand(0));
-    if (MDName->getString() != "branch_weights")
-      return "";
+    double Width = 1 + WeightPercent;
 
-    unsigned OpNo = I.getSuccessorIndex() + 1;
-    if (OpNo >= WeightsNode->getNumOperands())
-      return "";
-    ConstantInt *Weight =
-        mdconst::dyn_extract<ConstantInt>(WeightsNode->getOperand(OpNo));
-    if (!Weight)
-      return "";
+    if (!CFGInfo->useRawEdgeWeights())
+      return TTAttr +
+             formatv("label=\"{0:P}\" penwidth={1}", WeightPercent, Width)
+                 .str();
 
     // Prepend a 'W' to indicate that this is a weight rather than the actual
     // profile count (due to scaling).
-    return ("label=\"W:" + Twine(Weight->getZExtValue()) + "\"").str();
-  }
-};
-} // End llvm namespace
 
-namespace llvm {
-  class FunctionPass;
-  FunctionPass *createCFGPrinterLegacyPassPass ();
-  FunctionPass *createCFGOnlyPrinterLegacyPassPass ();
+    uint64_t Freq = CFGInfo->getFreq(Node);
+    std::string Attrs =
+        TTAttr + formatv("label=\"W:{0}\" penwidth={1}",
+                         (uint64_t)(Freq * WeightPercent), Width)
+                     .str();
+    if (Attrs.size())
+      return Attrs;
+
+    MDNode *WeightsNode = getBranchWeightMDNode(*TI);
+    if (!WeightsNode)
+      return TTAttr;
+
+    OpNo = I.getSuccessorIndex() + 1;
+    if (OpNo >= WeightsNode->getNumOperands())
+      return TTAttr;
+    ConstantInt *Weight =
+        mdconst::dyn_extract<ConstantInt>(WeightsNode->getOperand(OpNo));
+    if (!Weight)
+      return TTAttr;
+    return (TTAttr + "label=\"W:" + std::to_string(Weight->getZExtValue()) +
+            "\" penwidth=" + std::to_string(Width));
+  }
+
+  std::string getNodeAttributes(const BasicBlock *Node, DOTFuncInfo *CFGInfo) {
+
+    if (!CFGInfo->showHeatColors())
+      return "";
+
+    uint64_t Freq = CFGInfo->getFreq(Node);
+    std::string Color = getHeatColor(Freq, CFGInfo->getMaxFreq());
+    std::string EdgeColor = (Freq <= (CFGInfo->getMaxFreq() / 2))
+                                ? (getHeatColor(0))
+                                : (getHeatColor(1));
+
+    std::string Attrs = "color=\"" + EdgeColor + "ff\", style=filled," +
+                        " fillcolor=\"" + Color + "70\"" +
+                        " fontname=\"Courier\"";
+    return Attrs;
+  }
+  bool isNodeHidden(const BasicBlock *Node, const DOTFuncInfo *CFGInfo);
+  void computeDeoptOrUnreachablePaths(const Function *F);
+};
 } // End llvm namespace
 
 #endif

@@ -1,4 +1,4 @@
-//===-- StreamTest.cpp ------------------------------------------*- C++ -*-===//
+//===-- StreamTest.cpp ----------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -127,6 +127,39 @@ TEST_F(StreamTest, AddressRangeSize) {
 TEST_F(StreamTest, ChangingByteOrder) {
   s.SetByteOrder(lldb::eByteOrderPDP);
   EXPECT_EQ(lldb::eByteOrderPDP, s.GetByteOrder());
+}
+
+TEST_F(StreamTest, SetIndentLevel) {
+  s.Indent("a");
+  EXPECT_EQ("a", TakeValue());
+
+  s.SetIndentLevel(3);
+  s.Indent("a");
+  EXPECT_EQ("   a", TakeValue());
+
+  s.SetIndentLevel(2);
+  s.Indent("a");
+  EXPECT_EQ("  a", TakeValue());
+
+  s.SetIndentLevel(0);
+  s.Indent("a");
+  EXPECT_EQ("a", TakeValue());
+}
+
+TEST_F(StreamTest, Indent) {
+  s.SetIndentLevel(2);
+  const char *nullptr_cstring = nullptr;
+  s.Indent(nullptr_cstring);
+  EXPECT_EQ("  ", TakeValue());
+
+  s.Indent("");
+  EXPECT_EQ("  ", TakeValue());
+
+  s.Indent(" ");
+  EXPECT_EQ("   ", TakeValue());
+
+  s.Indent(" aa");
+  EXPECT_EQ("   aa", TakeValue());
 }
 
 TEST_F(StreamTest, PutChar) {
@@ -469,6 +502,30 @@ TEST_F(StreamTest, PutRawBytesToMixedEndian) {
 #if 0
   EXPECT_EQ("\x34\x12\x78\x56", TakeValue());
 #endif
+}
+
+TEST_F(StreamTest, PutRawBytesZeroLenght) {
+  uint32_t value = 0x12345678;
+
+  s.PutRawBytes(static_cast<void *>(&value), 0, hostByteOrder,
+                lldb::eByteOrderLittle);
+  EXPECT_EQ(0U, s.GetWrittenBytes());
+
+  s.PutRawBytes(static_cast<void *>(&value), 0, hostByteOrder,
+                lldb::eByteOrderBig);
+  EXPECT_EQ(0U, s.GetWrittenBytes());
+}
+
+TEST_F(StreamTest, PutBytesAsRawHex8ZeroLenght) {
+  uint32_t value = 0x12345678;
+
+  s.PutBytesAsRawHex8(static_cast<void *>(&value), 0, hostByteOrder,
+                      lldb::eByteOrderLittle);
+  EXPECT_EQ(0U, s.GetWrittenBytes());
+
+  s.PutBytesAsRawHex8(static_cast<void *>(&value), 0, hostByteOrder,
+                      lldb::eByteOrderBig);
+  EXPECT_EQ(0U, s.GetWrittenBytes());
 }
 
 // ULEB128 support for binary streams.

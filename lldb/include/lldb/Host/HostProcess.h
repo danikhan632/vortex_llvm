@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef lldb_Host_HostProcess_h_
-#define lldb_Host_HostProcess_h_
+#ifndef LLDB_HOST_HOSTPROCESS_H
+#define LLDB_HOST_HOSTPROCESS_H
 
 #include "lldb/Host/Host.h"
 #include "lldb/lldb-types.h"
@@ -37,14 +37,12 @@ public:
   ~HostProcess();
 
   Status Terminate();
-  Status GetMainModule(FileSpec &file_spec) const;
 
   lldb::pid_t GetProcessId() const;
   bool IsRunning() const;
 
   llvm::Expected<HostThread>
-  StartMonitoring(const Host::MonitorChildProcessCallback &callback,
-                  bool monitor_signals);
+  StartMonitoring(const Host::MonitorChildProcessCallback &callback);
 
   HostNativeProcessBase &GetNativeProcess();
   const HostNativeProcessBase &GetNativeProcess() const;

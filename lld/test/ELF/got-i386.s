@@ -2,7 +2,7 @@
 // RUN: llvm-mc -filetype=obj -triple=i686-unknown-linux %s -o %t.o
 // RUN: ld.lld %t.o -o %t
 // RUN: llvm-readobj -S -r --symbols %t | FileCheck %s
-// RUN: llvm-objdump -d %t | FileCheck --check-prefix=DISASM %s
+// RUN: llvm-objdump --no-print-imm-hex -d %t | FileCheck --check-prefix=DISASM %s
 
 // CHECK:      Name: .got.plt
 // CHECK-NEXT: Type: SHT_PROGBITS
@@ -41,7 +41,7 @@
 // 0x40200A + 5 - 15 = addr(.got) = 0x402000
 // DISASM:      Disassembly of section .text:
 // DISASM-EMPTY:
-// DISASM-NEXT: _start:
+// DISASM-NEXT: <_start>:
 // DISASM-NEXT: 4010d4: c7 81 0c 00 00 00 01 00 00 00 movl $1, 12(%ecx)
 // DISASM-NEXT: 4010de: c7 81 16 00 00 00 02 00 00 00 movl $2, 22(%ecx)
 // DISASM-NEXT: 4010e8: c7 81 1b 00 00 00 03 00 00 00 movl $3, 27(%ecx)

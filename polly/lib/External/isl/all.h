@@ -1,3 +1,6 @@
+#include <isl/id.h>
+#include <isl/id_to_id.h>
+#include <isl/space.h>
 #include <isl/val.h>
 #include <isl/aff.h>
 #include <isl/set.h>
@@ -9,3 +12,4 @@
 #include <isl/schedule.h>
 #include <isl/schedule_node.h>
 #include <isl/ast_build.h>
+#include <isl/fixed_box.h>

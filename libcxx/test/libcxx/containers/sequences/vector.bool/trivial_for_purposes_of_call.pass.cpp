@@ -24,12 +24,11 @@
 //       destructor, or
 //     * all of its copy and move constructors are deleted.
 
-// UNSUPPORTED: c++98, c++03
+// UNSUPPORTED: c++03
 
-#include <vector>
 #include <cassert>
-
-#include "test_macros.h"
+#include <type_traits>
+#include <vector>
 
 template <class T>
 using IsTrivialForCall = std::integral_constant<bool,

@@ -1,4 +1,4 @@
-//===-- NameMatches.cpp -----------------------------------------*- C++ -*-===//
+//===-- NameMatches.cpp ---------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -22,9 +22,9 @@ bool lldb_private::NameMatches(llvm::StringRef name, NameMatch match_type,
   case NameMatch::Contains:
     return name.contains(match);
   case NameMatch::StartsWith:
-    return name.startswith(match);
+    return name.starts_with(match);
   case NameMatch::EndsWith:
-    return name.endswith(match);
+    return name.ends_with(match);
   case NameMatch::RegularExpression: {
     RegularExpression regex(match);
     return regex.Execute(name);

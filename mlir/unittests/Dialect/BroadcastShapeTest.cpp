@@ -1,6 +1,6 @@
 //===- BroadcastShapeTest.cpp - broadcasting shape unit tests -------------===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -47,9 +47,10 @@ TEST(BroadcastShapeTest, InterleavingOnes) {
 
 TEST(BroadcastShapeTest, InterleavingUnknowns) {
   SmallVector<int64_t, 4> result;
-  ASSERT_TRUE(
-      getBroadcastedShape({1, 2, -1, -1, -1}, {-1, -1, -1, 4, 1}, result));
-  EXPECT_THAT(result, ElementsAre(-1, 2, -1, 4, -1));
+  int64_t dyn = mlir::ShapedType::kDynamic;
+  ASSERT_TRUE(getBroadcastedShape({1, 2, dyn, dyn, dyn}, {dyn, dyn, dyn, 4, 1},
+                                  result));
+  EXPECT_THAT(result, ElementsAre(dyn, 2, dyn, 4, dyn));
 }
 
 TEST(BroadcastShapeTest, IncompatibleLowDim) {

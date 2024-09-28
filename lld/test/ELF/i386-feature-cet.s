@@ -23,6 +23,23 @@
 # RUN:   | FileCheck --check-prefix=WARN %s
 # WARN: {{.*}}.o: -z force-ibt: file does not have GNU_PROPERTY_X86_FEATURE_1_IBT property
 
+# RUN: not ld.lld -e func1 %t.o %t3.o -o /dev/null -z cet-report=something 2>&1 \
+# RUN:   | FileCheck --check-prefix=REPORT_INVALID %s
+# REPORT_INVALID: error: -z cet-report= parameter something is not recognized
+# REPORT_INVALID-EMPTY:
+
+# RUN: ld.lld -e func1 %t.o %t3.o -o /dev/null -z cet-report=warning 2>&1 \
+# RUN:   | FileCheck --check-prefix=CET_REPORT_WARN %s
+# CET_REPORT_WARN: {{.*}}.o: -z cet-report: file does not have GNU_PROPERTY_X86_FEATURE_1_IBT property
+# CET_REPORT_WARN: {{.*}}.o: -z cet-report: file does not have GNU_PROPERTY_X86_FEATURE_1_SHSTK property
+# CET_REPORT_WARN-EMPTY:
+
+# RUN: not ld.lld -e func1 %t.o %t3.o -o /dev/null -z cet-report=error 2>&1 \
+# RUN:   | FileCheck --check-prefix=CET_REPORT_ERROR %s
+# CET_REPORT_ERROR: {{.*}}.o: -z cet-report: file does not have GNU_PROPERTY_X86_FEATURE_1_IBT property
+# CET_REPORT_ERROR: {{.*}}.o: -z cet-report: file does not have GNU_PROPERTY_X86_FEATURE_1_SHSTK property
+# CET_REPORT_ERROR-EMPTY:
+
 # RUN: ld.lld -e func1 %t.o %t4.o -o %t
 # RUN: llvm-readelf -n %t | FileCheck --check-prefix=NOSHSTK %s
 
@@ -40,13 +57,13 @@
 # GOTPLT-NEXT: 0x004032e0 0b124000
 
 # DISASM:      Disassembly of section .text:
-# DISASM:      00401200 func1:
-# DISASM-NEXT: 401200:       calll   0x2b <func2+0x401230>
-# DISASM-NEXT: 401205:       calll   0x36 <ifunc>
+# DISASM:      00401200 <func1>:
+# DISASM-NEXT: 401200:       calll   0x401230 <func2+0x401230>
+# DISASM-NEXT: 401205:       calll   0x401240 <ifunc>
 # DISASM-NEXT:               retl
 
 # DISASM:      Disassembly of section .plt:
-# DISASM:      00401210 .plt:
+# DISASM:      00401210 <.plt>:
 # DISASM-NEXT: 401210:       pushl   0x4032d4
 # DISASM-NEXT:               jmpl    *0x4032d8
 # DISASM-NEXT:               nop
@@ -55,17 +72,17 @@
 # DISASM-NEXT:               nop
 # DISASM-NEXT:               endbr32
 # DISASM-NEXT:               pushl   $0x0
-# DISASM-NEXT:               jmp     -0x1e <.plt>
+# DISASM-NEXT:               jmp     0x401210 <.plt>
 # DISASM-NEXT:               nop
 
 # DISASM:      Disassembly of section .plt.sec:
-# DISASM:      00401230 .plt.sec:
+# DISASM:      00401230 <.plt.sec>:
 # DISASM-NEXT: 401230:       endbr32
 # DISASM-NEXT:               jmpl    *0x4032dc
 # DISASM-NEXT:               nopw    (%eax,%eax)
 
 # DISASM:      Disassembly of section .iplt:
-# DISASM:      00401240 ifunc:
+# DISASM:      00401240 <ifunc>:
 # DISASM-NEXT: 401240:       endbr32
 # DISASM-NEXT:               jmpl    *0x4032e0
 # DISASM-NEXT:               nopw    (%eax,%eax)

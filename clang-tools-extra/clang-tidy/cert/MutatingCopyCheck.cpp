@@ -12,31 +12,24 @@
 
 using namespace clang::ast_matchers;
 
-namespace clang {
-namespace tidy {
-namespace cert {
+namespace clang::tidy::cert {
 
 static constexpr llvm::StringLiteral SourceDeclName = "ChangedPVD";
 static constexpr llvm::StringLiteral MutatingOperatorName = "MutatingOp";
 static constexpr llvm::StringLiteral MutatingCallName = "MutatingCall";
 
 void MutatingCopyCheck::registerMatchers(MatchFinder *Finder) {
-  if (!getLangOpts().CPlusPlus)
-    return;
-
   const auto MemberExprOrSourceObject = anyOf(
-      memberExpr(), declRefExpr(to(decl(equalsBoundNode(SourceDeclName)))));
+      memberExpr(),
+      declRefExpr(to(decl(equalsBoundNode(std::string(SourceDeclName))))));
 
   const auto IsPartOfSource =
       allOf(unless(hasDescendant(expr(unless(MemberExprOrSourceObject)))),
             MemberExprOrSourceObject);
 
-  const auto IsSourceMutatingAssignment =
-      expr(anyOf(binaryOperator(isAssignmentOperator(), hasLHS(IsPartOfSource))
-                     .bind(MutatingOperatorName),
-                 cxxOperatorCallExpr(isAssignmentOperator(),
-                                     hasArgument(0, IsPartOfSource))
-                     .bind(MutatingOperatorName)));
+  const auto IsSourceMutatingAssignment = traverse(
+      TK_AsIs, binaryOperation(hasOperatorName("="), hasLHS(IsPartOfSource))
+                   .bind(MutatingOperatorName));
 
   const auto MemberExprOrSelf = anyOf(memberExpr(), cxxThisExpr());
 
@@ -44,9 +37,7 @@ void MutatingCopyCheck::registerMatchers(MatchFinder *Finder) {
       unless(hasDescendant(expr(unless(MemberExprOrSelf)))), MemberExprOrSelf);
 
   const auto IsSelfMutatingAssignment =
-      expr(anyOf(binaryOperator(isAssignmentOperator(), hasLHS(IsPartOfSelf)),
-                 cxxOperatorCallExpr(isAssignmentOperator(),
-                                     hasArgument(0, IsPartOfSelf))));
+      binaryOperation(isAssignmentOperator(), hasLHS(IsPartOfSelf));
 
   const auto IsSelfMutatingMemberFunction =
       functionDecl(hasBody(hasDescendant(IsSelfMutatingAssignment)));
@@ -78,6 +69,4 @@ void MutatingCopyCheck::check(const MatchFinder::MatchResult &Result) {
     diag(Assignment->getBeginLoc(), "mutating copied object");
 }
 
-} // namespace cert
-} // namespace tidy
-} // namespace clang
+} // namespace clang::tidy::cert

@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_Breakpoint_Name_h_
-#define liblldb_Breakpoint_Name_h_
+#ifndef LLDB_BREAKPOINT_BREAKPOINTNAME_H
+#define LLDB_BREAKPOINT_BREAKPOINTNAME_H
 
 #include <memory>
 #include <string>
@@ -141,23 +141,11 @@ public:
    {
      SetHelp(help);
    }
-      
-  BreakpointName(ConstString name,
-                 BreakpointOptions &options,
-                 const Permissions &permissions = Permissions(),
-                 const char *help = nullptr) :
-      m_name(name), m_options(options), 
-      m_permissions(permissions) {
-        SetHelp(help);
-  };
   
   BreakpointName(const BreakpointName &rhs) :
       m_name(rhs.m_name), m_options(rhs.m_options),
       m_permissions(rhs.m_permissions), m_help(rhs.m_help)
   {}
-  
-  BreakpointName(ConstString name, const Breakpoint &bkpt,
-                 const char *help);
       
   ConstString GetName() const { return m_name; }
   BreakpointOptions &GetOptions() { return m_options; }
@@ -205,4 +193,4 @@ private:
 
 } // namespace lldb_private
 
-#endif // liblldb_Breakpoint_Name_h_
+#endif // LLDB_BREAKPOINT_BREAKPOINTNAME_H

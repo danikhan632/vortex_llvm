@@ -22,11 +22,9 @@ body:             |
     liveins: $w0
     ; CHECK-LABEL: name: test_legal_const_ext
     ; CHECK: [[COPY:%[0-9]+]]:_(s32) = COPY $w0
-    ; CHECK: [[COPY1:%[0-9]+]]:_(s32) = COPY [[COPY]](s32)
     ; CHECK: [[C:%[0-9]+]]:_(s32) = G_CONSTANT i32 0
-    ; CHECK: [[ADD:%[0-9]+]]:_(s32) = G_ADD [[COPY1]], [[C]]
-    ; CHECK: [[COPY2:%[0-9]+]]:_(s32) = COPY [[ADD]](s32)
-    ; CHECK: $w0 = COPY [[COPY2]](s32)
+    ; CHECK: [[ADD:%[0-9]+]]:_(s32) = G_ADD [[COPY]], [[C]]
+    ; CHECK: $w0 = COPY [[ADD]](s32)
     %0:_(s32) = COPY $w0
     %1:_(s1) = G_TRUNC %0(s32)
     %2:_(s1) = G_CONSTANT i1 2
@@ -90,4 +88,33 @@ body:             |
     $x1 = COPY %4(s64)
     $x2 = COPY %5(s64)
     $x3 = COPY %6(s64)
+...
+---
+name:            unmerge_merge_combine
+tracksRegLiveness: true
+body:             |
+  bb.1:
+    liveins: $x0
+    ; CHECK-LABEL: name: unmerge_merge_combine
+    ; CHECK: liveins: $x0
+    ; CHECK: [[COPY:%[0-9]+]]:_(p0) = COPY $x0
+    ; CHECK: [[LOAD:%[0-9]+]]:_(s64) = G_LOAD [[COPY]](p0) :: (load (s64))
+    ; CHECK: [[C:%[0-9]+]]:_(s64) = G_CONSTANT i64 0
+    ; CHECK: [[LOAD1:%[0-9]+]]:_(s128) = G_LOAD [[COPY]](p0) :: (load (s128))
+    ; CHECK: [[UV:%[0-9]+]]:_(s64), [[UV1:%[0-9]+]]:_(s64) = G_UNMERGE_VALUES [[LOAD1]](s128)
+    ; CHECK: [[MUL:%[0-9]+]]:_(s64) = G_MUL [[LOAD]], [[UV]]
+    ; CHECK: [[MUL1:%[0-9]+]]:_(s64) = G_MUL [[C]], [[UV]]
+    ; CHECK: [[MUL2:%[0-9]+]]:_(s64) = G_MUL [[LOAD]], [[UV1]]
+    ; CHECK: [[UMULH:%[0-9]+]]:_(s64) = G_UMULH [[LOAD]], [[UV]]
+    ; CHECK: [[ADD:%[0-9]+]]:_(s64) = G_ADD [[MUL1]], [[MUL2]]
+    ; CHECK: [[ADD1:%[0-9]+]]:_(s64) = G_ADD [[ADD]], [[UMULH]]
+    ; CHECK: [[MV:%[0-9]+]]:_(s128) = G_MERGE_VALUES [[MUL]](s64), [[ADD1]](s64)
+    ; CHECK: $q0 = COPY [[MV]](s128)
+    ; CHECK: RET_ReallyLR
+    %0:_(p0) = COPY $x0
+    %1:_(s128) = G_ZEXTLOAD %0:_(p0) :: (load (s64))
+    %2:_(s128) = G_LOAD %0:_(p0) :: (load (s128))
+    %3:_(s128) = G_MUL %1:_, %2:_
+    $q0 = COPY %3
+    RET_ReallyLR
 ...

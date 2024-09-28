@@ -21,18 +21,21 @@ using namespace llvm;
 // NVPTXTargetStreamer Implemenation
 //
 NVPTXTargetStreamer::NVPTXTargetStreamer(MCStreamer &S) : MCTargetStreamer(S) {}
-
 NVPTXTargetStreamer::~NVPTXTargetStreamer() = default;
+
+NVPTXAsmTargetStreamer::NVPTXAsmTargetStreamer(MCStreamer &S)
+    : NVPTXTargetStreamer(S) {}
+NVPTXAsmTargetStreamer::~NVPTXAsmTargetStreamer() = default;
 
 void NVPTXTargetStreamer::outputDwarfFileDirectives() {
   for (const std::string &S : DwarfFiles)
-    getStreamer().EmitRawText(S.data());
+    getStreamer().emitRawText(S);
   DwarfFiles.clear();
 }
 
 void NVPTXTargetStreamer::closeLastSection() {
   if (HasSections)
-    getStreamer().EmitRawText("\t}");
+    getStreamer().emitRawText("\t}");
 }
 
 void NVPTXTargetStreamer::emitDwarfFileDirective(StringRef Directive) {
@@ -93,8 +96,9 @@ void NVPTXTargetStreamer::changeSection(const MCSection *CurSection,
     // Emit DWARF .file directives in the outermost scope.
     outputDwarfFileDirectives();
     OS << "\t.section";
-    Section->PrintSwitchToSection(*getStreamer().getContext().getAsmInfo(),
-                                  FI->getTargetTriple(), OS, SubSection);
+    Section->printSwitchToSection(*getStreamer().getContext().getAsmInfo(),
+                                  getStreamer().getContext().getTargetTriple(),
+                                  OS, SubSection);
     // DWARF sections are enclosed into braces - emit the open one.
     OS << "\t{\n";
     HasSections = true;
@@ -128,7 +132,7 @@ void NVPTXTargetStreamer::emitRawBytes(StringRef Data) {
       if (Label == Directive)
         Label = ",";
     }
-    Streamer.EmitRawText(OS.str());
+    Streamer.emitRawText(OS.str());
   }
 #endif
 }

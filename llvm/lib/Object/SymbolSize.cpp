@@ -11,6 +11,8 @@
 #include "llvm/Object/COFF.h"
 #include "llvm/Object/ELFObjectFile.h"
 #include "llvm/Object/MachO.h"
+#include "llvm/Object/Wasm.h"
+#include "llvm/Object/XCOFFObjectFile.h"
 
 using namespace llvm;
 using namespace object;
@@ -27,11 +29,19 @@ int llvm::object::compareAddress(const SymEntry *A, const SymEntry *B) {
 static unsigned getSectionID(const ObjectFile &O, SectionRef Sec) {
   if (auto *M = dyn_cast<MachOObjectFile>(&O))
     return M->getSectionID(Sec);
+  if (isa<WasmObjectFile>(&O))
+    return Sec.getIndex();
+  if (isa<XCOFFObjectFile>(&O))
+    return Sec.getIndex();
   return cast<COFFObjectFile>(O).getSectionID(Sec);
 }
 
 static unsigned getSymbolSectionID(const ObjectFile &O, SymbolRef Sym) {
   if (auto *M = dyn_cast<MachOObjectFile>(&O))
+    return M->getSymbolSectionID(Sym);
+  if (const auto *M = dyn_cast<WasmObjectFile>(&O))
+    return M->getSymbolSectionId(Sym);
+  if (const auto *M = dyn_cast<XCOFFObjectFile>(&O))
     return M->getSymbolSectionID(Sym);
   return cast<COFFObjectFile>(O).getSymbolSectionID(Sym);
 }
@@ -42,9 +52,15 @@ llvm::object::computeSymbolSizes(const ObjectFile &O) {
 
   if (const auto *E = dyn_cast<ELFObjectFileBase>(&O)) {
     auto Syms = E->symbols();
-    if (Syms.begin() == Syms.end())
+    if (Syms.empty())
       Syms = E->getDynamicSymbolIterators();
     for (ELFSymbolRef Sym : Syms)
+      Ret.push_back({Sym, Sym.getSize()});
+    return Ret;
+  }
+
+  if (const auto *E = dyn_cast<XCOFFObjectFile>(&O)) {
+    for (XCOFFSymbolRef Sym : E->symbols())
       Ret.push_back({Sym, Sym.getSize()});
     return Ret;
   }
@@ -55,8 +71,11 @@ llvm::object::computeSymbolSizes(const ObjectFile &O) {
   unsigned SymNum = 0;
   for (symbol_iterator I = O.symbol_begin(), E = O.symbol_end(); I != E; ++I) {
     SymbolRef Sym = *I;
-    uint64_t Value = Sym.getValue();
-    Addresses.push_back({I, Value, SymNum, getSymbolSectionID(O, Sym)});
+    Expected<uint64_t> ValueOrErr = Sym.getValue();
+    if (!ValueOrErr)
+      // TODO: Actually report errors helpfully.
+      report_fatal_error(ValueOrErr.takeError());
+    Addresses.push_back({I, *ValueOrErr, SymNum, getSymbolSectionID(O, Sym)});
     ++SymNum;
   }
   for (SectionRef Sec : O.sections()) {
@@ -71,16 +90,21 @@ llvm::object::computeSymbolSizes(const ObjectFile &O) {
 
   array_pod_sort(Addresses.begin(), Addresses.end(), compareAddress);
 
-  // Compute the size as the gap to the next symbol
-  for (unsigned I = 0, N = Addresses.size() - 1; I < N; ++I) {
+  // Compute the size as the gap to the next symbol. If multiple symbols have
+  // the same address, give both the same size. Because Addresses is sorted,
+  // use two pointers to keep track of the current symbol vs. the next symbol
+  // that doesn't have the same address for size computation.
+  for (unsigned I = 0, NextI = 0, N = Addresses.size() - 1; I < N; ++I) {
     auto &P = Addresses[I];
     if (P.I == O.symbol_end())
       continue;
 
-    // If multiple symbol have the same address, give both the same size.
-    unsigned NextI = I + 1;
-    while (NextI < N && Addresses[NextI].Address == P.Address)
-      ++NextI;
+    // If the next pointer is behind, update it to the next symbol.
+    if (NextI <= I) {
+      NextI = I + 1;
+      while (NextI < N && Addresses[NextI].Address == P.Address)
+        ++NextI;
+    }
 
     uint64_t Size = Addresses[NextI].Address - P.Address;
     P.Address = Size;

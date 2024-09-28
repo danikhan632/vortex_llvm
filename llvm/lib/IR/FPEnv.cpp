@@ -12,55 +12,67 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/ADT/StringSwitch.h"
 #include "llvm/IR/FPEnv.h"
+#include "llvm/ADT/StringSwitch.h"
+#include "llvm/IR/Instruction.h"
+#include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/Intrinsics.h"
+#include <optional>
 
 namespace llvm {
 
-Optional<fp::RoundingMode> StrToRoundingMode(StringRef RoundingArg) {
+std::optional<RoundingMode> convertStrToRoundingMode(StringRef RoundingArg) {
   // For dynamic rounding mode, we use round to nearest but we will set the
   // 'exact' SDNodeFlag so that the value will not be rounded.
-  return StringSwitch<Optional<fp::RoundingMode>>(RoundingArg)
-      .Case("round.dynamic", fp::rmDynamic)
-      .Case("round.tonearest", fp::rmToNearest)
-      .Case("round.downward", fp::rmDownward)
-      .Case("round.upward", fp::rmUpward)
-      .Case("round.towardzero", fp::rmTowardZero)
-      .Default(None);
+  return StringSwitch<std::optional<RoundingMode>>(RoundingArg)
+      .Case("round.dynamic", RoundingMode::Dynamic)
+      .Case("round.tonearest", RoundingMode::NearestTiesToEven)
+      .Case("round.tonearestaway", RoundingMode::NearestTiesToAway)
+      .Case("round.downward", RoundingMode::TowardNegative)
+      .Case("round.upward", RoundingMode::TowardPositive)
+      .Case("round.towardzero", RoundingMode::TowardZero)
+      .Default(std::nullopt);
 }
 
-Optional<StringRef> RoundingModeToStr(fp::RoundingMode UseRounding) {
-  Optional<StringRef> RoundingStr = None;
+std::optional<StringRef> convertRoundingModeToStr(RoundingMode UseRounding) {
+  std::optional<StringRef> RoundingStr;
   switch (UseRounding) {
-  case fp::rmDynamic:
+  case RoundingMode::Dynamic:
     RoundingStr = "round.dynamic";
     break;
-  case fp::rmToNearest:
+  case RoundingMode::NearestTiesToEven:
     RoundingStr = "round.tonearest";
     break;
-  case fp::rmDownward:
+  case RoundingMode::NearestTiesToAway:
+    RoundingStr = "round.tonearestaway";
+    break;
+  case RoundingMode::TowardNegative:
     RoundingStr = "round.downward";
     break;
-  case fp::rmUpward:
+  case RoundingMode::TowardPositive:
     RoundingStr = "round.upward";
     break;
-  case fp::rmTowardZero:
+  case RoundingMode::TowardZero:
     RoundingStr = "round.towardzero";
+    break;
+  default:
     break;
   }
   return RoundingStr;
 }
 
-Optional<fp::ExceptionBehavior> StrToExceptionBehavior(StringRef ExceptionArg) {
-  return StringSwitch<Optional<fp::ExceptionBehavior>>(ExceptionArg)
+std::optional<fp::ExceptionBehavior>
+convertStrToExceptionBehavior(StringRef ExceptionArg) {
+  return StringSwitch<std::optional<fp::ExceptionBehavior>>(ExceptionArg)
       .Case("fpexcept.ignore", fp::ebIgnore)
       .Case("fpexcept.maytrap", fp::ebMayTrap)
       .Case("fpexcept.strict", fp::ebStrict)
-      .Default(None);
+      .Default(std::nullopt);
 }
 
-Optional<StringRef> ExceptionBehaviorToStr(fp::ExceptionBehavior UseExcept) {
-  Optional<StringRef> ExceptStr = None;
+std::optional<StringRef>
+convertExceptionBehaviorToStr(fp::ExceptionBehavior UseExcept) {
+  std::optional<StringRef> ExceptStr;
   switch (UseExcept) {
   case fp::ebStrict:
     ExceptStr = "fpexcept.strict";
@@ -75,4 +87,45 @@ Optional<StringRef> ExceptionBehaviorToStr(fp::ExceptionBehavior UseExcept) {
   return ExceptStr;
 }
 
+Intrinsic::ID getConstrainedIntrinsicID(const Instruction &Instr) {
+  Intrinsic::ID IID = Intrinsic::not_intrinsic;
+  switch (Instr.getOpcode()) {
+  case Instruction::FCmp:
+    // Unlike other instructions FCmp can be mapped to one of two intrinsic
+    // functions. We choose the non-signaling variant.
+    IID = Intrinsic::experimental_constrained_fcmp;
+    break;
+
+    // Instructions
+#define INSTRUCTION(NAME, NARG, ROUND_MODE, INTRINSIC)                         \
+  case Instruction::NAME:                                                      \
+    IID = Intrinsic::INTRINSIC;                                                \
+    break;
+#define FUNCTION(NAME, NARG, ROUND_MODE, INTRINSIC)
+#define CMP_INSTRUCTION(NAME, NARG, ROUND_MODE, INTRINSIC, DAGN)
+#include "llvm/IR/ConstrainedOps.def"
+
+  // Intrinsic calls.
+  case Instruction::Call:
+    if (auto *IntrinCall = dyn_cast<IntrinsicInst>(&Instr)) {
+      switch (IntrinCall->getIntrinsicID()) {
+#define FUNCTION(NAME, NARG, ROUND_MODE, INTRINSIC)                            \
+  case Intrinsic::NAME:                                                        \
+    IID = Intrinsic::INTRINSIC;                                                \
+    break;
+#define INSTRUCTION(NAME, NARG, ROUND_MODE, INTRINSIC)
+#define CMP_INSTRUCTION(NAME, NARG, ROUND_MODE, INTRINSIC, DAGN)
+#include "llvm/IR/ConstrainedOps.def"
+      default:
+        break;
+      }
+    }
+    break;
+  default:
+    break;
+  }
+
+  return IID;
 }
+
+} // namespace llvm

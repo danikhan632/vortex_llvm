@@ -1,6 +1,6 @@
 //===- RegionGraphTraits.h - llvm::GraphTraits for CFGs ---------*- C++ -*-===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -19,7 +19,8 @@
 #include "llvm/ADT/GraphTraits.h"
 
 namespace llvm {
-template <> struct GraphTraits<mlir::Block *> {
+template <>
+struct GraphTraits<mlir::Block *> {
   using ChildIteratorType = mlir::Block::succ_iterator;
   using Node = mlir::Block;
   using NodeRef = Node *;
@@ -32,7 +33,8 @@ template <> struct GraphTraits<mlir::Block *> {
   static ChildIteratorType child_end(NodeRef node) { return node->succ_end(); }
 };
 
-template <> struct GraphTraits<Inverse<mlir::Block *>> {
+template <>
+struct GraphTraits<Inverse<mlir::Block *>> {
   using ChildIteratorType = mlir::Block::pred_iterator;
   using Node = mlir::Block;
   using NodeRef = Node *;
@@ -44,6 +46,40 @@ template <> struct GraphTraits<Inverse<mlir::Block *>> {
   }
   static inline ChildIteratorType child_end(NodeRef node) {
     return node->pred_end();
+  }
+};
+
+template <>
+struct GraphTraits<const mlir::Block *> {
+  using ChildIteratorType = mlir::Block::succ_iterator;
+  using Node = const mlir::Block;
+  using NodeRef = Node *;
+
+  static NodeRef getEntryNode(NodeRef node) { return node; }
+
+  static ChildIteratorType child_begin(NodeRef node) {
+    return const_cast<mlir::Block *>(node)->succ_begin();
+  }
+  static ChildIteratorType child_end(NodeRef node) {
+    return const_cast<mlir::Block *>(node)->succ_end();
+  }
+};
+
+template <>
+struct GraphTraits<Inverse<const mlir::Block *>> {
+  using ChildIteratorType = mlir::Block::pred_iterator;
+  using Node = const mlir::Block;
+  using NodeRef = Node *;
+
+  static NodeRef getEntryNode(Inverse<NodeRef> inverseGraph) {
+    return inverseGraph.Graph;
+  }
+
+  static ChildIteratorType child_begin(NodeRef node) {
+    return const_cast<mlir::Block *>(node)->pred_begin();
+  }
+  static ChildIteratorType child_end(NodeRef node) {
+    return const_cast<mlir::Block *>(node)->pred_end();
   }
 };
 

@@ -12,14 +12,9 @@
 
 using namespace clang::ast_matchers;
 
-namespace clang {
-namespace tidy {
-namespace readability {
+namespace clang::tidy::readability {
 
 void RedundantAccessSpecifiersCheck::registerMatchers(MatchFinder *Finder) {
-  if (!getLangOpts().CPlusPlus)
-    return;
-
   Finder->addMatcher(
       cxxRecordDecl(has(accessSpecDecl())).bind("redundant-access-specifiers"),
       this);
@@ -80,6 +75,4 @@ void RedundantAccessSpecifiersCheck::check(
   }
 }
 
-} // namespace readability
-} // namespace tidy
-} // namespace clang
+} // namespace clang::tidy::readability

@@ -6,30 +6,23 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_GDBRemoteCommunicationHistory_h_
-#define liblldb_GDBRemoteCommunicationHistory_h_
+#ifndef LLDB_SOURCE_PLUGINS_PROCESS_GDB_REMOTE_GDBREMOTECOMMUNICATIONHISTORY_H
+#define LLDB_SOURCE_PLUGINS_PROCESS_GDB_REMOTE_GDBREMOTECOMMUNICATIONHISTORY_H
 
 #include <string>
 #include <vector>
 
 #include "lldb/Utility/GDBRemote.h"
-#include "lldb/Utility/Reproducer.h"
 #include "lldb/lldb-public.h"
-#include "llvm/Support/YAMLTraits.h"
 #include "llvm/Support/raw_ostream.h"
 
 namespace lldb_private {
-namespace repro {
-class PacketRecorder;
-}
 namespace process_gdb_remote {
 
 /// The history keeps a circular buffer of GDB remote packets. The history is
 /// used for logging and replaying GDB remote packets.
 class GDBRemoteCommunicationHistory {
 public:
-  friend llvm::yaml::MappingTraits<GDBRemoteCommunicationHistory>;
-
   GDBRemoteCommunicationHistory(uint32_t size = 0);
 
   ~GDBRemoteCommunicationHistory();
@@ -44,8 +37,6 @@ public:
   void Dump(Stream &strm) const;
   void Dump(Log *log) const;
   bool DidDumpToLog() const { return m_dumped_to_log; }
-
-  void SetRecorder(repro::PacketRecorder *recorder) { m_recorder = recorder; }
 
 private:
   uint32_t GetFirstSavedPacketIndex() const {
@@ -74,13 +65,12 @@ private:
   }
 
   std::vector<GDBRemotePacket> m_packets;
-  uint32_t m_curr_idx;
-  uint32_t m_total_packet_count;
-  mutable bool m_dumped_to_log;
-  repro::PacketRecorder *m_recorder = nullptr;
+  uint32_t m_curr_idx = 0;
+  uint32_t m_total_packet_count = 0;
+  mutable bool m_dumped_to_log = false;
 };
 
 } // namespace process_gdb_remote
 } // namespace lldb_private
 
-#endif // liblldb_GDBRemoteCommunicationHistory_h_
+#endif // LLDB_SOURCE_PLUGINS_PROCESS_GDB_REMOTE_GDBREMOTECOMMUNICATIONHISTORY_H

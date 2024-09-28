@@ -12,7 +12,9 @@ UndefinedBehaviorSanitizer (UBSan) is a fast undefined behavior detector.
 UBSan modifies the program at compile-time to catch various kinds of undefined
 behavior during program execution, for example:
 
-* Using misaligned or null pointer
+* Array subscript out of bounds, where the bounds can be statically determined
+* Bitwise shifts that are out of bounds for their data type
+* Dereferencing misaligned or null pointers
 * Signed integer overflow
 * Conversion to, from, or between floating-point types which would
   overflow the destination
@@ -30,10 +32,11 @@ Build LLVM/Clang with `CMake <https://llvm.org/docs/CMake.html>`_.
 Usage
 =====
 
-Use ``clang++`` to compile and link your program with ``-fsanitize=undefined``
-flag. Make sure to use ``clang++`` (not ``ld``) as a linker, so that your
-executable is linked with proper UBSan runtime libraries. You can use ``clang``
-instead of ``clang++`` if you're compiling/linking C code.
+Use ``clang++`` to compile and link your program with the ``-fsanitize=undefined``
+option. Make sure to use ``clang++`` (not ``ld``) as a linker, so that your
+executable is linked with proper UBSan runtime libraries, unless all enabled
+checks use trap mode. You can use ``clang`` instead of ``clang++`` if you're
+compiling/linking C code.
 
 .. code-block:: console
 
@@ -47,22 +50,55 @@ instead of ``clang++`` if you're compiling/linking C code.
   % ./a.out
   test.cc:3:5: runtime error: signed integer overflow: 2147483647 + 1 cannot be represented in type 'int'
 
-You can enable only a subset of :ref:`checks <ubsan-checks>` offered by UBSan,
-and define the desired behavior for each kind of check:
-
-* ``-fsanitize=...``: print a verbose error report and continue execution (default);
-* ``-fno-sanitize-recover=...``: print a verbose error report and exit the program;
-* ``-fsanitize-trap=...``: execute a trap instruction (doesn't require UBSan run-time support).
-
-For example if you compile/link your program as:
+You can use ``-fsanitize=...`` and ``-fno-sanitize=`` to enable and disable one
+check or one check group. For an individual check, the last option that enabling
+or disabling it wins.
 
 .. code-block:: console
 
-  % clang++ -fsanitize=signed-integer-overflow,null,alignment -fno-sanitize-recover=null -fsanitize-trap=alignment
+  # Enable all checks in the "undefined" group, but disable "alignment".
+  % clang -fsanitize=undefined -fno-sanitize=alignment a.c
 
-the program will continue execution after signed integer overflows, exit after
+  # Enable just "alignment".
+  % clang -fsanitize=alignment a.c
+
+  # The same. -fno-sanitize=undefined nullifies the previous -fsanitize=undefined.
+  % clang -fsanitize=undefined -fno-sanitize=undefined -fsanitize=alignment a.c
+
+For most checks (:ref:`checks <ubsan-checks>`), the instrumented program prints
+a verbose error report and continues execution upon a failed check.
+You can use the following options to change the error reporting behavior:
+
+* ``-fno-sanitize-recover=...``: print a verbose error report and exit the program;
+* ``-fsanitize-trap=...``: execute a trap instruction (doesn't require UBSan
+  run-time support). If the signal is not caught, the program will typically
+  terminate due to a ``SIGILL`` or ``SIGTRAP`` signal.
+
+For example:
+
+.. code-block:: console
+
+  % clang++ -fsanitize=signed-integer-overflow,null,alignment -fno-sanitize-recover=null -fsanitize-trap=alignment a.cc
+
+The program will continue execution after signed integer overflows, exit after
 the first invalid use of a null pointer, and trap after the first use of misaligned
 pointer.
+
+.. code-block:: console
+
+  % clang++ -fsanitize=undefined -fsanitize-trap=all a.cc
+
+All checks in the "undefined" group are put into trap mode. Since no check
+needs run-time support, the UBSan run-time library it not linked. Note that
+some other sanitizers also support trap mode and ``-fsanitize-trap=all``
+enables trap mode for them.
+
+.. code-block:: console
+
+  % clang -fsanitize-trap=undefined -fsanitize-recover=all a.c
+
+``-fsanitize-trap=`` and ``-fsanitize-recover=`` are a no-op in the absence of
+a ``-fsanitize=`` option. There is no unused command line option warning.
 
 .. _ubsan-checks:
 
@@ -77,7 +113,9 @@ Available checks are:
      ``true`` nor ``false``.
   -  ``-fsanitize=builtin``: Passing invalid values to compiler builtins.
   -  ``-fsanitize=bounds``: Out of bounds array indexing, in cases
-     where the array bound can be statically determined.
+     where the array bound can be statically determined. The check includes
+     ``-fsanitize=array-bounds`` and ``-fsanitize=local-bounds``. Note that
+     ``-fsanitize=local-bounds`` is not included in ``-fsanitize=undefined``.
   -  ``-fsanitize=enum``: Load of a value of an enumerated type which
      is not in the range of representable values for that enumerated
      type.
@@ -91,8 +129,7 @@ Available checks are:
      by Clang (and by ISO/IEC/IEEE 60559 / IEEE 754) as producing either an
      infinity or NaN value, so is not included in ``-fsanitize=undefined``.
   -  ``-fsanitize=function``: Indirect call of a function through a
-     function pointer of the wrong type (Darwin/Linux, C++ and x86/x86_64
-     only).
+     function pointer of the wrong type.
   -  ``-fsanitize=implicit-unsigned-integer-truncation``,
      ``-fsanitize=implicit-signed-integer-truncation``: Implicit conversion from
      integer of larger bit width to smaller bit width, if that results in data
@@ -105,7 +142,7 @@ Available checks are:
      Issues caught by these sanitizers are not undefined behavior,
      but are often unintentional.
   -  ``-fsanitize=implicit-integer-sign-change``: Implicit conversion between
-     integer types, if that changes the sign of the value. That is, if the the
+     integer types, if that changes the sign of the value. That is, if the
      original value was negative and the new value is positive (or zero),
      or the original value was positive, and the new value is negative.
      Issues caught by this sanitizer are not undefined behavior,
@@ -121,6 +158,10 @@ Available checks are:
      is annotated with ``_Nonnull``.
   -  ``-fsanitize=nullability-return``: Returning null from a function with
      a return type annotated with ``_Nonnull``.
+  -  ``-fsanitize=objc-cast``: Invalid implicit cast of an ObjC object pointer
+     to an incompatible type. This is often unintentional, but is not undefined
+     behavior, therefore the check is not a part of the ``undefined`` group.
+     Currently only supported on Darwin.
   -  ``-fsanitize=object-size``: An attempt to potentially use bytes which
      the optimizer can determine are not part of the object being accessed.
      This will also detect some types of undefined behavior that may not
@@ -143,6 +184,9 @@ Available checks are:
      unsigned overflow in C++. You can use ``-fsanitize=shift-base`` or
      ``-fsanitize=shift-exponent`` to check only left-hand side or
      right-hand side of shift operation, respectively.
+  -  ``-fsanitize=unsigned-shift-base``: check that an unsigned left-hand side of
+     a left shift operation doesn't overflow. Issues caught by this sanitizer are
+     not undefined behavior, but are often unintentional.
   -  ``-fsanitize=signed-integer-overflow``: Signed integer overflow, where the
      result of a signed integer computation cannot be represented in its type.
      This includes all the checks covered by ``-ftrapv``, as well as checks for
@@ -169,7 +213,8 @@ Available checks are:
 You can also use the following check groups:
   -  ``-fsanitize=undefined``: All of the checks listed above other than
      ``float-divide-by-zero``, ``unsigned-integer-overflow``,
-     ``implicit-conversion``, and the ``nullability-*`` group of checks.
+     ``implicit-conversion``, ``local-bounds`` and the ``nullability-*`` group
+     of checks.
   -  ``-fsanitize=undefined-trap``: Deprecated alias of
      ``-fsanitize=undefined``.
   -  ``-fsanitize=implicit-integer-truncation``: Catches lossy integral
@@ -198,7 +243,7 @@ You can also use the following check groups:
 Volatile
 --------
 
-The ``null``, ``alignment``, ``object-size``, and ``vptr`` checks do not apply
+The ``null``, ``alignment``, ``object-size``, ``local-bounds``, and ``vptr`` checks do not apply
 to pointers to types with the ``volatile`` qualifier.
 
 Minimal Runtime
@@ -206,8 +251,8 @@ Minimal Runtime
 
 There is a minimal UBSan runtime available suitable for use in production
 environments. This runtime has a small attack surface. It only provides very
-basic issue logging and deduplication, and does not support
-``-fsanitize=function`` and ``-fsanitize=vptr`` checking.
+basic issue logging and deduplication, and does not support ``-fsanitize=vptr``
+checking.
 
 To use the minimal runtime, add ``-fsanitize-minimal-runtime`` to the clang
 command line options. For example, if you're used to compiling with
@@ -257,8 +302,8 @@ This attribute may not be
 supported by other compilers, so consider using it together with
 ``#if defined(__clang__)``.
 
-Suppressing Errors in Recompiled Code (Blacklist)
--------------------------------------------------
+Suppressing Errors in Recompiled Code (Ignorelist)
+--------------------------------------------------
 
 UndefinedBehaviorSanitizer supports ``src`` and ``fun`` entity types in
 :doc:`SanitizerSpecialCaseList`, that can be used to suppress error reports
@@ -344,6 +389,9 @@ For a file called ``/code/library/file.cpp``, here is what would be emitted:
 More Information
 ================
 
+* From Oracle blog, including a discussion of error messages:
+  `Improving Application Security with UndefinedBehaviorSanitizer (UBSan) and GCC
+  <https://blogs.oracle.com/linux/improving-application-security-with-undefinedbehaviorsanitizer-ubsan-and-gcc>`_
 * From LLVM project blog:
   `What Every C Programmer Should Know About Undefined Behavior
   <http://blog.llvm.org/2011/05/what-every-c-programmer-should-know.html>`_

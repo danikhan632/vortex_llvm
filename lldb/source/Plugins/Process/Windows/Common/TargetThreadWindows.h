@@ -34,7 +34,7 @@ public:
   lldb::RegisterContextSP
   CreateRegisterContextForFrame(StackFrame *frame) override;
   bool CalculateStopInfo() override;
-  Unwind *GetUnwinder() override;
+  const char *GetName() override;
 
   Status DoResume();
 
@@ -43,6 +43,7 @@ public:
 private:
   lldb::RegisterContextSP m_thread_reg_ctx_sp;
   HostThread m_host_thread;
+  std::string m_name;
 };
 } // namespace lldb_private
 

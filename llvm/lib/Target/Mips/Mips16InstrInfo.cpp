@@ -96,16 +96,16 @@ void Mips16InstrInfo::copyPhysReg(MachineBasicBlock &MBB,
     MIB.addReg(SrcReg, getKillRegState(KillSrc));
 }
 
-Optional<DestSourcePair>
+std::optional<DestSourcePair>
 Mips16InstrInfo::isCopyInstrImpl(const MachineInstr &MI) const {
   if (MI.isMoveReg())
     return DestSourcePair{MI.getOperand(0), MI.getOperand(1)};
-  return None;
+  return std::nullopt;
 }
 
 void Mips16InstrInfo::storeRegToStack(MachineBasicBlock &MBB,
                                       MachineBasicBlock::iterator I,
-                                      unsigned SrcReg, bool isKill, int FI,
+                                      Register SrcReg, bool isKill, int FI,
                                       const TargetRegisterClass *RC,
                                       const TargetRegisterInfo *TRI,
                                       int64_t Offset) const {
@@ -123,7 +123,7 @@ void Mips16InstrInfo::storeRegToStack(MachineBasicBlock &MBB,
 
 void Mips16InstrInfo::loadRegFromStack(MachineBasicBlock &MBB,
                                        MachineBasicBlock::iterator I,
-                                       unsigned DestReg, int FI,
+                                       Register DestReg, int FI,
                                        const TargetRegisterClass *RC,
                                        const TargetRegisterInfo *TRI,
                                        int64_t Offset) const {
@@ -182,7 +182,7 @@ unsigned Mips16InstrInfo::getOppositeBranchOpc(unsigned Opc) const {
 }
 
 static void addSaveRestoreRegs(MachineInstrBuilder &MIB,
-                               const std::vector<CalleeSavedInfo> &CSI,
+                               ArrayRef<CalleeSavedInfo> CSI,
                                unsigned Flags = 0) {
   for (unsigned i = 0, e = CSI.size(); i != e; ++i) {
     // Add the callee-saved register as live-in. Do not add if the register is
@@ -190,7 +190,7 @@ static void addSaveRestoreRegs(MachineInstrBuilder &MIB,
     // method MipsTargetLowering::lowerRETURNADDR.
     // It's killed at the spill, unless the register is RA and return address
     // is taken.
-    unsigned Reg = CSI[e-i-1].getReg();
+    Register Reg = CSI[e-i-1].getReg();
     switch (Reg) {
     case Mips::RA:
     case Mips::S0:
@@ -340,8 +340,8 @@ unsigned Mips16InstrInfo::loadImmediate(unsigned FrameReg, int64_t Imm,
   int Reg =0;
   int SpReg = 0;
 
-  rs.enterBasicBlock(MBB);
-  rs.forward(II);
+  rs.enterBasicBlockEnd(MBB);
+  rs.backward(std::next(II));
   //
   // We need to know which registers can be used, in the case where there
   // are not enough free registers. We exclude all registers that
@@ -351,10 +351,9 @@ unsigned Mips16InstrInfo::loadImmediate(unsigned FrameReg, int64_t Imm,
       RI.getAllocatableSet
       (*II->getParent()->getParent(), &Mips::CPU16RegsRegClass);
   // Exclude all the registers being used by the instruction.
-  for (unsigned i = 0, e = II->getNumOperands(); i != e; ++i) {
-    MachineOperand &MO = II->getOperand(i);
+  for (MachineOperand &MO : II->operands()) {
     if (MO.isReg() && MO.getReg() != 0 && !MO.isDef() &&
-        !Register::isVirtualRegister(MO.getReg()))
+        !MO.getReg().isVirtual())
       Candidates.reset(MO.getReg());
   }
 
@@ -367,8 +366,7 @@ unsigned Mips16InstrInfo::loadImmediate(unsigned FrameReg, int64_t Imm,
   // whether the register is live before the instruction. if it's not
   // then we don't need to save it in case there are no free registers.
   int DefReg = 0;
-  for (unsigned i = 0, e = II->getNumOperands(); i != e; ++i) {
-    MachineOperand &MO = II->getOperand(i);
+  for (MachineOperand &MO : II->operands()) {
     if (MO.isReg() && MO.isDef()) {
       DefReg = MO.getReg();
       break;

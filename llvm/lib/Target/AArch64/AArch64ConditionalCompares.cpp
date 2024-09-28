@@ -18,8 +18,6 @@
 
 #include "AArch64.h"
 #include "llvm/ADT/DepthFirstIterator.h"
-#include "llvm/ADT/SetVector.h"
-#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/MachineBranchProbabilityInfo.h"
 #include "llvm/CodeGen/MachineDominators.h"
@@ -157,7 +155,7 @@ public:
   MachineInstr *CmpMI;
 
 private:
-  /// The branch condition in Head as determined by AnalyzeBranch.
+  /// The branch condition in Head as determined by analyzeBranch.
   SmallVector<MachineOperand, 4> HeadCond;
 
   /// The condition code that makes Head branch to CmpBB.
@@ -247,8 +245,8 @@ void SSACCmpConv::updateTailPHIs() {
     for (unsigned oi = I.getNumOperands(); oi > 2; oi -= 2) {
       // PHI operands are (Reg, MBB) at (oi-2, oi-1).
       if (I.getOperand(oi - 1).getMBB() == CmpBB) {
-        I.RemoveOperand(oi - 1);
-        I.RemoveOperand(oi - 2);
+        I.removeOperand(oi - 1);
+        I.removeOperand(oi - 2);
       }
     }
   }
@@ -267,7 +265,7 @@ bool SSACCmpConv::isDeadDef(unsigned DstReg) {
   return MRI->use_nodbg_empty(DstReg);
 }
 
-// Parse a condition code returned by AnalyzeBranch, and compute the CondCode
+// Parse a condition code returned by analyzeBranch, and compute the CondCode
 // corresponding to TBB.
 // Return
 static bool parseCond(ArrayRef<MachineOperand> Cond, AArch64CC::CondCode &CC) {
@@ -317,7 +315,7 @@ MachineInstr *SSACCmpConv::findConvertibleCompare(MachineBasicBlock *MBB) {
 
   // Now find the instruction controlling the terminator.
   for (MachineBasicBlock::iterator B = MBB->begin(); I != B;) {
-    --I;
+    I = prev_nodbg(I, MBB->begin());
     assert(!I->isTerminator() && "Spurious terminator");
     switch (I->getOpcode()) {
     // cmp is an alias for subs with a dead destination register.
@@ -333,7 +331,7 @@ MachineInstr *SSACCmpConv::findConvertibleCompare(MachineBasicBlock *MBB) {
         ++NumImmRangeRejs;
         return nullptr;
       }
-      LLVM_FALLTHROUGH;
+      [[fallthrough]];
     case AArch64::SUBSWrr:
     case AArch64::SUBSXrr:
     case AArch64::ADDSWrr:
@@ -509,7 +507,7 @@ bool SSACCmpConv::canConvert(MachineBasicBlock *MBB) {
   // landing pad.
   if (!TBB || HeadCond.empty()) {
     LLVM_DEBUG(
-        dbgs() << "AnalyzeBranch didn't find conditional branch in Head.\n");
+        dbgs() << "analyzeBranch didn't find conditional branch in Head.\n");
     ++NumHeadBranchRejs;
     return false;
   }
@@ -536,7 +534,7 @@ bool SSACCmpConv::canConvert(MachineBasicBlock *MBB) {
 
   if (!TBB || CmpBBCond.empty()) {
     LLVM_DEBUG(
-        dbgs() << "AnalyzeBranch didn't find conditional branch in CmpBB.\n");
+        dbgs() << "analyzeBranch didn't find conditional branch in CmpBB.\n");
     ++NumCmpBranchRejs;
     return false;
   }
@@ -710,7 +708,7 @@ void SSACCmpConv::convert(SmallVectorImpl<MachineBasicBlock *> &RemovedBlocks) {
         .add(CmpMI->getOperand(1)); // Branch target.
   }
   CmpMI->eraseFromParent();
-  Head->updateTerminator();
+  Head->updateTerminator(CmpBB->getNextNode());
 
   RemovedBlocks.push_back(CmpBB);
   CmpBB->eraseFromParent();
@@ -828,7 +826,7 @@ void AArch64ConditionalCompares::updateDomTree(
     assert(Node != HeadNode && "Cannot erase the head node");
     assert(Node->getIDom() == HeadNode && "CmpBB should be dominated by Head");
     while (Node->getNumChildren())
-      DomTree->changeImmediateDominator(Node->getChildren().back(), HeadNode);
+      DomTree->changeImmediateDominator(Node->back(), HeadNode);
     DomTree->eraseNode(RemovedMBB);
   }
 }
@@ -856,7 +854,7 @@ bool AArch64ConditionalCompares::shouldConvert() {
   if (Stress)
     return true;
   if (!MinInstr)
-    MinInstr = Traces->getEnsemble(MachineTraceMetrics::TS_MinInstrCount);
+    MinInstr = Traces->getEnsemble(MachineTraceStrategy::TS_MinInstrCount);
 
   // Head dominates CmpBB, so it is always included in its trace.
   MachineTraceMetrics::Trace Trace = MinInstr->getTrace(CmpConv.CmpBB);
@@ -936,7 +934,7 @@ bool AArch64ConditionalCompares::runOnMachineFunction(MachineFunction &MF) {
   SchedModel = MF.getSubtarget().getSchedModel();
   MRI = &MF.getRegInfo();
   DomTree = &getAnalysis<MachineDominatorTree>();
-  Loops = getAnalysisIfAvailable<MachineLoopInfo>();
+  Loops = &getAnalysis<MachineLoopInfo>();
   MBPI = &getAnalysis<MachineBranchProbabilityInfo>();
   Traces = &getAnalysis<MachineTraceMetrics>();
   MinInstr = nullptr;

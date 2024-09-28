@@ -1,6 +1,6 @@
 //===- Parser.h - Toy Language Parser -------------------------------------===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -11,13 +11,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef MLIR_TUTORIAL_TOY_PARSER_H
-#define MLIR_TUTORIAL_TOY_PARSER_H
+#ifndef TOY_PARSER_H
+#define TOY_PARSER_H
 
 #include "toy/AST.h"
 #include "toy/Lexer.h"
 
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/raw_ostream.h"
@@ -25,6 +24,7 @@
 #include <map>
 #include <utility>
 #include <vector>
+#include <optional>
 
 namespace toy {
 
@@ -66,7 +66,7 @@ private:
     lexer.consume(tok_return);
 
     // return takes an optional argument
-    llvm::Optional<std::unique_ptr<ExprAST>> expr;
+    std::optional<std::unique_ptr<ExprAST>> expr;
     if (lexer.getCurToken() != ';') {
       expr = parseExpression();
       if (!expr)
@@ -171,7 +171,7 @@ private:
   ///   ::= identifier
   ///   ::= identifier '(' expression ')'
   std::unique_ptr<ExprAST> parseIdentifierExpr() {
-    std::string name = lexer.getId();
+    std::string name(lexer.getId());
 
     auto loc = lexer.getLastLocation();
     lexer.getNextToken(); // eat identifier.
@@ -321,7 +321,7 @@ private:
     if (lexer.getCurToken() != tok_identifier)
       return parseError<VarDeclExprAST>("identified",
                                         "after 'var' declaration");
-    std::string id = lexer.getId();
+    std::string id(lexer.getId());
     lexer.getNextToken(); // eat id
 
     std::unique_ptr<VarType> type; // Type is optional, it can be inferred
@@ -396,11 +396,15 @@ private:
   /// decl_list ::= identifier | identifier, decl_list
   std::unique_ptr<PrototypeAST> parsePrototype() {
     auto loc = lexer.getLastLocation();
+
+    if (lexer.getCurToken() != tok_def)
+      return parseError<PrototypeAST>("def", "in prototype");
     lexer.consume(tok_def);
+
     if (lexer.getCurToken() != tok_identifier)
       return parseError<PrototypeAST>("function name", "in prototype");
 
-    std::string fnName = lexer.getId();
+    std::string fnName(lexer.getId());
     lexer.consume(tok_identifier);
 
     if (lexer.getCurToken() != '(')
@@ -410,7 +414,7 @@ private:
     std::vector<std::unique_ptr<VariableExprAST>> args;
     if (lexer.getCurToken() != ')') {
       do {
-        std::string name = lexer.getId();
+        std::string name(lexer.getId());
         auto loc = lexer.getLastLocation();
         lexer.consume(tok_identifier);
         auto decl = std::make_unique<VariableExprAST>(std::move(loc), name);
@@ -424,7 +428,7 @@ private:
       } while (true);
     }
     if (lexer.getCurToken() != ')')
-      return parseError<PrototypeAST>("}", "to end function prototype");
+      return parseError<PrototypeAST>(")", "to end function prototype");
 
     // success.
     lexer.consume(Token(')'));
@@ -482,4 +486,4 @@ private:
 
 } // namespace toy
 
-#endif // MLIR_TUTORIAL_TOY_PARSER_H
+#endif // TOY_PARSER_H

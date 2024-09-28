@@ -9,7 +9,8 @@
 #include "lld/Common/Strings.h"
 #include "lld/Common/ErrorHandler.h"
 #include "lld/Common/LLVM.h"
-#include "llvm/Demangle/Demangle.h"
+#include "llvm/ADT/StringExtras.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/GlobPattern.h"
 #include <algorithm>
 #include <mutex>
@@ -18,39 +19,36 @@
 using namespace llvm;
 using namespace lld;
 
-// Returns the demangled C++ symbol name for name.
-std::string lld::demangleItanium(StringRef name) {
-  // itaniumDemangle can be used to demangle strings other than symbol
-  // names which do not necessarily start with "_Z". Name can be
-  // either a C or C++ symbol. Don't call demangle if the name
-  // does not look like a C++ symbol name to avoid getting unexpected
-  // result for a C symbol that happens to match a mangled type name.
-  if (!name.startswith("_Z"))
-    return name;
-
-  return demangle(name);
-}
-
-StringMatcher::StringMatcher(ArrayRef<StringRef> pat) {
-  for (StringRef s : pat) {
-    Expected<GlobPattern> pat = GlobPattern::create(s);
-    if (!pat)
-      error(toString(pat.takeError()));
-    else
-      patterns.push_back(*pat);
+SingleStringMatcher::SingleStringMatcher(StringRef Pattern) {
+  if (Pattern.size() > 2 && Pattern.starts_with("\"") &&
+      Pattern.ends_with("\"")) {
+    ExactMatch = true;
+    ExactPattern = Pattern.substr(1, Pattern.size() - 2);
+  } else {
+    Expected<GlobPattern> Glob = GlobPattern::create(Pattern);
+    if (!Glob) {
+      error(toString(Glob.takeError()) + ": " + Pattern);
+      return;
+    }
+    ExactMatch = false;
+    GlobPatternMatcher = *Glob;
   }
 }
 
+bool SingleStringMatcher::match(StringRef s) const {
+  return ExactMatch ? (ExactPattern == s) : GlobPatternMatcher.match(s);
+}
+
 bool StringMatcher::match(StringRef s) const {
-  for (const GlobPattern &pat : patterns)
+  for (const SingleStringMatcher &pat : patterns)
     if (pat.match(s))
       return true;
   return false;
 }
 
 // Converts a hex string (e.g. "deadbeef") to a vector.
-std::vector<uint8_t> lld::parseHex(StringRef s) {
-  std::vector<uint8_t> hex;
+SmallVector<uint8_t, 0> lld::parseHex(StringRef s) {
+  SmallVector<uint8_t, 0> hex;
   while (!s.empty()) {
     StringRef b = s.substr(0, 2);
     s = s.substr(2);
@@ -66,9 +64,8 @@ std::vector<uint8_t> lld::parseHex(StringRef s) {
 
 // Returns true if S is valid as a C language identifier.
 bool lld::isValidCIdentifier(StringRef s) {
-  return !s.empty() && (isAlpha(s[0]) || s[0] == '_') &&
-         std::all_of(s.begin() + 1, s.end(),
-                     [](char c) { return c == '_' || isAlnum(c); });
+  return !s.empty() && !isDigit(s[0]) &&
+         llvm::all_of(s, [](char c) { return isAlnum(c) || c == '_'; });
 }
 
 // Write the contents of the a buffer to a file

@@ -1,4 +1,4 @@
-//===-- Variable.cpp --------------------------------------------*- C++ -*-===//
+//===-- Variable.cpp ------------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -39,16 +39,17 @@ Variable::Variable(lldb::user_id_t uid, const char *name, const char *mangled,
                    const lldb::SymbolFileTypeSP &symfile_type_sp,
                    ValueType scope, SymbolContextScope *context,
                    const RangeList &scope_range, Declaration *decl_ptr,
-                   const DWARFExpression &location, bool external,
-                   bool artificial, bool static_member)
+                   const DWARFExpressionList &location_list, bool external,
+                   bool artificial, bool location_is_constant_data,
+                   bool static_member)
     : UserID(uid), m_name(name), m_mangled(ConstString(mangled)),
       m_symfile_type_sp(symfile_type_sp), m_scope(scope),
       m_owner_scope(context), m_scope_range(scope_range),
-      m_declaration(decl_ptr), m_location(location), m_external(external),
-      m_artificial(artificial), m_loc_is_const_data(false),
+      m_declaration(decl_ptr), m_location_list(location_list), m_external(external),
+      m_artificial(artificial), m_loc_is_const_data(location_is_constant_data),
       m_static_member(static_member) {}
 
-Variable::~Variable() {}
+Variable::~Variable() = default;
 
 lldb::LanguageType Variable::GetLanguage() const {
   lldb::LanguageType lang = m_mangled.GuessLanguage();
@@ -68,7 +69,7 @@ lldb::LanguageType Variable::GetLanguage() const {
 }
 
 ConstString Variable::GetName() const {
-  ConstString name = m_mangled.GetName(GetLanguage());
+  ConstString name = m_mangled.GetName();
   if (name)
     return name;
   return m_name;
@@ -82,16 +83,13 @@ bool Variable::NameMatches(ConstString name) const {
   SymbolContext variable_sc;
   m_owner_scope->CalculateSymbolContext(&variable_sc);
 
-  LanguageType language = eLanguageTypeUnknown;
-  if (variable_sc.comp_unit)
-    language = variable_sc.comp_unit->GetLanguage();
-  return m_mangled.NameMatches(name, language);
+  return m_mangled.NameMatches(name);
 }
 bool Variable::NameMatches(const RegularExpression &regex) const {
   if (regex.Execute(m_name.AsCString()))
     return true;
   if (m_mangled)
-    return m_mangled.NameMatches(regex, GetLanguage());
+    return m_mangled.NameMatches(regex);
   return false;
 }
 
@@ -147,25 +145,15 @@ void Variable::Dump(Stream *s, bool show_context) const {
   bool show_fullpaths = false;
   m_declaration.Dump(s, show_fullpaths);
 
-  if (m_location.IsValid()) {
+  if (m_location_list.IsValid()) {
     s->PutCString(", location = ");
-    lldb::addr_t loclist_base_addr = LLDB_INVALID_ADDRESS;
-    if (m_location.IsLocationList()) {
-      SymbolContext variable_sc;
-      m_owner_scope->CalculateSymbolContext(&variable_sc);
-      if (variable_sc.function)
-        loclist_base_addr = variable_sc.function->GetAddressRange()
-                                .GetBaseAddress()
-                                .GetFileAddress();
-    }
     ABISP abi;
     if (m_owner_scope) {
       ModuleSP module_sp(m_owner_scope->CalculateSymbolContextModule());
       if (module_sp)
         abi = ABI::FindPlugin(ProcessSP(), module_sp->GetArchitecture());
     }
-    m_location.GetDescription(s, lldb::eDescriptionLevelBrief,
-                              loclist_base_addr, abi.get());
+    m_location_list.GetDescription(s, lldb::eDescriptionLevelBrief, abi.get());
   }
 
   if (m_external)
@@ -224,12 +212,6 @@ void Variable::CalculateSymbolContext(SymbolContext *sc) {
 }
 
 bool Variable::LocationIsValidForFrame(StackFrame *frame) {
-  // Is the variable is described by a single location?
-  if (!m_location.IsLocationList()) {
-    // Yes it is, the location is valid.
-    return true;
-  }
-
   if (frame) {
     Function *function =
         frame->GetSymbolContext(eSymbolContextFunction).function;
@@ -243,9 +225,10 @@ bool Variable::LocationIsValidForFrame(StackFrame *frame) {
         return false;
       // It is a location list. We just need to tell if the location list
       // contains the current address when converted to a load address
-      return m_location.LocationListContainsAddress(
+      return m_location_list.ContainsAddress(
           loclist_base_load_addr,
-          frame->GetFrameCodeAddress().GetLoadAddress(target_sp.get()));
+          frame->GetFrameCodeAddressForSymbolication().GetLoadAddress(
+              target_sp.get()));
     }
   }
   return false;
@@ -255,11 +238,19 @@ bool Variable::LocationIsValidForAddress(const Address &address) {
   // Be sure to resolve the address to section offset prior to calling this
   // function.
   if (address.IsSectionOffset()) {
+    // We need to check if the address is valid for both scope range and value
+    // range.
+    // Empty scope range means block range.
+    bool valid_in_scope_range =
+        GetScopeRange().IsEmpty() || GetScopeRange().FindEntryThatContains(
+                                         address.GetFileAddress()) != nullptr;
+    if (!valid_in_scope_range)
+      return false;
     SymbolContext sc;
     CalculateSymbolContext(&sc);
     if (sc.module_sp == address.GetModule()) {
       // Is the variable is described by a single location?
-      if (!m_location.IsLocationList()) {
+      if (m_location_list.IsAlwaysValidSingleExpr()) {
         // Yes it is, the location is valid.
         return true;
       }
@@ -271,8 +262,8 @@ bool Variable::LocationIsValidForAddress(const Address &address) {
           return false;
         // It is a location list. We just need to tell if the location list
         // contains the current address when converted to a load address
-        return m_location.LocationListContainsAddress(loclist_base_file_addr,
-                                                      address.GetFileAddress());
+        return m_location_list.ContainsAddress(loclist_base_file_addr,
+                                               address.GetFileAddress());
       }
     }
   }
@@ -390,9 +381,8 @@ Status Variable::GetValuesForVariableExpressionPath(
     llvm::SmallVector<llvm::StringRef, 2> matches;
     variable_list.Clear();
     if (!g_regex.Execute(variable_expr_path, &matches)) {
-      error.SetErrorStringWithFormat(
-          "unable to extract a variable name from '%s'",
-          variable_expr_path.str().c_str());
+      error.SetErrorStringWithFormatv(
+          "unable to extract a variable name from '{0}'", variable_expr_path);
       return error;
     }
     std::string variable_name = matches[1].str();
@@ -421,10 +411,9 @@ Status Variable::GetValuesForVariableExpressionPath(
         valobj_sp = variable_valobj_sp->GetValueForExpressionPath(
             variable_sub_expr_path);
         if (!valobj_sp) {
-          error.SetErrorStringWithFormat(
-              "invalid expression path '%s' for variable '%s'",
-              variable_sub_expr_path.str().c_str(),
-              var_sp->GetName().GetCString());
+          error.SetErrorStringWithFormatv(
+              "invalid expression path '{0}' for variable '{1}'",
+              variable_sub_expr_path, var_sp->GetName().GetCString());
           variable_list.RemoveVariableAtIndex(i);
           continue;
         }
@@ -447,36 +436,25 @@ Status Variable::GetValuesForVariableExpressionPath(
   return error;
 }
 
-bool Variable::DumpLocationForAddress(Stream *s, const Address &address) {
-  // Be sure to resolve the address to section offset prior to calling this
-  // function.
-  if (address.IsSectionOffset()) {
-    SymbolContext sc;
-    CalculateSymbolContext(&sc);
-    if (sc.module_sp == address.GetModule()) {
-      ABISP abi;
-      if (m_owner_scope) {
-        ModuleSP module_sp(m_owner_scope->CalculateSymbolContextModule());
-        if (module_sp)
-          abi = ABI::FindPlugin(ProcessSP(), module_sp->GetArchitecture());
-      }
+bool Variable::DumpLocations(Stream *s, const Address &address) {
+  SymbolContext sc;
+  CalculateSymbolContext(&sc);
+  ABISP abi;
+  if (m_owner_scope) {
+    ModuleSP module_sp(m_owner_scope->CalculateSymbolContextModule());
+    if (module_sp)
+      abi = ABI::FindPlugin(ProcessSP(), module_sp->GetArchitecture());
+  }
 
-      const addr_t file_addr = address.GetFileAddress();
-      if (sc.function) {
-        if (sc.function->GetAddressRange().ContainsFileAddress(address)) {
-          addr_t loclist_base_file_addr =
-              sc.function->GetAddressRange().GetBaseAddress().GetFileAddress();
-          if (loclist_base_file_addr == LLDB_INVALID_ADDRESS)
-            return false;
-          return m_location.DumpLocationForAddress(s, eDescriptionLevelBrief,
-                                                   loclist_base_file_addr,
-                                                   file_addr, abi.get());
-        }
-      }
-      return m_location.DumpLocationForAddress(s, eDescriptionLevelBrief,
-                                               LLDB_INVALID_ADDRESS, file_addr,
-                                               abi.get());
-    }
+  const addr_t file_addr = address.GetFileAddress();
+  if (sc.function) {
+    addr_t loclist_base_file_addr =
+        sc.function->GetAddressRange().GetBaseAddress().GetFileAddress();
+    if (loclist_base_file_addr == LLDB_INVALID_ADDRESS)
+      return false;
+    return m_location_list.DumpLocations(s, eDescriptionLevelBrief,
+                                         loclist_base_file_addr, file_addr,
+                                         abi.get());
   }
   return false;
 }
@@ -532,7 +510,7 @@ static void PrivateAutoCompleteMembers(
           i, member_name, nullptr, nullptr, nullptr);
 
       if (partial_member_name.empty() ||
-          member_name.find(partial_member_name) == 0) {
+          llvm::StringRef(member_name).starts_with(partial_member_name)) {
         if (member_name == partial_member_name) {
           PrivateAutoComplete(
               frame, partial_path,
@@ -599,7 +577,8 @@ static void PrivateAutoComplete(
       if (frame) {
         const bool get_file_globals = true;
 
-        VariableList *variable_list = frame->GetVariableList(get_file_globals);
+        VariableList *variable_list = frame->GetVariableList(get_file_globals,
+                                                             nullptr);
 
         if (variable_list) {
           for (const VariableSP &var_sp : *variable_list)
@@ -684,8 +663,8 @@ static void PrivateAutoComplete(
           break;
         }
 
-        std::string token(partial_path, 0, pos);
-        remaining_partial_path = partial_path.substr(pos);
+        std::string token(std::string(partial_path), 0, pos);
+        remaining_partial_path = std::string(partial_path.substr(pos));
 
         if (compiler_type.IsValid()) {
           PrivateAutoCompleteMembers(frame, token, remaining_partial_path,
@@ -695,7 +674,7 @@ static void PrivateAutoComplete(
           const bool get_file_globals = true;
 
           VariableList *variable_list =
-              frame->GetVariableList(get_file_globals);
+              frame->GetVariableList(get_file_globals, nullptr);
 
           if (!variable_list)
             break;
@@ -706,7 +685,7 @@ static void PrivateAutoComplete(
               continue;
 
             llvm::StringRef variable_name = var_sp->GetName().GetStringRef();
-            if (variable_name.startswith(token)) {
+            if (variable_name.starts_with(token)) {
               if (variable_name == token) {
                 Type *variable_type = var_sp->GetType();
                 if (variable_type) {

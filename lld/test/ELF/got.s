@@ -4,7 +4,7 @@
 // RUN: ld.lld -shared %t2.o -soname=t2.so -o %t2.so
 // RUN: ld.lld --hash-style=sysv %t.o %t2.so -o %t
 // RUN: llvm-readobj -S -r %t | FileCheck %s
-// RUN: llvm-objdump -d %t | FileCheck --check-prefix=DISASM %s
+// RUN: llvm-objdump --no-print-imm-hex -d %t | FileCheck --check-prefix=DISASM %s
 
 // CHECK:      Name: .got
 // CHECK-NEXT: Type: SHT_PROGBITS
@@ -33,7 +33,7 @@
 //  0x202338 - (0x201276 + 2) - 4 = 4284
 //  0x202340 - (0x20127c + 2) - 4 = 4286
 
-// DISASM:      _start:
+// DISASM:      <_start>:
 // DISASM-NEXT:  201270:  {{.*}}  jmpq  *4290(%rip)
 // DISASM-NEXT:  201276:  {{.*}}  jmpq  *4284(%rip)
 // DISASM-NEXT:  20127c:  {{.*}}  jmpq  *4286(%rip)

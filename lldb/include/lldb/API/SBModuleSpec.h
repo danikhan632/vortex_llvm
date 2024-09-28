@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLDB_SBModuleSpec_h_
-#define LLDB_SBModuleSpec_h_
+#ifndef LLDB_API_SBMODULESPEC_H
+#define LLDB_API_SBMODULESPEC_H
 
 #include "lldb/API/SBDefines.h"
 #include "lldb/API/SBFileSpec.h"
@@ -77,12 +77,23 @@ public:
 
   bool SetUUIDBytes(const uint8_t *uuid, size_t uuid_len);
 
+  uint64_t GetObjectOffset();
+
+  void SetObjectOffset(uint64_t object_offset);
+
+  uint64_t GetObjectSize();
+
+  void SetObjectSize(uint64_t object_size);
+
   bool GetDescription(lldb::SBStream &description);
 
 private:
   friend class SBModuleSpecList;
   friend class SBModule;
+  friend class SBPlatform;
   friend class SBTarget;
+
+  SBModuleSpec(const lldb_private::ModuleSpec &module_spec);
 
   std::unique_ptr<lldb_private::ModuleSpec> m_opaque_up;
 };
@@ -119,4 +130,4 @@ private:
 
 } // namespace lldb
 
-#endif // LLDB_SBModuleSpec_h_
+#endif // LLDB_API_SBMODULESPEC_H

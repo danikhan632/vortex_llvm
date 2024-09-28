@@ -1,6 +1,6 @@
 //===- Ops.td - Toy dialect operation definitions ----------*- tablegen -*-===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -13,14 +13,27 @@
 #ifndef TOY_OPS
 #define TOY_OPS
 
-include "mlir/Analysis/CallInterfaces.td"
+include "mlir/Interfaces/FunctionInterfaces.td"
+include "mlir/IR/SymbolInterfaces.td"
+include "mlir/Interfaces/CallInterfaces.td"
+include "mlir/Interfaces/CastInterfaces.td"
+include "mlir/Interfaces/SideEffectInterfaces.td"
 include "toy/ShapeInferenceInterface.td"
 
 // Provide a definition of the 'toy' dialect in the ODS framework so that we
 // can define our operations.
 def Toy_Dialect : Dialect {
   let name = "toy";
-  let cppNamespace = "toy";
+  let cppNamespace = "::mlir::toy";
+
+  // We set this bit to generate a declaration of the `materializeConstant`
+  // method so that we can materialize constants for our toy operations.
+  let hasConstantMaterializer = 1;
+
+  // We set this bit to generate the declarations for the dialect's type parsing
+  // and printing hooks.
+  let useDefaultTypePrinterParser = 1;
+
 }
 
 // Base class for toy dialect operations. This operation inherits from the base
@@ -28,13 +41,15 @@ def Toy_Dialect : Dialect {
 //   * The parent dialect of the operation.
 //   * The mnemonic for the operation, or the name without the dialect prefix.
 //   * A list of traits for the operation.
-class Toy_Op<string mnemonic, list<OpTrait> traits = []> :
+class Toy_Op<string mnemonic, list<Trait> traits = []> :
     Op<Toy_Dialect, mnemonic, traits>;
 
 // Provide a definition for the Toy StructType for use in ODS. This allows for
-// using StructType in a similar way to Tensor or MemRef.
+// using StructType in a similar way to Tensor or MemRef. We use `DialectType`
+// to demarcate the StructType as belonging to the Toy dialect.
 def Toy_StructType :
-    Type<CPred<"$_self.isa<StructType>()">, "Toy struct type">;
+    DialectType<Toy_Dialect, CPred<"::llvm::isa<StructType>($_self)">,
+                "Toy struct type">;
 
 // Provide a definition of the types that are used within the Toy dialect.
 def Toy_Type : AnyTypeOf<[F64Tensor, Toy_StructType]>;
@@ -43,12 +58,17 @@ def Toy_Type : AnyTypeOf<[F64Tensor, Toy_StructType]>;
 // Toy Operations
 //===----------------------------------------------------------------------===//
 
+//===----------------------------------------------------------------------===//
+// ConstantOp
+//===----------------------------------------------------------------------===//
+
 // We define a toy operation by inheriting from our base 'Toy_Op' class above.
 // Here we provide the mnemonic and a list of traits for the operation. The
-// constant operation is marked as 'NoSideEffect' as it is a pure operation
+// constant operation is marked as 'Pure' as it is a pure operation
 // and may be removed if dead.
 def ConstantOp : Toy_Op<"constant",
-    [NoSideEffect, DeclareOpInterfaceMethods<ShapeInferenceOpInterface>]> {
+    [ConstantLike, Pure,
+     DeclareOpInterfaceMethods<ShapeInferenceOpInterface>]> {
   // Provide a summary and description for this operation. This can be used to
   // auto-generate documentation of the operations within our dialect.
   let summary = "constant";
@@ -57,9 +77,8 @@ def ConstantOp : Toy_Op<"constant",
     to the operation as an attribute. For example:
 
     ```mlir
-      %0 = "toy.constant"()
-         { value = dense<[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]> : tensor<2x3xf64> }
-        : () -> tensor<2x3xf64>
+      %0 = toy.constant dense<[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]>
+                        : tensor<2x3xf64>
     ```
   }];
 
@@ -69,29 +88,35 @@ def ConstantOp : Toy_Op<"constant",
   // The constant operation returns a single value of TensorType.
   let results = (outs F64Tensor);
 
+  // Indicate that the operation has a custom parser and printer method.
+  let hasCustomAssemblyFormat = 1;
+
   // Add custom build methods for the constant operation. These method populates
   // the `state` that MLIR uses to create operations, i.e. these are used when
   // using `builder.create<ConstantOp>(...)`.
   let builders = [
     // Build a constant with a given constant tensor value.
-    OpBuilder<"Builder *builder, OperationState &state, "
-              "DenseElementsAttr value", [{
-      build(builder, state, value.getType(), value);
+    OpBuilder<(ins "DenseElementsAttr":$value), [{
+      build($_builder, $_state, value.getType(), value);
     }]>,
 
     // Build a constant with a given constant floating-point value.
-    OpBuilder<"Builder *builder, OperationState &state, double value">
+    OpBuilder<(ins "double":$value)>
   ];
 
-  // Invoke a static verify method to verify this constant operation.
-  let verifier = [{ return ::verify(*this); }];
+  // Indicate that additional verification for this operation is necessary.
+  let hasVerifier = 1;
 
   // Set the folder bit so that we can implement constant folders.
   let hasFolder = 1;
 }
 
+//===----------------------------------------------------------------------===//
+// AddOp
+//===----------------------------------------------------------------------===//
+
 def AddOp : Toy_Op<"add",
-    [NoSideEffect, DeclareOpInterfaceMethods<ShapeInferenceOpInterface>]> {
+    [Pure, DeclareOpInterfaceMethods<ShapeInferenceOpInterface>]> {
   let summary = "element-wise addition operation";
   let description = [{
     The "add" operation performs element-wise addition between two tensors.
@@ -101,30 +126,96 @@ def AddOp : Toy_Op<"add",
   let arguments = (ins F64Tensor:$lhs, F64Tensor:$rhs);
   let results = (outs F64Tensor);
 
+  // Indicate that the operation has a custom parser and printer method.
+  let hasCustomAssemblyFormat = 1;
+
   // Allow building an AddOp with from the two input operands.
   let builders = [
-    OpBuilder<"Builder *b, OperationState &state, Value lhs, Value rhs">
+    OpBuilder<(ins "Value":$lhs, "Value":$rhs)>
   ];
 }
 
-def CastOp : Toy_Op<"cast",
-    [DeclareOpInterfaceMethods<ShapeInferenceOpInterface>, NoSideEffect,
-     SameOperandsAndResultShape]> {
+//===----------------------------------------------------------------------===//
+// CastOp
+//===----------------------------------------------------------------------===//
+
+def CastOp : Toy_Op<"cast", [
+     DeclareOpInterfaceMethods<CastOpInterface>,
+     DeclareOpInterfaceMethods<ShapeInferenceOpInterface>,
+     Pure,
+     SameOperandsAndResultShape
+  ]> {
   let summary = "shape cast operation";
   let description = [{
     The "cast" operation converts a tensor from one type to an equivalent type
-    without changing any data elements. The source and destination types
-    must both be tensor types with the same element type. If both are ranked
-    then the rank should be the same and static dimensions should match. The
-    operation is invalid if converting to a mismatching constant dimension.
+    without changing any data elements. The source and destination types must
+    both be tensor types with the same element type. If both are ranked, then
+    shape is required to match. The operation is invalid if converting to a
+    mismatching constant dimension.
   }];
 
   let arguments = (ins F64Tensor:$input);
   let results = (outs F64Tensor:$output);
 
-  // Set the folder bit so that we can fold redundant cast operations.
-  let hasFolder = 1;
+  let assemblyFormat = "$input attr-dict `:` type($input) `to` type($output)";
 }
+
+//===----------------------------------------------------------------------===//
+// FuncOp
+//===----------------------------------------------------------------------===//
+
+def FuncOp : Toy_Op<"func", [
+    FunctionOpInterface, IsolatedFromAbove
+  ]> {
+  let summary = "user defined function operation";
+  let description = [{
+    The "toy.func" operation represents a user defined function. These are
+    callable SSA-region operations that contain toy computations.
+
+    Example:
+
+    ```mlir
+    toy.func @main() {
+      %0 = toy.constant dense<5.500000e+00> : tensor<f64>
+      %1 = toy.reshape(%0 : tensor<f64>) to tensor<2x2xf64>
+      toy.print %1 : tensor<2x2xf64>
+      toy.return
+    }
+    ```
+  }];
+
+  let arguments = (ins
+    SymbolNameAttr:$sym_name,
+    TypeAttrOf<FunctionType>:$function_type,
+    OptionalAttr<DictArrayAttr>:$arg_attrs,
+    OptionalAttr<DictArrayAttr>:$res_attrs
+  );
+  let regions = (region AnyRegion:$body);
+
+  let builders = [OpBuilder<(ins
+    "StringRef":$name, "FunctionType":$type,
+    CArg<"ArrayRef<NamedAttribute>", "{}">:$attrs)
+  >];
+  let extraClassDeclaration = [{
+    //===------------------------------------------------------------------===//
+    // FunctionOpInterface Methods
+    //===------------------------------------------------------------------===//
+
+    /// Returns the argument types of this function.
+    ArrayRef<Type> getArgumentTypes() { return getFunctionType().getInputs(); }
+
+    /// Returns the result types of this function.
+    ArrayRef<Type> getResultTypes() { return getFunctionType().getResults(); }
+
+    Region *getCallableRegion() { return &getBody(); }
+  }];
+  let hasCustomAssemblyFormat = 1;
+  let skipDefaultBuilders = 1;
+}
+
+//===----------------------------------------------------------------------===//
+// GenericCallOp
+//===----------------------------------------------------------------------===//
 
 def GenericCallOp : Toy_Op<"generic_call",
     [DeclareOpInterfaceMethods<CallOpInterface>]> {
@@ -136,7 +227,7 @@ def GenericCallOp : Toy_Op<"generic_call",
     arguments expected by the callee. For example:
 
     ```mlir
-     %4 = "toy.generic_call"(%1, %3) {callee = @my_func}
+     %4 = toy.generic_call @my_func(%1, %3)
            : (tensor<2x3xf64>, tensor<2x3xf64>) -> tensor<*xf64>
     ```
 
@@ -152,15 +243,23 @@ def GenericCallOp : Toy_Op<"generic_call",
   // StructType.
   let results = (outs Toy_Type);
 
+  // Specialize assembly printing and parsing using a declarative format.
+  let assemblyFormat = [{
+    $callee `(` $inputs `)` attr-dict `:` functional-type($inputs, results)
+  }];
+
   // Add custom build methods for the generic call operation.
   let builders = [
-    OpBuilder<"Builder *builder, OperationState &state, "
-              "StringRef callee, ArrayRef<Value> arguments">
+    OpBuilder<(ins "StringRef":$callee, "ArrayRef<Value>":$arguments)>
   ];
 }
 
+//===----------------------------------------------------------------------===//
+// MulOp
+//===----------------------------------------------------------------------===//
+
 def MulOp : Toy_Op<"mul",
-    [NoSideEffect, DeclareOpInterfaceMethods<ShapeInferenceOpInterface>]> {
+    [Pure, DeclareOpInterfaceMethods<ShapeInferenceOpInterface>]> {
   let summary = "element-wise multiplication operation";
   let description = [{
     The "mul" operation performs element-wise multiplication between two
@@ -170,11 +269,18 @@ def MulOp : Toy_Op<"mul",
   let arguments = (ins F64Tensor:$lhs, F64Tensor:$rhs);
   let results = (outs F64Tensor);
 
+  // Indicate that the operation has a custom parser and printer method.
+  let hasCustomAssemblyFormat = 1;
+
   // Allow building a MulOp with from the two input operands.
   let builders = [
-    OpBuilder<"Builder *b, OperationState &state, Value lhs, Value rhs">
+    OpBuilder<(ins "Value":$lhs, "Value":$rhs)>
   ];
 }
+
+//===----------------------------------------------------------------------===//
+// PrintOp
+//===----------------------------------------------------------------------===//
 
 def PrintOp : Toy_Op<"print"> {
   let summary = "print operation";
@@ -186,27 +292,44 @@ def PrintOp : Toy_Op<"print"> {
   // The print operation takes an input tensor to print.
   // We also allow a F64MemRef to enable interop during partial lowering.
   let arguments = (ins AnyTypeOf<[F64Tensor, F64MemRef]>:$input);
+
+  let assemblyFormat = "$input attr-dict `:` type($input)";
 }
 
-def ReshapeOp : Toy_Op<"reshape", [NoSideEffect]> {
+//===----------------------------------------------------------------------===//
+// ReshapeOp
+//===----------------------------------------------------------------------===//
+
+def ReshapeOp : Toy_Op<"reshape", [Pure]> {
   let summary = "tensor reshape operation";
   let description = [{
     Reshape operation is transforming its input tensor into a new tensor with
     the same number of elements but different shapes. For example:
 
     ```mlir
-       %0 = "toy.reshape"(%arg1) : (tensor<10xf64>) -> tensor<5x2xf64>
+       %0 = toy.reshape (%arg1 : tensor<10xf64>) to tensor<5x2xf64>
     ```
   }];
 
   let arguments = (ins F64Tensor:$input);
+
+  let assemblyFormat = [{
+    `(` $input `:` type($input) `)` attr-dict `to` type(results)
+  }];
+
+  // Enable registering canonicalization patterns with this operation.
   let hasCanonicalizer = 1;
 
   // We expect that the reshape operation returns a statically shaped tensor.
   let results = (outs StaticShapeTensorOf<[F64]>);
 }
 
-def ReturnOp : Toy_Op<"return", [Terminator, HasParent<"FuncOp">]> {
+//===----------------------------------------------------------------------===//
+// ReturnOp
+//===----------------------------------------------------------------------===//
+
+def ReturnOp : Toy_Op<"return", [Pure, HasParent<"FuncOp">,
+                                 Terminator]> {
   let summary = "return operation";
   let description = [{
     The "return" operation represents a return operation within a function.
@@ -215,7 +338,7 @@ def ReturnOp : Toy_Op<"return", [Terminator, HasParent<"FuncOp">]> {
     the operation. For example:
 
     ```mlir
-      func @foo() -> tensor<2xf64> {
+      toy.func @foo() -> tensor<2xf64> {
         ...
         toy.return %0 : tensor<2xf64>
       }
@@ -226,41 +349,57 @@ def ReturnOp : Toy_Op<"return", [Terminator, HasParent<"FuncOp">]> {
   // value must match the return type of the enclosing function.
   let arguments = (ins Variadic<Toy_Type>:$input);
 
+  // The return operation only emits the input in the format if it is present.
+  let assemblyFormat = "($input^ `:` type($input))? attr-dict ";
+
   // Allow building a ReturnOp with no return operand.
-  let builders = [OpBuilder<
-    "Builder *b, OperationState &state", [{ build(b, state, llvm::None); }]
-  >];
+  let builders = [
+    OpBuilder<(ins), [{ build($_builder, $_state, std::nullopt); }]>
+  ];
 
   // Provide extra utility definitions on the c++ operation class definition.
   let extraClassDeclaration = [{
     bool hasOperand() { return getNumOperands() != 0; }
   }];
 
-  // Invoke a static verify method to verify this return operation.
-  let verifier = [{ return ::verify(*this); }];
+  // Indicate that additional verification for this operation is necessary.
+  let hasVerifier = 1;
 }
 
-def StructAccessOp : Toy_Op<"struct_access", [NoSideEffect]> {
+//===----------------------------------------------------------------------===//
+// StructAccessOp
+//===----------------------------------------------------------------------===//
+
+def StructAccessOp : Toy_Op<"struct_access", [Pure]> {
   let summary = "struct access";
   let description = [{
     Access the Nth element of a value returning a struct type.
   }];
 
   let arguments = (ins Toy_StructType:$input, I64Attr:$index);
-  let results = (outs Toy_Type);
+  let results = (outs Toy_Type:$output);
+
+  let assemblyFormat = [{
+    $input `[` $index `]` attr-dict `:` type($input) `->` type($output)
+  }];
 
   // Allow building a StructAccessOp with just a struct value and an index.
   let builders = [
-    OpBuilder<"Builder *b, OperationState &state, Value input, size_t index">
+    OpBuilder<(ins "Value":$input, "size_t":$index)>
   ];
 
-  let verifier = [{ return ::verify(*this); }];
+  // Indicate that additional verification for this operation is necessary.
+  let hasVerifier = 1;
 
   // Set the folder bit so that we can fold constant accesses.
   let hasFolder = 1;
 }
 
-def StructConstantOp : Toy_Op<"struct_constant", [NoSideEffect]> {
+//===----------------------------------------------------------------------===//
+// StructConstantOp
+//===----------------------------------------------------------------------===//
+
+def StructConstantOp : Toy_Op<"struct_constant", [ConstantLike, Pure]> {
   let summary = "struct constant";
   let description = [{
     Constant operation turns a literal struct value into an SSA value. The data
@@ -268,33 +407,47 @@ def StructConstantOp : Toy_Op<"struct_constant", [NoSideEffect]> {
     as an array of other constant values. For example:
 
     ```mlir
-      %0 = "toy.struct_constant"() {
-        value = [dense<[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]> : tensor<2x3xf64>]
-      } : () -> !toy.struct<tensor<*xf64>>
+      %0 = toy.struct_constant [
+        dense<[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]> : tensor<2x3xf64>
+      ] : !toy.struct<tensor<*xf64>>
     ```
   }];
 
-  let hasFolder = 1;
   let arguments = (ins ArrayAttr:$value);
-  let results = (outs Toy_StructType);
-  let verifier = [{ return ::verify(*this); }];
+  let results = (outs Toy_StructType:$output);
+
+  let assemblyFormat = "$value attr-dict `:` type($output)";
+
+  // Indicate that additional verification for this operation is necessary.
+  let hasVerifier = 1;
+  let hasFolder = 1;
 }
 
+//===----------------------------------------------------------------------===//
+// TransposeOp
+//===----------------------------------------------------------------------===//
+
 def TransposeOp : Toy_Op<"transpose",
-    [NoSideEffect, DeclareOpInterfaceMethods<ShapeInferenceOpInterface>]> {
+    [Pure, DeclareOpInterfaceMethods<ShapeInferenceOpInterface>]> {
   let summary = "transpose operation";
 
   let arguments = (ins F64Tensor:$input);
   let results = (outs F64Tensor);
+
+  let assemblyFormat = [{
+    `(` $input `:` type($input) `)` attr-dict `to` type(results)
+  }];
+
+  // Enable registering canonicalization patterns with this operation.
   let hasCanonicalizer = 1;
 
   // Allow building a TransposeOp with from the input operand.
   let builders = [
-    OpBuilder<"Builder *b, OperationState &state, Value input">
+    OpBuilder<(ins "Value":$input)>
   ];
 
-  // Invoke a static verify method to verify this transpose operation.
-  let verifier = [{ return ::verify(*this); }];
+  // Indicate that additional verification for this operation is necessary.
+  let hasVerifier = 1;
 }
 
 #endif // TOY_OPS

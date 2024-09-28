@@ -1,6 +1,6 @@
 //===- FileUtilities.h - utilities for working with files -------*- C++ -*-===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -17,6 +17,7 @@
 #include <string>
 
 namespace llvm {
+struct Align;
 class MemoryBuffer;
 class ToolOutputFile;
 class StringRef;
@@ -28,6 +29,12 @@ namespace mlir {
 /// `errorMessage` if errors occur and `errorMessage` is not nullptr.
 std::unique_ptr<llvm::MemoryBuffer>
 openInputFile(llvm::StringRef inputFilename,
+              std::string *errorMessage = nullptr);
+/// Open the file specified by its name for reading, with the given buffer
+/// alignment constraint. Write the error message to `errorMessage` if errors
+/// occur and `errorMessage` is not nullptr.
+std::unique_ptr<llvm::MemoryBuffer>
+openInputFile(llvm::StringRef inputFilename, llvm::Align alignment,
               std::string *errorMessage = nullptr);
 
 /// Open the file specified by its name for writing. Write the error message to

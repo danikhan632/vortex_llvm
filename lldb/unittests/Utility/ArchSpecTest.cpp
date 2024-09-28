@@ -1,4 +1,4 @@
-//===-- ArchSpecTest.cpp ----------------------------------------*- C++ -*-===//
+//===-- ArchSpecTest.cpp --------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -9,8 +9,8 @@
 #include "gtest/gtest.h"
 
 #include "lldb/Utility/ArchSpec.h"
-#include "llvm/BinaryFormat/MachO.h"
 #include "llvm/BinaryFormat/ELF.h"
+#include "llvm/BinaryFormat/MachO.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -123,6 +123,12 @@ TEST(ArchSpecTest, TestSetTriple) {
   EXPECT_STREQ("i686", AS.GetArchitectureName());
   EXPECT_EQ(ArchSpec::eCore_x86_32_i686, AS.GetCore());
 
+  AS = ArchSpec();
+  EXPECT_TRUE(AS.SetTriple("msp430---elf"));
+  EXPECT_EQ(llvm::Triple::msp430, AS.GetTriple().getArch());
+  EXPECT_STREQ("msp430", AS.GetArchitectureName());
+  EXPECT_EQ(ArchSpec::eCore_msp430, AS.GetCore());
+
   // Various flavors of invalid triples.
   AS = ArchSpec();
   EXPECT_FALSE(AS.SetTriple("unknown-unknown-unknown"));
@@ -200,14 +206,14 @@ TEST(ArchSpecTest, MergeFrom) {
 
     EXPECT_TRUE(A.IsValid());
     EXPECT_TRUE(B.IsValid());
-    
+
     EXPECT_EQ(llvm::Triple::ArchType::arm, B.GetTriple().getArch());
     EXPECT_EQ(llvm::Triple::VendorType::UnknownVendor,
               B.GetTriple().getVendor());
     EXPECT_EQ(llvm::Triple::OSType::Linux, B.GetTriple().getOS());
     EXPECT_EQ(llvm::Triple::EnvironmentType::UnknownEnvironment,
               B.GetTriple().getEnvironment());
-    
+
     A.MergeFrom(B);
     EXPECT_EQ(llvm::Triple::ArchType::arm, A.GetTriple().getArch());
     EXPECT_EQ(llvm::Triple::VendorType::UnknownVendor,
@@ -280,7 +286,7 @@ TEST(ArchSpecTest, Compatibility) {
     ASSERT_TRUE(A.IsCompatibleMatch(B));
   }
   {
-    // The version information is auxiliary to support availablity but
+    // The version information is auxiliary to support availability but
     // doesn't affect compatibility.
     ArchSpec A("x86_64-apple-macosx10.11");
     ArchSpec B("x86_64-apple-macosx10.12");
@@ -304,6 +310,33 @@ TEST(ArchSpecTest, Compatibility) {
     ArchSpec B("x86_64-apple-ios-simulator");
     ASSERT_FALSE(A.IsExactMatch(B));
     ASSERT_FALSE(A.IsCompatibleMatch(B));
+    ASSERT_FALSE(B.IsExactMatch(A));
+    ASSERT_FALSE(B.IsCompatibleMatch(A));
+  }
+  {
+    ArchSpec A("x86_64-apple-ios");
+    ArchSpec B("x86_64-apple-ios-simulator");
+    ASSERT_FALSE(A.IsExactMatch(B));
+    ASSERT_FALSE(A.IsCompatibleMatch(B));
+    ASSERT_FALSE(B.IsExactMatch(A));
+    ASSERT_FALSE(B.IsCompatibleMatch(A));
+  }
+  {
+    // FIXME: This is surprisingly not equivalent to "x86_64-*-*".
+    ArchSpec A("x86_64");
+    ArchSpec B("x86_64-apple-ios-simulator");
+    ASSERT_FALSE(A.IsExactMatch(B));
+    ASSERT_TRUE(A.IsCompatibleMatch(B));
+    ASSERT_FALSE(B.IsExactMatch(A));
+    ASSERT_TRUE(B.IsCompatibleMatch(A));
+  }
+  {
+    ArchSpec A("arm64-apple-ios");
+    ArchSpec B("arm64-apple-ios-simulator");
+    ASSERT_FALSE(A.IsExactMatch(B));
+    ASSERT_FALSE(A.IsCompatibleMatch(B));
+    ASSERT_FALSE(B.IsCompatibleMatch(A));
+    ASSERT_FALSE(B.IsCompatibleMatch(A));
   }
   {
     ArchSpec A("arm64-*-*");
@@ -326,6 +359,40 @@ TEST(ArchSpecTest, Compatibility) {
     // FIXME: The exact match also looks unintuitive.
     ASSERT_TRUE(A.IsExactMatch(B));
     ASSERT_TRUE(A.IsCompatibleMatch(B));
+  }
+  {
+    ArchSpec A("x86_64");
+    ArchSpec B("x86_64-apple-ios12.0.0-macabi");
+    // FIXME: The exact match also looks unintuitive.
+    ASSERT_TRUE(A.IsExactMatch(B));
+    ASSERT_TRUE(A.IsCompatibleMatch(B));
+  }
+  {
+    ArchSpec A("x86_64-apple-ios12.0.0");
+    ArchSpec B("x86_64-apple-ios12.0.0-macabi");
+    ASSERT_FALSE(A.IsExactMatch(B));
+    ASSERT_FALSE(A.IsCompatibleMatch(B));
+  }
+  {
+    ArchSpec A("x86_64-apple-macosx10.14.2");
+    ArchSpec B("x86_64-apple-ios12.0.0-macabi");
+    ASSERT_FALSE(A.IsExactMatch(B));
+    ASSERT_TRUE(A.IsCompatibleMatch(B));
+  }
+  {
+    ArchSpec A("x86_64-apple-macosx10.14.2");
+    ArchSpec B("x86_64-apple-ios12.0.0-macabi");
+    // ios-macabi wins.
+    A.MergeFrom(B);
+    ASSERT_TRUE(A.IsExactMatch(B));
+  }
+  {
+    ArchSpec A("x86_64-apple-macosx10.14.2");
+    ArchSpec B("x86_64-apple-ios12.0.0-macabi");
+    ArchSpec C(B);
+    // ios-macabi wins.
+    B.MergeFrom(A);
+    ASSERT_TRUE(B.IsExactMatch(C));
   }
 }
 

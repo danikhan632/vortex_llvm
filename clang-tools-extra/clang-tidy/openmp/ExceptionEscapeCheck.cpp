@@ -17,9 +17,7 @@
 
 using namespace clang::ast_matchers;
 
-namespace clang {
-namespace tidy {
-namespace openmp {
+namespace clang::tidy::openmp {
 
 ExceptionEscapeCheck::ExceptionEscapeCheck(StringRef Name,
                                            ClangTidyContext *Context)
@@ -43,14 +41,6 @@ void ExceptionEscapeCheck::storeOptions(ClangTidyOptions::OptionMap &Opts) {
 }
 
 void ExceptionEscapeCheck::registerMatchers(MatchFinder *Finder) {
-  // Don't register the check if OpenMP is not enabled; the OpenMP pragmas are
-  // completely ignored then, so no OpenMP entires will be present in the AST.
-  if (!getLangOpts().OpenMP)
-    return;
-  // Similarly, if C++ Exceptions are not enabled, nothing to do.
-  if (!getLangOpts().CPlusPlus || !getLangOpts().CXXExceptions)
-    return;
-
   Finder->addMatcher(ompExecutableDirective(
                          unless(isStandaloneDirective()),
                          hasStructuredBlock(stmt().bind("structured-block")))
@@ -79,6 +69,4 @@ void ExceptionEscapeCheck::check(const MatchFinder::MatchResult &Result) {
       << getOpenMPDirectiveName(Directive->getDirectiveKind());
 }
 
-} // namespace openmp
-} // namespace tidy
-} // namespace clang
+} // namespace clang::tidy::openmp

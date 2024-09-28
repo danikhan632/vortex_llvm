@@ -1,23 +1,26 @@
-add_llvm_tool(mlir-cpu-runner
+set(LLVM_LINK_COMPONENTS
+  Core
+  Support
+  nativecodegen
+  native
+  )
+
+add_mlir_tool(mlir-cpu-runner
   mlir-cpu-runner.cpp
-)
+  )
 llvm_update_compile_flags(mlir-cpu-runner)
-whole_archive_link(mlir-cpu-runner
-  MLIRAffineOps
-  MLIRLLVMIR
-  MLIRTargetLLVMIR
-  MLIRTranslation
-)
 target_link_libraries(mlir-cpu-runner PRIVATE
   MLIRAnalysis
-  MLIREDSC
+  MLIRBuiltinToLLVMIRTranslation
   MLIRExecutionEngine
   MLIRIR
   MLIRJitRunner
-  MLIRLLVMIR
+  MLIRLLVMDialect
+  MLIRLLVMToLLVMIRTranslation
+  MLIRToLLVMIRTranslationRegistration
   MLIRParser
-  MLIRTargetLLVMIR
+  MLIRTargetLLVMIRExport
   MLIRSupport
-  LLVMCore
-  LLVMSupport
-)
+  )
+
+export_executable_symbols(mlir-cpu-runner)

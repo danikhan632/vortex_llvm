@@ -1,4 +1,4 @@
-//===-- RangeTest.cpp ----------------------------------------*- C++ -*-===//
+//===-- RangeTest.cpp -----------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -12,11 +12,98 @@
 
 using namespace lldb_private;
 
+TEST(RangeVector, CombineConsecutiveRanges) {
+  using RangeVector = RangeVector<uint32_t, uint32_t>;
+  using Entry = RangeVector::Entry;
+
+  RangeVector V;
+  V.Append(0, 1);
+  V.Append(5, 1);
+  V.Append(6, 1);
+  V.Append(10, 9);
+  V.Append(15, 1);
+  V.Append(20, 9);
+  V.Append(21, 9);
+  V.Sort();
+  V.CombineConsecutiveRanges();
+  EXPECT_THAT(V, testing::ElementsAre(Entry(0, 1), Entry(5, 2), Entry(10, 9),
+                                      Entry(20, 10)));
+
+  V.Clear();
+  V.Append(0, 20);
+  V.Append(5, 1);
+  V.Append(10, 1);
+  V.Sort();
+  V.CombineConsecutiveRanges();
+  EXPECT_THAT(V, testing::ElementsAre(Entry(0, 20)));
+}
+
+TEST(RangeVector, GetOverlaps) {
+  using RangeVector = RangeVector<uint32_t, uint32_t>;
+
+  RangeVector V1;
+  RangeVector V2;
+  RangeVector Expected;
+  // same range
+  V1.Append(0, 1);
+  V2.Append(0, 1);
+  Expected.Append(0, 1);
+
+  // no overlap
+  V1.Append(2, 2);
+  V2.Append(4, 1);
+
+  // same base overlap
+  V1.Append(10, 5);
+  V2.Append(10, 3);
+  Expected.Append(10, 3);
+
+  // same end overlap
+  V1.Append(27, 1);
+  V2.Append(20, 8);
+  Expected.Append(27, 1);
+
+  // smaller base overlap
+  V1.Append(33, 4);
+  V2.Append(30, 5);
+  Expected.Append(33, 2);
+
+  // larger base overlap
+  V1.Append(46, 3);
+  V2.Append(40, 7);
+  Expected.Append(46, 1);
+
+  // encompass 1 range
+  V1.Append(50, 9);
+  V2.Append(51, 7);
+  Expected.Append(51, 7);
+
+  // encompass 2 ranges
+  V1.Append(60, 9);
+  V2.Append(60, 3);
+  V2.Append(65, 3);
+  Expected.Append(60, 3);
+  Expected.Append(65, 3);
+
+  V1.Sort();
+  V2.Sort();
+  Expected.Sort();
+
+  EXPECT_EQ(RangeVector::GetOverlaps(V1, V2), Expected);
+  EXPECT_EQ(RangeVector::GetOverlaps(V2, V1), Expected);
+}
+
 using RangeDataVectorT = RangeDataVector<uint32_t, uint32_t, uint32_t>;
 using EntryT = RangeDataVectorT::Entry;
 
 static testing::Matcher<const EntryT *> EntryIs(uint32_t ID) {
   return testing::Pointee(testing::Field(&EntryT::data, ID));
+}
+
+std::vector<uint32_t> FindEntryIndexes(uint32_t address, RangeDataVectorT map) {
+  std::vector<uint32_t> result;
+  map.FindEntryIndexesThatContain(address, result);
+  return result;
 }
 
 TEST(RangeDataVector, FindEntryThatContains) {
@@ -93,4 +180,38 @@ TEST(RangeDataVector, CustomSort) {
   EXPECT_THAT(MapC.GetEntryRef(1).data, 52);
   EXPECT_THAT(MapC.GetEntryRef(2).data, 51);
   EXPECT_THAT(MapC.GetEntryRef(3).data, 50);
+}
+
+TEST(RangeDataVector, FindEntryIndexesThatContain) {
+  RangeDataVectorT Map;
+  Map.Append(EntryT(0, 10, 10));
+  Map.Append(EntryT(10, 10, 11));
+  Map.Append(EntryT(20, 10, 12));
+  Map.Sort();
+
+  EXPECT_THAT(FindEntryIndexes(0, Map), testing::ElementsAre(10));
+  EXPECT_THAT(FindEntryIndexes(9, Map), testing::ElementsAre(10));
+  EXPECT_THAT(FindEntryIndexes(10, Map), testing::ElementsAre(11));
+  EXPECT_THAT(FindEntryIndexes(19, Map), testing::ElementsAre(11));
+  EXPECT_THAT(FindEntryIndexes(20, Map), testing::ElementsAre(12));
+  EXPECT_THAT(FindEntryIndexes(29, Map), testing::ElementsAre(12));
+  EXPECT_THAT(FindEntryIndexes(30, Map), testing::ElementsAre());
+}
+
+TEST(RangeDataVector, FindEntryIndexesThatContain_Overlap) {
+  RangeDataVectorT Map;
+  Map.Append(EntryT(0, 40, 10));
+  Map.Append(EntryT(10, 20, 11));
+  Map.Append(EntryT(20, 10, 12));
+  Map.Sort();
+
+  EXPECT_THAT(FindEntryIndexes(0, Map), testing::ElementsAre(10));
+  EXPECT_THAT(FindEntryIndexes(9, Map), testing::ElementsAre(10));
+  EXPECT_THAT(FindEntryIndexes(10, Map), testing::ElementsAre(10, 11));
+  EXPECT_THAT(FindEntryIndexes(19, Map), testing::ElementsAre(10, 11));
+  EXPECT_THAT(FindEntryIndexes(20, Map), testing::ElementsAre(10, 11, 12));
+  EXPECT_THAT(FindEntryIndexes(29, Map), testing::ElementsAre(10, 11, 12));
+  EXPECT_THAT(FindEntryIndexes(30, Map), testing::ElementsAre(10));
+  EXPECT_THAT(FindEntryIndexes(39, Map), testing::ElementsAre(10));
+  EXPECT_THAT(FindEntryIndexes(40, Map), testing::ElementsAre());
 }

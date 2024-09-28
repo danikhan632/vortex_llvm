@@ -13,93 +13,67 @@
 #ifndef _OMPTARGET_PRIVATE_H
 #define _OMPTARGET_PRIVATE_H
 
-#include <omptarget.h>
+#include "Shared/Debug.h"
+#include "Shared/SourceInfo.h"
+
+#include "OpenMP/InternalTypes.h"
+
+#include "device.h"
+#include "omptarget.h"
 
 #include <cstdint>
 
-extern int target_data_begin(DeviceTy &Device, int32_t arg_num,
-    void **args_base, void **args, int64_t *arg_sizes, int64_t *arg_types);
+extern int target(ident_t *Loc, DeviceTy &Device, void *HostPtr,
+                  KernelArgsTy &KernelArgs, AsyncInfoTy &AsyncInfo);
 
-extern int target_data_end(DeviceTy &Device, int32_t arg_num, void **args_base,
-    void **args, int64_t *arg_sizes, int64_t *arg_types);
+extern int target_activate_rr(DeviceTy &Device, uint64_t MemorySize,
+                              void *ReqAddr, bool isRecord, bool SaveOutput,
+                              uint64_t &ReqPtrArgOffset);
 
-extern int target_data_update(DeviceTy &Device, int32_t arg_num,
-    void **args_base, void **args, int64_t *arg_sizes, int64_t *arg_types);
+extern int target_replay(ident_t *Loc, DeviceTy &Device, void *HostPtr,
+                         void *DeviceMemory, int64_t DeviceMemorySize,
+                         void **TgtArgs, ptrdiff_t *TgtOffsets, int32_t NumArgs,
+                         int32_t NumTeams, int32_t ThreadLimit,
+                         uint64_t LoopTripCount, AsyncInfoTy &AsyncInfo);
 
-extern int target(int64_t device_id, void *host_ptr, int32_t arg_num,
-    void **args_base, void **args, int64_t *arg_sizes, int64_t *arg_types,
-    int32_t team_num, int32_t thread_limit, int IsTeamConstruct);
-
-extern int CheckDeviceAndCtors(int64_t device_id);
-
-// enum for OMP_TARGET_OFFLOAD; keep in sync with kmp.h definition
-enum kmp_target_offload_kind {
-  tgt_disabled = 0,
-  tgt_default = 1,
-  tgt_mandatory = 2
-};
-typedef enum kmp_target_offload_kind kmp_target_offload_kind_t;
-extern kmp_target_offload_kind_t TargetOffloadPolicy;
-
-// This structure stores information of a mapped memory region.
-struct MapComponentInfoTy {
-  void *Base;
-  void *Begin;
-  int64_t Size;
-  int64_t Type;
-  MapComponentInfoTy() = default;
-  MapComponentInfoTy(void *Base, void *Begin, int64_t Size, int64_t Type)
-      : Base(Base), Begin(Begin), Size(Size), Type(Type) {}
-};
-
-// This structure stores all components of a user-defined mapper. The number of
-// components are dynamically decided, so we utilize C++ STL vector
-// implementation here.
-struct MapperComponentsTy {
-  std::vector<MapComponentInfoTy> Components;
-};
+extern void handleTargetOutcome(bool Success, ident_t *Loc);
+extern bool checkDeviceAndCtors(int64_t &DeviceID, ident_t *Loc);
 
 ////////////////////////////////////////////////////////////////////////////////
-// implementation for fatal messages
-////////////////////////////////////////////////////////////////////////////////
+/// Print out the names and properties of the arguments to each kernel
+static inline void
+printKernelArguments(const ident_t *Loc, const int64_t DeviceId,
+                     const int32_t ArgNum, const int64_t *ArgSizes,
+                     const int64_t *ArgTypes, const map_var_info_t *ArgNames,
+                     const char *RegionType) {
+  SourceInfo Info(Loc);
+  INFO(OMP_INFOTYPE_ALL, DeviceId, "%s at %s:%d:%d with %d arguments:\n",
+       RegionType, Info.getFilename(), Info.getLine(), Info.getColumn(),
+       ArgNum);
 
-#define FATAL_MESSAGE0(_num, _str)                                    \
-  do {                                                                \
-    fprintf(stderr, "Libomptarget fatal error %d: %s\n", _num, _str); \
-    exit(1);                                                          \
-  } while (0)
+  for (int32_t I = 0; I < ArgNum; ++I) {
+    const map_var_info_t VarName = (ArgNames) ? ArgNames[I] : nullptr;
+    const char *Type = nullptr;
+    const char *Implicit =
+        (ArgTypes[I] & OMP_TGT_MAPTYPE_IMPLICIT) ? "(implicit)" : "";
+    if (ArgTypes[I] & OMP_TGT_MAPTYPE_TO && ArgTypes[I] & OMP_TGT_MAPTYPE_FROM)
+      Type = "tofrom";
+    else if (ArgTypes[I] & OMP_TGT_MAPTYPE_TO)
+      Type = "to";
+    else if (ArgTypes[I] & OMP_TGT_MAPTYPE_FROM)
+      Type = "from";
+    else if (ArgTypes[I] & OMP_TGT_MAPTYPE_PRIVATE)
+      Type = "private";
+    else if (ArgTypes[I] & OMP_TGT_MAPTYPE_LITERAL)
+      Type = "firstprivate";
+    else if (ArgSizes[I] != 0)
+      Type = "alloc";
+    else
+      Type = "use_address";
 
-#define FATAL_MESSAGE(_num, _str, ...)                              \
-  do {                                                              \
-    fprintf(stderr, "Libomptarget fatal error %d:" _str "\n", _num, \
-            __VA_ARGS__);                                           \
-    exit(1);                                                        \
-  } while (0)
-
-// Implemented in libomp, they are called from within __tgt_* functions.
-#ifdef __cplusplus
-extern "C" {
-#endif
-// functions that extract info from libomp; keep in sync
-int omp_get_default_device(void) __attribute__((weak));
-int32_t __kmpc_omp_taskwait(void *loc_ref, int32_t gtid) __attribute__((weak));
-int32_t __kmpc_global_thread_num(void *) __attribute__((weak));
-int __kmpc_get_target_offload(void) __attribute__((weak));
-#ifdef __cplusplus
+    INFO(OMP_INFOTYPE_ALL, DeviceId, "%s(%s)[%" PRId64 "] %s\n", Type,
+         getNameFromMapping(VarName).c_str(), ArgSizes[I], Implicit);
+  }
 }
-#endif
-
-#ifdef OMPTARGET_DEBUG
-extern int DebugLevel;
-
-#define DP(...) \
-  do { \
-    if (DebugLevel > 0) { \
-      DEBUGP("Libomptarget", __VA_ARGS__); \
-    } \
-  } while (false)
-#else // OMPTARGET_DEBUG
-#define DP(...) {}
-#endif // OMPTARGET_DEBUG
 
 #endif

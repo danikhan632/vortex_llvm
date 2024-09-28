@@ -6,11 +6,17 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "CFGBuildResult.h"
-#include "clang/ASTMatchers/ASTMatchFinder.h"
 #include "clang/Analysis/CFG.h"
+#include "CFGBuildResult.h"
+#include "clang/AST/Decl.h"
+#include "clang/ASTMatchers/ASTMatchFinder.h"
+#include "clang/Analysis/Analyses/IntervalPartition.h"
+#include "clang/Analysis/AnalysisDeclContext.h"
+#include "clang/Analysis/FlowSensitive/DataflowWorklist.h"
 #include "clang/Tooling/Tooling.h"
+#include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -66,6 +72,27 @@ TEST(CFG, VariableOfIncompleteType) {
   EXPECT_EQ(BuildResult::BuiltCFG, BuildCFG(Code).getStatus());
 }
 
+// Constructing a CFG with a dependent base should not crash.
+TEST(CFG, DependantBaseAddImplicitDtors) {
+  const char *Code = R"(
+    template <class T>
+    struct Base {
+      virtual ~Base() {}
+    };
+
+    template <typename T>
+    struct Derived : public Base<T> {
+      virtual ~Derived() {}
+    };
+  )";
+  CFG::BuildOptions Options;
+  Options.AddImplicitDtors = true;
+  Options.setAllAlwaysAdd();
+  EXPECT_EQ(BuildResult::BuiltCFG,
+            BuildCFG(Code, Options, ast_matchers::hasName("~Derived<T>"))
+                .getStatus());
+}
+
 TEST(CFG, IsLinear) {
   auto expectLinear = [](bool IsLinear, const char *Code) {
     BuildResult B = BuildCFG(Code);
@@ -73,14 +100,14 @@ TEST(CFG, IsLinear) {
     EXPECT_EQ(IsLinear, B.getCFG()->isLinear());
   };
 
-  expectLinear(true,  "void foo() {}");
-  expectLinear(true,  "void foo() { if (true) return; }");
-  expectLinear(true,  "void foo() { if constexpr (false); }");
+  expectLinear(true, "void foo() {}");
+  expectLinear(true, "void foo() { if (true) return; }");
+  expectLinear(true, "void foo() { if constexpr (false); }");
   expectLinear(false, "void foo(bool coin) { if (coin) return; }");
   expectLinear(false, "void foo() { for(;;); }");
   expectLinear(false, "void foo() { do {} while (true); }");
-  expectLinear(true,  "void foo() { do {} while (false); }");
-  expectLinear(true,  "void foo() { foo(); }"); // Recursion is not our problem.
+  expectLinear(true, "void foo() { do {} while (false); }");
+  expectLinear(true, "void foo() { foo(); }"); // Recursion is not our problem.
 }
 
 TEST(CFG, ElementRefIterator) {
@@ -214,6 +241,80 @@ TEST(CFG, ElementRefIterator) {
             CMainBlock->rref_end());
   EXPECT_EQ(CMainBlock->rref_begin()++, CMainBlock->rref_begin());
   EXPECT_EQ(++(CMainBlock->rref_begin()), CMainBlock->rref_begin() + 1);
+}
+
+TEST(CFG, Worklists) {
+  const char *Code = "int f(bool cond) {\n"
+                     "  int a = 5;\n"
+                     "  while (a < 6)\n"
+                     "    ++a;\n"
+                     "  if (cond)\n"
+                     "    a += 1;\n"
+                     "  return a;\n"
+                     "}\n";
+  BuildResult B = BuildCFG(Code);
+  EXPECT_EQ(BuildResult::BuiltCFG, B.getStatus());
+  const FunctionDecl *Func = B.getFunc();
+  AnalysisDeclContext AC(nullptr, Func);
+  auto *CFG = AC.getCFG();
+
+  std::vector<const CFGBlock *> ReferenceOrder;
+  for (const auto *B : *AC.getAnalysis<PostOrderCFGView>())
+    ReferenceOrder.push_back(B);
+
+  {
+    ForwardDataflowWorklist ForwardWorklist(*CFG, AC);
+    for (const auto *B : *CFG)
+      ForwardWorklist.enqueueBlock(B);
+
+    std::vector<const CFGBlock *> ForwardNodes;
+    while (const CFGBlock *B = ForwardWorklist.dequeue())
+      ForwardNodes.push_back(B);
+
+    EXPECT_EQ(ForwardNodes.size(), ReferenceOrder.size());
+    EXPECT_TRUE(std::equal(ReferenceOrder.begin(), ReferenceOrder.end(),
+                           ForwardNodes.begin()));
+  }
+
+  // RPO: 876321054
+  // WTO: 876534210
+  // So, we construct the WTO order accordingly from the reference order.
+  std::vector<const CFGBlock *> WTOOrder = {
+      ReferenceOrder[0], ReferenceOrder[1], ReferenceOrder[2],
+      ReferenceOrder[7], ReferenceOrder[3], ReferenceOrder[8],
+      ReferenceOrder[4], ReferenceOrder[5], ReferenceOrder[6]};
+
+  {
+    using ::testing::ElementsAreArray;
+    std::optional<WeakTopologicalOrdering> WTO = getIntervalWTO(*CFG);
+    ASSERT_TRUE(WTO);
+    WTOCompare WCmp(*WTO);
+    WTODataflowWorklist WTOWorklist(*CFG, WCmp);
+    for (const auto *B : *CFG)
+      WTOWorklist.enqueueBlock(B);
+
+    std::vector<const CFGBlock *> WTONodes;
+    while (const CFGBlock *B = WTOWorklist.dequeue())
+      WTONodes.push_back(B);
+
+    EXPECT_THAT(WTONodes, ElementsAreArray(WTOOrder));
+  }
+
+  std::reverse(ReferenceOrder.begin(), ReferenceOrder.end());
+
+  {
+    BackwardDataflowWorklist BackwardWorklist(*CFG, AC);
+    for (const auto *B : *CFG)
+      BackwardWorklist.enqueueBlock(B);
+
+    std::vector<const CFGBlock *> BackwardNodes;
+    while (const CFGBlock *B = BackwardWorklist.dequeue())
+      BackwardNodes.push_back(B);
+
+    EXPECT_EQ(BackwardNodes.size(), ReferenceOrder.size());
+    EXPECT_TRUE(std::equal(ReferenceOrder.begin(), ReferenceOrder.end(),
+                           BackwardNodes.begin()));
+  }
 }
 
 } // namespace

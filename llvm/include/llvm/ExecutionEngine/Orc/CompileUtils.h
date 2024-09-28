@@ -20,7 +20,6 @@
 
 namespace llvm {
 
-class MCContext;
 class MemoryBuffer;
 class Module;
 class ObjectCache;
@@ -28,9 +27,7 @@ class TargetMachine;
 
 namespace orc {
 
-class JITTargetMachineBuilder;
-
-IRMaterializationUnit::ManglingOptions
+IRSymbolMapper::ManglingOptions
 irManglingOptionsFromTargetOptions(const TargetOptions &Opts);
 
 /// Simple compile functor: Takes a single IR module and returns an ObjectFile.
@@ -52,7 +49,7 @@ public:
   Expected<CompileResult> operator()(Module &M) override;
 
 private:
-  IRMaterializationUnit::ManglingOptions
+  IRSymbolMapper::ManglingOptions
   manglingOptionsForTargetMachine(const TargetMachine &TM);
 
   CompileResult tryToLoadFromObjectCache(const Module &M);
@@ -64,7 +61,7 @@ private:
 
 /// A SimpleCompiler that owns its TargetMachine.
 ///
-/// This convenient for clients who don't want to own their TargetMachines,
+/// This is convenient for clients who don't want to own their TargetMachines,
 /// e.g. LLJIT.
 class TMOwningSimpleCompiler : public SimpleCompiler {
 public:

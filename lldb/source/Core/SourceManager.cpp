@@ -1,4 +1,4 @@
-//===-- SourceManager.cpp ---------------------------------------*- C++ -*-===//
+//===-- SourceManager.cpp -------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -21,10 +21,13 @@
 #include "lldb/Symbol/LineEntry.h"
 #include "lldb/Symbol/SymbolContext.h"
 #include "lldb/Target/PathMappingList.h"
+#include "lldb/Target/Process.h"
 #include "lldb/Target/Target.h"
+#include "lldb/Utility/AnsiTerminal.h"
 #include "lldb/Utility/ConstString.h"
 #include "lldb/Utility/DataBuffer.h"
-#include "lldb/Utility/DataBufferLLVM.h"
+#include "lldb/Utility/LLDBLog.h"
+#include "lldb/Utility/Log.h"
 #include "lldb/Utility/RegularExpression.h"
 #include "lldb/Utility/Stream.h"
 #include "lldb/lldb-enumerations.h"
@@ -32,10 +35,11 @@
 #include "llvm/ADT/Twine.h"
 
 #include <memory>
+#include <optional>
 #include <utility>
 
-#include <assert.h>
-#include <stdio.h>
+#include <cassert>
+#include <cstdio>
 
 namespace lldb_private {
 class ExecutionContext;
@@ -49,54 +53,112 @@ using namespace lldb_private;
 
 static inline bool is_newline_char(char ch) { return ch == '\n' || ch == '\r'; }
 
+static void resolve_tilde(FileSpec &file_spec) {
+  if (!FileSystem::Instance().Exists(file_spec) &&
+      file_spec.GetDirectory() &&
+      file_spec.GetDirectory().GetCString()[0] == '~') {
+    FileSystem::Instance().Resolve(file_spec);
+  }
+}
+
 // SourceManager constructor
 SourceManager::SourceManager(const TargetSP &target_sp)
-    : m_last_file_sp(), m_last_line(0), m_last_count(0), m_default_set(false),
+    : m_last_line(0), m_last_count(0), m_default_set(false),
       m_target_wp(target_sp),
       m_debugger_wp(target_sp->GetDebugger().shared_from_this()) {}
 
 SourceManager::SourceManager(const DebuggerSP &debugger_sp)
-    : m_last_file_sp(), m_last_line(0), m_last_count(0), m_default_set(false),
-      m_target_wp(), m_debugger_wp(debugger_sp) {}
+    : m_last_line(0), m_last_count(0), m_default_set(false), m_target_wp(),
+      m_debugger_wp(debugger_sp) {}
 
 // Destructor
-SourceManager::~SourceManager() {}
+SourceManager::~SourceManager() = default;
 
 SourceManager::FileSP SourceManager::GetFile(const FileSpec &file_spec) {
-  bool same_as_previous =
-      m_last_file_sp &&
-      FileSpec::Match(file_spec, m_last_file_sp->GetFileSpec());
+  if (!file_spec)
+    return {};
+
+  Log *log = GetLog(LLDBLog::Source);
 
   DebuggerSP debugger_sp(m_debugger_wp.lock());
-  FileSP file_sp;
-  if (same_as_previous)
-    file_sp = m_last_file_sp;
-  else if (debugger_sp)
-    file_sp = debugger_sp->GetSourceFileCache().FindSourceFile(file_spec);
-
   TargetSP target_sp(m_target_wp.lock());
 
-  // It the target source path map has been updated, get this file again so we
-  // can successfully remap the source file
-  if (target_sp && file_sp &&
-      file_sp->GetSourceMapModificationID() !=
-          target_sp->GetSourcePathMap().GetModificationID())
-    file_sp.reset();
-
-  // Update the file contents if needed if we found a file
-  if (file_sp)
-    file_sp->UpdateIfNeeded();
-
-  // If file_sp is no good or it points to a non-existent file, reset it.
-  if (!file_sp || !FileSystem::Instance().Exists(file_sp->GetFileSpec())) {
+  if (!debugger_sp || !debugger_sp->GetUseSourceCache()) {
+    LLDB_LOG(log, "Source file caching disabled: creating new source file: {0}",
+             file_spec);
     if (target_sp)
-      file_sp = std::make_shared<File>(file_spec, target_sp.get());
+      return std::make_shared<File>(file_spec, target_sp);
+    return std::make_shared<File>(file_spec, debugger_sp);
+  }
+
+  ProcessSP process_sp = target_sp ? target_sp->GetProcessSP() : ProcessSP();
+
+  // Check the process source cache first. This is the fast path which avoids
+  // touching the file system unless the path remapping has changed.
+  if (process_sp) {
+    if (FileSP file_sp =
+            process_sp->GetSourceFileCache().FindSourceFile(file_spec)) {
+      LLDB_LOG(log, "Found source file in the process cache: {0}", file_spec);
+      if (file_sp->PathRemappingIsStale()) {
+        LLDB_LOG(log, "Path remapping is stale: removing file from caches: {0}",
+                 file_spec);
+
+        // Remove the file from the debugger and process cache. Otherwise we'll
+        // hit the same issue again below when querying the debugger cache.
+        debugger_sp->GetSourceFileCache().RemoveSourceFile(file_sp);
+        process_sp->GetSourceFileCache().RemoveSourceFile(file_sp);
+
+        file_sp.reset();
+      } else {
+        return file_sp;
+      }
+    }
+  }
+
+  // Cache miss in the process cache. Check the debugger source cache.
+  FileSP file_sp = debugger_sp->GetSourceFileCache().FindSourceFile(file_spec);
+
+  // We found the file in the debugger cache. Check if anything invalidated our
+  // cache result.
+  if (file_sp)
+    LLDB_LOG(log, "Found source file in the debugger cache: {0}", file_spec);
+
+  // Check if the path remapping has changed.
+  if (file_sp && file_sp->PathRemappingIsStale()) {
+    LLDB_LOG(log, "Path remapping is stale: {0}", file_spec);
+    file_sp.reset();
+  }
+
+  // Check if the modification time has changed.
+  if (file_sp && file_sp->ModificationTimeIsStale()) {
+    LLDB_LOG(log, "Modification time is stale: {0}", file_spec);
+    file_sp.reset();
+  }
+
+  // Check if the file exists on disk.
+  if (file_sp && !FileSystem::Instance().Exists(file_sp->GetFileSpec())) {
+    LLDB_LOG(log, "File doesn't exist on disk: {0}", file_spec);
+    file_sp.reset();
+  }
+
+  // If at this point we don't have a valid file, it means we either didn't find
+  // it in the debugger cache or something caused it to be invalidated.
+  if (!file_sp) {
+    LLDB_LOG(log, "Creating and caching new source file: {0}", file_spec);
+
+    // (Re)create the file.
+    if (target_sp)
+      file_sp = std::make_shared<File>(file_spec, target_sp);
     else
       file_sp = std::make_shared<File>(file_spec, debugger_sp);
 
-    if (debugger_sp)
-      debugger_sp->GetSourceFileCache().AddSourceFile(file_sp);
+    // Add the file to the debugger and process cache. If the file was
+    // invalidated, this will overwrite it.
+    debugger_sp->GetSourceFileCache().AddSourceFile(file_spec, file_sp);
+    if (process_sp)
+      process_sp->GetSourceFileCache().AddSourceFile(file_spec, file_sp);
   }
+
   return file_sp;
 }
 
@@ -148,6 +210,10 @@ static bool should_show_stop_column_with_caret(DebuggerSP debugger_sp) {
   return value == eStopShowColumnCaret;
 }
 
+static bool should_show_stop_line_with_ansi(DebuggerSP debugger_sp) {
+  return debugger_sp && debugger_sp->GetUseColor();
+}
+
 size_t SourceManager::DisplaySourceLinesWithLineNumbersUsingLastFile(
     uint32_t start_line, uint32_t count, uint32_t curr_line, uint32_t column,
     const char *current_line_cstr, Stream *s,
@@ -173,41 +239,55 @@ size_t SourceManager::DisplaySourceLinesWithLineNumbersUsingLastFile(
   m_last_line = start_line;
   m_last_count = count;
 
-  if (m_last_file_sp.get()) {
+  if (FileSP last_file_sp = GetLastFile()) {
     const uint32_t end_line = start_line + count - 1;
     for (uint32_t line = start_line; line <= end_line; ++line) {
-      if (!m_last_file_sp->LineIsValid(line)) {
+      if (!last_file_sp->LineIsValid(line)) {
         m_last_line = UINT32_MAX;
         break;
       }
 
-      char prefix[32] = "";
+      std::string prefix;
       if (bp_locs) {
         uint32_t bp_count = bp_locs->NumLineEntriesWithLine(line);
 
         if (bp_count > 0)
-          ::snprintf(prefix, sizeof(prefix), "[%u] ", bp_count);
+          prefix = llvm::formatv("[{0}]", bp_count);
         else
-          ::snprintf(prefix, sizeof(prefix), "    ");
+          prefix = "    ";
       }
 
-      s->Printf("%s%2.2s %-4u\t", prefix,
-                line == curr_line ? current_line_cstr : "", line);
+      char buffer[3];
+      snprintf(buffer, sizeof(buffer), "%2.2s",
+               (line == curr_line) ? current_line_cstr : "");
+      std::string current_line_highlight(buffer);
+
+      auto debugger_sp = m_debugger_wp.lock();
+      if (should_show_stop_line_with_ansi(debugger_sp)) {
+        current_line_highlight = ansi::FormatAnsiTerminalCodes(
+            (debugger_sp->GetStopShowLineMarkerAnsiPrefix() +
+             current_line_highlight +
+             debugger_sp->GetStopShowLineMarkerAnsiSuffix())
+                .str());
+      }
+
+      s->Printf("%s%s %-4u\t", prefix.c_str(), current_line_highlight.c_str(),
+                line);
 
       // So far we treated column 0 as a special 'no column value', but
       // DisplaySourceLines starts counting columns from 0 (and no column is
       // expressed by passing an empty optional).
-      llvm::Optional<size_t> columnToHighlight;
+      std::optional<size_t> columnToHighlight;
       if (line == curr_line && column)
         columnToHighlight = column - 1;
 
       size_t this_line_size =
-          m_last_file_sp->DisplaySourceLines(line, columnToHighlight, 0, 0, s);
+          last_file_sp->DisplaySourceLines(line, columnToHighlight, 0, 0, s);
       if (column != 0 && line == curr_line &&
-          should_show_stop_column_with_caret(m_debugger_wp.lock())) {
+          should_show_stop_column_with_caret(debugger_sp)) {
         // Display caret cursor.
         std::string src_line;
-        m_last_file_sp->GetLine(line, src_line);
+        last_file_sp->GetLine(line, src_line);
         s->Printf("    \t");
         // Insert a space for every non-tab character in the source line.
         for (size_t i = 0; i + 1 < column && i < src_line.length(); ++i)
@@ -238,10 +318,11 @@ size_t SourceManager::DisplaySourceLinesWithLineNumbers(
   else
     start_line = 1;
 
-  if (m_last_file_sp.get() != file_sp.get()) {
+  FileSP last_file_sp(GetLastFile());
+  if (last_file_sp.get() != file_sp.get()) {
     if (line == 0)
       m_last_line = 0;
-    m_last_file_sp = file_sp;
+    m_last_file_spec = file_spec;
   }
   return DisplaySourceLinesWithLineNumbersUsingLastFile(
       start_line, count, line, column, current_line_cstr, s, bp_locs);
@@ -251,14 +332,15 @@ size_t SourceManager::DisplayMoreWithLineNumbers(
     Stream *s, uint32_t count, bool reverse, const SymbolContextList *bp_locs) {
   // If we get called before anybody has set a default file and line, then try
   // to figure it out here.
-  const bool have_default_file_line = m_last_file_sp && m_last_line > 0;
+  FileSP last_file_sp(GetLastFile());
+  const bool have_default_file_line = last_file_sp && m_last_line > 0;
   if (!m_default_set) {
     FileSpec tmp_spec;
     uint32_t tmp_line;
     GetDefaultFileAndLine(tmp_spec, tmp_line);
   }
 
-  if (m_last_file_sp) {
+  if (last_file_sp) {
     if (m_last_line == UINT32_MAX)
       return 0;
 
@@ -293,22 +375,21 @@ size_t SourceManager::DisplayMoreWithLineNumbers(
 
 bool SourceManager::SetDefaultFileAndLine(const FileSpec &file_spec,
                                           uint32_t line) {
-  FileSP old_file_sp = m_last_file_sp;
-  m_last_file_sp = GetFile(file_spec);
-
   m_default_set = true;
-  if (m_last_file_sp) {
+  FileSP file_sp(GetFile(file_spec));
+
+  if (file_sp) {
     m_last_line = line;
+    m_last_file_spec = file_spec;
     return true;
   } else {
-    m_last_file_sp = old_file_sp;
     return false;
   }
 }
 
 bool SourceManager::GetDefaultFileAndLine(FileSpec &file_spec, uint32_t &line) {
-  if (m_last_file_sp) {
-    file_spec = m_last_file_sp->GetFileSpec();
+  if (FileSP last_file_sp = GetLastFile()) {
+    file_spec = m_last_file_spec;
     line = m_last_line;
     return true;
   } else if (!m_default_set) {
@@ -323,22 +404,22 @@ bool SourceManager::GetDefaultFileAndLine(FileSpec &file_spec, uint32_t &line) {
       if (executable_ptr) {
         SymbolContextList sc_list;
         ConstString main_name("main");
-        bool symbols_okay = false; // Force it to be a debug symbol.
-        bool inlines_okay = true;
-        executable_ptr->FindFunctions(main_name, nullptr,
-                                      lldb::eFunctionNameTypeBase, inlines_okay,
-                                      symbols_okay, sc_list);
-        size_t num_matches = sc_list.GetSize();
-        for (size_t idx = 0; idx < num_matches; idx++) {
-          SymbolContext sc;
-          sc_list.GetContextAtIndex(idx, sc);
+
+        ModuleFunctionSearchOptions function_options;
+        function_options.include_symbols =
+            false; // Force it to be a debug symbol.
+        function_options.include_inlines = true;
+        executable_ptr->FindFunctions(main_name, CompilerDeclContext(),
+                                      lldb::eFunctionNameTypeBase,
+                                      function_options, sc_list);
+        for (const SymbolContext &sc : sc_list) {
           if (sc.function) {
             lldb_private::LineEntry line_entry;
             if (sc.function->GetAddressRange()
                     .GetBaseAddress()
                     .CalculateSymbolContextLineEntry(line_entry)) {
               SetDefaultFileAndLine(line_entry.file, line_entry.line);
-              file_spec = m_last_file_sp->GetFileSpec();
+              file_spec = m_last_file_spec;
               line = m_last_line;
               return true;
             }
@@ -365,33 +446,37 @@ void SourceManager::FindLinesMatchingRegex(FileSpec &file_spec,
 
 SourceManager::File::File(const FileSpec &file_spec,
                           lldb::DebuggerSP debugger_sp)
-    : m_file_spec_orig(file_spec), m_file_spec(file_spec),
-      m_mod_time(FileSystem::Instance().GetModificationTime(file_spec)),
-      m_debugger_wp(debugger_sp) {
-  CommonInitializer(file_spec, nullptr);
+    : m_file_spec_orig(file_spec), m_file_spec(), m_mod_time(),
+      m_debugger_wp(debugger_sp), m_target_wp(TargetSP()) {
+  CommonInitializer(file_spec, {});
 }
 
-SourceManager::File::File(const FileSpec &file_spec, Target *target)
-    : m_file_spec_orig(file_spec), m_file_spec(file_spec),
-      m_mod_time(FileSystem::Instance().GetModificationTime(file_spec)),
-      m_debugger_wp(target ? target->GetDebugger().shared_from_this()
-                           : DebuggerSP()) {
-  CommonInitializer(file_spec, target);
+SourceManager::File::File(const FileSpec &file_spec, TargetSP target_sp)
+    : m_file_spec_orig(file_spec), m_file_spec(), m_mod_time(),
+      m_debugger_wp(target_sp ? target_sp->GetDebugger().shared_from_this()
+                              : DebuggerSP()),
+      m_target_wp(target_sp) {
+  CommonInitializer(file_spec, target_sp);
 }
 
 void SourceManager::File::CommonInitializer(const FileSpec &file_spec,
-                                            Target *target) {
-  if (m_mod_time == llvm::sys::TimePoint<>()) {
-    if (target) {
-      m_source_map_mod_id = target->GetSourcePathMap().GetModificationID();
+                                            TargetSP target_sp) {
+  // Set the file and update the modification time.
+  SetFileSpec(file_spec);
 
+  // Always update the source map modification ID if we have a target.
+  if (target_sp)
+    m_source_map_mod_id = target_sp->GetSourcePathMap().GetModificationID();
+
+  // File doesn't exist.
+  if (m_mod_time == llvm::sys::TimePoint<>()) {
+    if (target_sp) {
+      // If this is just a file name, try finding it in the target.
       if (!file_spec.GetDirectory() && file_spec.GetFilename()) {
-        // If this is just a file name, lets see if we can find it in the
-        // target:
         bool check_inlines = false;
         SymbolContextList sc_list;
         size_t num_matches =
-            target->GetImages().ResolveSymbolContextForFilePath(
+            target_sp->GetImages().ResolveSymbolContextForFilePath(
                 file_spec.GetFilename().AsCString(), 0, check_inlines,
                 SymbolContextItem(eSymbolContextModule |
                                   eSymbolContextCompUnit),
@@ -399,11 +484,8 @@ void SourceManager::File::CommonInitializer(const FileSpec &file_spec,
         bool got_multiple = false;
         if (num_matches != 0) {
           if (num_matches > 1) {
-            SymbolContext sc;
             CompileUnit *test_cu = nullptr;
-
-            for (unsigned i = 0; i < num_matches; i++) {
-              sc_list.GetContextAtIndex(i, sc);
+            for (const SymbolContext &sc : sc_list) {
               if (sc.comp_unit) {
                 if (test_cu) {
                   if (test_cu != sc.comp_unit)
@@ -418,28 +500,37 @@ void SourceManager::File::CommonInitializer(const FileSpec &file_spec,
             SymbolContext sc;
             sc_list.GetContextAtIndex(0, sc);
             if (sc.comp_unit)
-              m_file_spec = sc.comp_unit->GetPrimaryFile();
-            m_mod_time = FileSystem::Instance().GetModificationTime(m_file_spec);
+              SetFileSpec(sc.comp_unit->GetPrimaryFile());
           }
         }
       }
-      // Try remapping if m_file_spec does not correspond to an existing file.
+
+      // Try remapping the file if it doesn't exist.
       if (!FileSystem::Instance().Exists(m_file_spec)) {
-        FileSpec new_file_spec;
-        // Check target specific source remappings first, then fall back to
-        // modules objects can have individual path remappings that were
-        // detected when the debug info for a module was found. then
-        if (target->GetSourcePathMap().FindFile(m_file_spec, new_file_spec) ||
-            target->GetImages().FindSourceFile(m_file_spec, new_file_spec)) {
-          m_file_spec = new_file_spec;
-          m_mod_time = FileSystem::Instance().GetModificationTime(m_file_spec);
+        // Check target specific source remappings (i.e., the
+        // target.source-map setting), then fall back to the module
+        // specific remapping (i.e., the .dSYM remapping dictionary).
+        auto remapped = target_sp->GetSourcePathMap().FindFile(m_file_spec);
+        if (!remapped) {
+          FileSpec new_spec;
+          if (target_sp->GetImages().FindSourceFile(m_file_spec, new_spec))
+            remapped = new_spec;
         }
+        if (remapped)
+          SetFileSpec(*remapped);
       }
     }
   }
 
+  // If the file exists, read in the data.
   if (m_mod_time != llvm::sys::TimePoint<>())
     m_data_sp = FileSystem::Instance().CreateDataBuffer(m_file_spec);
+}
+
+void SourceManager::File::SetFileSpec(FileSpec file_spec) {
+  resolve_tilde(file_spec);
+  m_file_spec = std::move(file_spec);
+  m_mod_time = FileSystem::Instance().GetModificationTime(m_file_spec);
 }
 
 uint32_t SourceManager::File::GetLineOffset(uint32_t line) {
@@ -508,22 +599,24 @@ bool SourceManager::File::LineIsValid(uint32_t line) {
   return false;
 }
 
-void SourceManager::File::UpdateIfNeeded() {
+bool SourceManager::File::ModificationTimeIsStale() const {
   // TODO: use host API to sign up for file modifications to anything in our
   // source cache and only update when we determine a file has been updated.
   // For now we check each time we want to display info for the file.
   auto curr_mod_time = FileSystem::Instance().GetModificationTime(m_file_spec);
+  return curr_mod_time != llvm::sys::TimePoint<>() &&
+         m_mod_time != curr_mod_time;
+}
 
-  if (curr_mod_time != llvm::sys::TimePoint<>() &&
-      m_mod_time != curr_mod_time) {
-    m_mod_time = curr_mod_time;
-    m_data_sp = FileSystem::Instance().CreateDataBuffer(m_file_spec);
-    m_offsets.clear();
-  }
+bool SourceManager::File::PathRemappingIsStale() const {
+  if (TargetSP target_sp = m_target_wp.lock())
+    return GetSourceMapModificationID() !=
+           target_sp->GetSourcePathMap().GetModificationID();
+  return false;
 }
 
 size_t SourceManager::File::DisplaySourceLines(uint32_t line,
-                                               llvm::Optional<size_t> column,
+                                               std::optional<size_t> column,
                                                uint32_t context_before,
                                                uint32_t context_after,
                                                Stream *s) {
@@ -622,7 +715,7 @@ bool SourceManager::File::CalculateLineOffsets(uint32_t line) {
       if (m_data_sp.get() == nullptr)
         return false;
 
-      const char *start = (char *)m_data_sp->GetBytes();
+      const char *start = (const char *)m_data_sp->GetBytes();
       if (start) {
         const char *end = start + m_data_sp->GetByteSize();
 
@@ -672,18 +765,46 @@ bool SourceManager::File::GetLine(uint32_t line_no, std::string &buffer) {
   if (end_offset == UINT32_MAX) {
     end_offset = m_data_sp->GetByteSize();
   }
-  buffer.assign((char *)m_data_sp->GetBytes() + start_offset,
+  buffer.assign((const char *)m_data_sp->GetBytes() + start_offset,
                 end_offset - start_offset);
 
   return true;
 }
 
-void SourceManager::SourceFileCache::AddSourceFile(const FileSP &file_sp) {
-  FileSpec file_spec;
+void SourceManager::SourceFileCache::AddSourceFile(const FileSpec &file_spec,
+                                                   FileSP file_sp) {
+  llvm::sys::ScopedWriter guard(m_mutex);
+
+  assert(file_sp && "invalid FileSP");
+
+  AddSourceFileImpl(file_spec, file_sp);
+  const FileSpec &resolved_file_spec = file_sp->GetFileSpec();
+  if (file_spec != resolved_file_spec)
+    AddSourceFileImpl(file_sp->GetFileSpec(), file_sp);
+}
+
+void SourceManager::SourceFileCache::RemoveSourceFile(const FileSP &file_sp) {
+  llvm::sys::ScopedWriter guard(m_mutex);
+
+  assert(file_sp && "invalid FileSP");
+
+  // Iterate over all the elements in the cache.
+  // This is expensive but a relatively uncommon operation.
+  auto it = m_file_cache.begin();
+  while (it != m_file_cache.end()) {
+    if (it->second == file_sp)
+      it = m_file_cache.erase(it);
+    else
+      it++;
+  }
+}
+
+void SourceManager::SourceFileCache::AddSourceFileImpl(
+    const FileSpec &file_spec, FileSP file_sp) {
   FileCache::iterator pos = m_file_cache.find(file_spec);
-  if (pos == m_file_cache.end())
+  if (pos == m_file_cache.end()) {
     m_file_cache[file_spec] = file_sp;
-  else {
+  } else {
     if (file_sp != pos->second)
       m_file_cache[file_spec] = file_sp;
   }
@@ -691,9 +812,22 @@ void SourceManager::SourceFileCache::AddSourceFile(const FileSP &file_sp) {
 
 SourceManager::FileSP SourceManager::SourceFileCache::FindSourceFile(
     const FileSpec &file_spec) const {
-  FileSP file_sp;
+  llvm::sys::ScopedReader guard(m_mutex);
+
   FileCache::const_iterator pos = m_file_cache.find(file_spec);
   if (pos != m_file_cache.end())
-    file_sp = pos->second;
-  return file_sp;
+    return pos->second;
+  return {};
+}
+
+void SourceManager::SourceFileCache::Dump(Stream &stream) const {
+  stream << "Modification time   Lines    Path\n";
+  stream << "------------------- -------- --------------------------------\n";
+  for (auto &entry : m_file_cache) {
+    if (!entry.second)
+      continue;
+    FileSP file = entry.second;
+    stream.Format("{0:%Y-%m-%d %H:%M:%S} {1,8:d} {2}\n", file->GetTimestamp(),
+                  file->GetNumLines(), entry.first.GetPath());
+  }
 }

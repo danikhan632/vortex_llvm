@@ -4,6 +4,7 @@ set(LLVM_LINK_COMPONENTS
   AllTargetsDescs
   AllTargetsInfos
   BitReader
+  CodeGen
   Core
   Linker
   LTO
@@ -12,6 +13,7 @@ set(LLVM_LINK_COMPONENTS
   Passes
   Support
   Target
+  TargetParser
   )
 
 add_llvm_tool(llvm-lto2
@@ -20,3 +22,4 @@ add_llvm_tool(llvm-lto2
   DEPENDS
   intrinsics_gen
   )
+export_executable_symbols_for_plugins(llvm-lto2)

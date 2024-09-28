@@ -6,8 +6,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-// UNSUPPORTED: c++98, c++03, c++11, c++14
-// XFAIL: dylib-has-no-filesystem
+// UNSUPPORTED: c++03, c++11, c++14
+
+// UNSUPPORTED: availability-filesystem-missing
+
+// FILE_DEPENDENCIES: test.dat
 
 // <fstream>
 
@@ -35,6 +38,7 @@ int main(int, char**) {
     fs >> c;
     assert(c == 'r');
   }
+#ifndef TEST_HAS_NO_WIDE_CHARACTERS
   {
     std::wifstream fs;
     assert(!fs.is_open());
@@ -47,6 +51,7 @@ int main(int, char**) {
     fs >> c;
     assert(c == L'r');
   }
+#endif
 
   return 0;
 }

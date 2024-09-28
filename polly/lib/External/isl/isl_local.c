@@ -1,6 +1,7 @@
 /*
  * Copyright 2011      INRIA Saclay
  * Copyright 2014      Ecole Normale Superieure
+ * Copyright 2015      Sven Verdoolaege
  *
  * Use of this software is governed by the MIT license
  *
@@ -15,7 +16,7 @@
 #include <isl_mat_private.h>
 #include <isl_reordering.h>
 #include <isl_seq.h>
-#include <isl_local.h>
+#include <isl_local_private.h>
 
 /* Return the isl_ctx to which "local" belongs.
  */
@@ -38,6 +39,13 @@ __isl_give isl_local *isl_local_alloc_from_mat(__isl_take isl_mat *mat)
 	return mat;
 }
 
+/* Return a new reference to "local".
+ */
+__isl_give isl_local *isl_local_copy(__isl_keep isl_local *local)
+{
+	return isl_local_alloc_from_mat(isl_mat_copy(local));
+}
+
 /* Free "local" and return NULL.
  */
 __isl_null isl_local *isl_local_free(__isl_take isl_local *local)
@@ -52,33 +60,43 @@ __isl_null isl_local *isl_local_free(__isl_take isl_local *local)
  *
  * Other types do not have any meaning for an isl_local object.
  */
-int isl_local_dim(__isl_keep isl_local *local, enum isl_dim_type type)
+isl_size isl_local_dim(__isl_keep isl_local *local, enum isl_dim_type type)
 {
 	isl_mat *mat = local;
 
 	if (!local)
-		return 0;
+		return isl_size_error;
 	if (type == isl_dim_div)
 		return isl_mat_rows(mat);
-	if (type == isl_dim_all)
-		return isl_mat_cols(mat) - 2;
-	if (type == isl_dim_set)
-		return isl_local_dim(local, isl_dim_all) -
-			isl_local_dim(local, isl_dim_div);
+	if (type == isl_dim_all) {
+		isl_size cols = isl_mat_cols(mat);
+		if (cols < 0)
+			return isl_size_error;
+		return cols - 2;
+	}
+	if (type == isl_dim_set) {
+		isl_size total, n_div;
+
+		total = isl_local_dim(local, isl_dim_all);
+		n_div = isl_local_dim(local, isl_dim_div);
+		if (total < 0 || n_div < 0)
+			return isl_size_error;
+		return total - n_div;
+	}
 	isl_die(isl_local_get_ctx(local), isl_error_unsupported,
-		"unsupported dimension type", return 0);
+		"unsupported dimension type", return isl_size_error);
 }
+
+#undef TYPE
+#define TYPE	isl_local
+static
+#include "check_type_range_templ.c"
 
 /* Check that "pos" is a valid position for a variable in "local".
  */
 static isl_stat isl_local_check_pos(__isl_keep isl_local *local, int pos)
 {
-	if (!local)
-		return isl_stat_error;
-	if (pos < 0 || pos >= isl_local_dim(local, isl_dim_div))
-		isl_die(isl_local_get_ctx(local), isl_error_invalid,
-			"position out of bounds", return isl_stat_error);
-	return isl_stat_ok;
+	return isl_local_check_range(local, isl_dim_div, pos, 1);
 }
 
 /* Given local variables "local",
@@ -95,7 +113,7 @@ isl_bool isl_local_div_is_marked_unknown(__isl_keep isl_local *local, int pos)
 
 	if (isl_local_check_pos(local, pos) < 0)
 		return isl_bool_error;
-	return isl_int_is_zero(mat->row[pos][0]);
+	return isl_bool_ok(isl_int_is_zero(mat->row[pos][0]));
 }
 
 /* Given local variables "local",
@@ -108,7 +126,8 @@ isl_bool isl_local_div_is_marked_unknown(__isl_keep isl_local *local, int pos)
 isl_bool isl_local_div_is_known(__isl_keep isl_local *local, int pos)
 {
 	isl_bool marked;
-	int i, n, off;
+	int i, off;
+	isl_size n, cols;
 	isl_mat *mat = local;
 
 	if (isl_local_check_pos(local, pos) < 0)
@@ -119,7 +138,10 @@ isl_bool isl_local_div_is_known(__isl_keep isl_local *local, int pos)
 		return isl_bool_not(marked);
 
 	n = isl_local_dim(local, isl_dim_div);
-	off = isl_mat_cols(mat) - n;
+	cols = isl_mat_cols(mat);
+	if (n < 0 || cols < 0)
+		return isl_bool_error;
+	off = cols - n;
 
 	for (i = n - 1; i >= 0; --i) {
 		isl_bool known;
@@ -138,12 +160,13 @@ isl_bool isl_local_div_is_known(__isl_keep isl_local *local, int pos)
  */
 isl_bool isl_local_divs_known(__isl_keep isl_local *local)
 {
-	int i, n;
-
-	if (!local)
-		return isl_bool_error;
+	int i;
+	isl_size n;
 
 	n = isl_local_dim(local, isl_dim_div);
+	if (n < 0)
+		return isl_bool_error;
+
 	for (i = 0; i < n; ++i) {
 		isl_bool unknown = isl_local_div_is_marked_unknown(local, i);
 		if (unknown < 0 || unknown)
@@ -169,7 +192,7 @@ int isl_local_cmp(__isl_keep isl_local *local1, __isl_keep isl_local *local2)
 	int cmp;
 	isl_bool unknown1, unknown2;
 	int last1, last2;
-	int n_col;
+	isl_size n_col;
 	isl_mat *mat1 = local1;
 	isl_mat *mat2 = local2;
 
@@ -184,6 +207,8 @@ int isl_local_cmp(__isl_keep isl_local *local1, __isl_keep isl_local *local2)
 		return mat1->n_row - mat2->n_row;
 
 	n_col = isl_mat_cols(mat1);
+	if (n_col < 0)
+		return -1;
 	for (i = 0; i < mat1->n_row; ++i) {
 		unknown1 = isl_local_div_is_marked_unknown(local1, i);
 		unknown2 = isl_local_div_is_marked_unknown(local2, i);
@@ -205,6 +230,32 @@ int isl_local_cmp(__isl_keep isl_local *local1, __isl_keep isl_local *local2)
 	return 0;
 }
 
+/* Return the position of the variables of the given type
+ * within the sequence of variables of "local".
+ *
+ * Only the position of the local variables can be obtained.
+ * It is equal to the total number of variables minus
+ * the number of local variables.
+ */
+isl_size isl_local_var_offset(__isl_keep isl_local *local,
+	enum isl_dim_type type)
+{
+	isl_size n_div, n_all;
+
+	if (!local)
+		return isl_size_error;
+	if (type != isl_dim_div)
+		isl_die(isl_local_get_ctx(local), isl_error_unsupported,
+			"only the offset of the local variables "
+			"can be obtained", return isl_size_error);
+
+	n_div = isl_local_dim(local, isl_dim_div);
+	n_all = isl_local_dim(local, isl_dim_all);
+	if (n_div < 0 || n_all < 0)
+		return isl_size_error;
+	return n_all - n_div;
+}
+
 /* Reorder the columns of the given local variables according to the
  * given reordering.
  * The order of the local variables themselves is assumed not to change.
@@ -214,15 +265,13 @@ __isl_give isl_local *isl_local_reorder(__isl_take isl_local *local,
 {
 	isl_mat *div = local;
 	int i, j;
-	isl_space *space;
 	isl_mat *mat;
 	int extra;
 
 	if (!local || !r)
 		goto error;
 
-	space = isl_reordering_peek_space(r);
-	extra = isl_space_dim(space, isl_dim_all) + div->n_row - r->len;
+	extra = r->dst_len - r->src_len;
 	mat = isl_mat_alloc(div->ctx, div->n_row, div->n_col + extra);
 	if (!mat)
 		goto error;
@@ -230,7 +279,7 @@ __isl_give isl_local *isl_local_reorder(__isl_take isl_local *local,
 	for (i = 0; i < div->n_row; ++i) {
 		isl_seq_cpy(mat->row[i], div->row[i], 2);
 		isl_seq_clr(mat->row[i] + 2, mat->n_col - 2);
-		for (j = 0; j < r->len; ++j)
+		for (j = 0; j < r->src_len; ++j)
 			isl_int_set(mat->row[i][2 + r->pos[j]],
 				    div->row[i][2 + j]);
 	}
@@ -244,15 +293,43 @@ error:
 	return NULL;
 }
 
+/* Move the "n" variables starting at "src_pos" of "local" to "dst_pos".
+ *
+ * Moving local variables is not allowed.
+ */
+__isl_give isl_local *isl_local_move_vars(__isl_take isl_local *local,
+	unsigned dst_pos, unsigned src_pos, unsigned n)
+{
+	isl_mat *mat = local;
+	isl_size v_div;
+
+	v_div = isl_local_var_offset(local, isl_dim_div);
+	if (v_div < 0)
+		return isl_local_free(local);
+	if (n == 0)
+		return local;
+
+	if (dst_pos >= v_div || src_pos >= v_div)
+		isl_die(isl_local_get_ctx(local), isl_error_invalid,
+			"cannot move local variables",
+			return isl_local_free(local));
+
+	mat = isl_mat_move_cols(mat, 2 + dst_pos, 2 + src_pos, n);
+
+	return isl_local_alloc_from_mat(mat);
+}
+
 /* Extend a vector "v" representing an integer point
  * in the domain space of "local"
  * to one that also includes values for the local variables.
  * All local variables are required to have an explicit representation.
+ * If there are no local variables, then the point is not required
+ * to be integral.
  */
 __isl_give isl_vec *isl_local_extend_point_vec(__isl_keep isl_local *local,
 	__isl_take isl_vec *v)
 {
-	unsigned n_div;
+	isl_size dim, n_div, size;
 	isl_bool known;
 	isl_mat *mat = local;
 
@@ -264,16 +341,21 @@ __isl_give isl_vec *isl_local_extend_point_vec(__isl_keep isl_local *local,
 	if (!known)
 		isl_die(isl_local_get_ctx(local), isl_error_invalid,
 			"unknown local variables", return isl_vec_free(v));
-	if (isl_vec_size(v) != 1 + isl_local_dim(local, isl_dim_set))
+	dim = isl_local_dim(local, isl_dim_set);
+	n_div = isl_local_dim(local, isl_dim_div);
+	size = isl_vec_size(v);
+	if (dim < 0 || n_div < 0 || size < 0)
+		return isl_vec_free(v);
+	if (size != 1 + dim)
 		isl_die(isl_local_get_ctx(local), isl_error_invalid,
 			"incorrect size", return isl_vec_free(v));
+	if (n_div == 0)
+		return v;
 	if (!isl_int_is_one(v->el[0]))
 		isl_die(isl_local_get_ctx(local), isl_error_invalid,
 			"expecting integer point", return isl_vec_free(v));
-	n_div = isl_local_dim(local, isl_dim_div);
-	if (n_div != 0) {
+	{
 		int i;
-		unsigned dim = isl_local_dim(local, isl_dim_set);
 		v = isl_vec_add_els(v, n_div);
 		if (!v)
 			return NULL;

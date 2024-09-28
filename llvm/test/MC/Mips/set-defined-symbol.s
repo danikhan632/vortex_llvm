@@ -1,4 +1,4 @@
-# RUN: llvm-mc %s -arch=mips -mcpu=mips32 -filetype=obj -o - | \
+# RUN: llvm-mc %s -triple=mips -mcpu=mips32 -filetype=obj -o - | \
 # RUN:   llvm-objdump -d -r - | FileCheck %s
 
   .global foo
@@ -9,10 +9,10 @@
 a:
   nop
 # CHECK-NOT: a:
-# CHECK: foo:
+# CHECK: <foo>:
 
 b:
   nop
 # CHECK-NOT: b:
 # CHECK-NOT: foo:
-# CHECK: bar:
+# CHECK: <bar>:

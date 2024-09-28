@@ -1,10 +1,25 @@
-add_llvm_library(MLIRGPUtoROCDLTransforms
+set(LLVM_TARGET_DEFINITIONS GPUToROCDL.td)
+mlir_tablegen(GPUToROCDL.cpp.inc -gen-rewriters)
+add_public_tablegen_target(MLIRGPUToROCDLIncGen)
+
+add_mlir_conversion_library(MLIRGPUToROCDLTransforms
   LowerGpuOpsToROCDLOps.cpp
-  )
-target_link_libraries(MLIRGPUtoROCDLTransforms
-  LLVMSupport
-  MLIRGPU
-  MLIRLLVMIR
-  MLIRROCDLIR
+
+  DEPENDS
+  MLIRConversionPassIncGen
+  MLIRGPUToROCDLIncGen
+
+  LINK_LIBS PUBLIC
+  MLIRArithToLLVM
+  MLIRArithTransforms
+  MLIRMathToLLVM
+  MLIRAMDGPUToROCDL
+  MLIRFuncToLLVM
+  MLIRGPUDialect
+  MLIRGPUToGPURuntimeTransforms
+  MLIRLLVMCommonConversion
+  MLIRLLVMDialect
+  MLIRMemRefToLLVM
+  MLIRROCDLDialect
   MLIRPass
   )

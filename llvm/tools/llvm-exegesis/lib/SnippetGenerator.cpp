@@ -6,7 +6,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <array>
 #include <string>
 
 #include "Assembler.h"
@@ -17,6 +16,7 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
+#include "llvm/Support/Error.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/Program.h"
@@ -38,13 +38,14 @@ SnippetGenerator::SnippetGenerator(const LLVMState &State, const Options &Opts)
 
 SnippetGenerator::~SnippetGenerator() = default;
 
-Expected<std::vector<BenchmarkCode>> SnippetGenerator::generateConfigurations(
-    const Instruction &Instr, const BitVector &ExtraForbiddenRegs) const {
+Error SnippetGenerator::generateConfigurations(
+    const InstructionTemplate &Variant, std::vector<BenchmarkCode> &Benchmarks,
+    const BitVector &ExtraForbiddenRegs) const {
   BitVector ForbiddenRegs = State.getRATC().reservedRegisters();
   ForbiddenRegs |= ExtraForbiddenRegs;
   // If the instruction has memory registers, prevent the generator from
   // using the scratch register and its aliasing registers.
-  if (Instr.hasMemoryOperands()) {
+  if (Variant.getInstr().hasMemoryOperands()) {
     const auto &ET = State.getExegesisTarget();
     unsigned ScratchSpacePointerInReg =
         ET.getScratchMemoryRegister(State.getTargetMachine().getTargetTriple());
@@ -55,7 +56,7 @@ Expected<std::vector<BenchmarkCode>> SnippetGenerator::generateConfigurations(
         State.getRATC().getRegister(ScratchSpacePointerInReg).aliasedBits();
     // If the instruction implicitly writes to ScratchSpacePointerInReg , abort.
     // FIXME: We could make a copy of the scratch register.
-    for (const auto &Op : Instr.Operands) {
+    for (const auto &Op : Variant.getInstr().Operands) {
       if (Op.isDef() && Op.isImplicitReg() &&
           ScratchRegAliases.test(Op.getImplicitReg()))
         return make_error<Failure>(
@@ -64,29 +65,38 @@ Expected<std::vector<BenchmarkCode>> SnippetGenerator::generateConfigurations(
     ForbiddenRegs |= ScratchRegAliases;
   }
 
-  if (auto E = generateCodeTemplates(Instr, ForbiddenRegs)) {
-    std::vector<BenchmarkCode> Output;
-    for (CodeTemplate &CT : E.get()) {
+  if (auto E = generateCodeTemplates(Variant, ForbiddenRegs)) {
+    MutableArrayRef<CodeTemplate> Templates = E.get();
+
+    // Avoid reallocations in the loop.
+    Benchmarks.reserve(Benchmarks.size() + Templates.size());
+    for (CodeTemplate &CT : Templates) {
       // TODO: Generate as many BenchmarkCode as needed.
       {
         BenchmarkCode BC;
         BC.Info = CT.Info;
+        BC.Key.Instructions.reserve(CT.Instructions.size());
         for (InstructionTemplate &IT : CT.Instructions) {
-          randomizeUnsetVariables(State.getExegesisTarget(), ForbiddenRegs, IT);
-          BC.Key.Instructions.push_back(IT.build());
+          if (auto Error = randomizeUnsetVariables(State, ForbiddenRegs, IT))
+            return Error;
+          MCInst Inst = IT.build();
+          if (auto Error = validateGeneratedInstruction(State, Inst))
+            return Error;
+          BC.Key.Instructions.push_back(Inst);
         }
         if (CT.ScratchSpacePointerInReg)
           BC.LiveIns.push_back(CT.ScratchSpacePointerInReg);
         BC.Key.RegisterInitialValues =
             computeRegisterInitialValues(CT.Instructions);
         BC.Key.Config = CT.Config;
-        Output.push_back(std::move(BC));
-        if (Output.size() >= Opts.MaxConfigsPerOpcode)
-          return Output; // Early exit if we exceeded the number of allowed
-                         // configs.
+        Benchmarks.emplace_back(std::move(BC));
+        if (Benchmarks.size() >= Opts.MaxConfigsPerOpcode) {
+          // We reached the number of  allowed configs and return early.
+          return Error::success();
+        }
       }
     }
-    return Output;
+    return Error::success();
   } else
     return E.takeError();
 }
@@ -134,33 +144,36 @@ std::vector<RegisterValue> SnippetGenerator::computeRegisterInitialValues(
 }
 
 Expected<std::vector<CodeTemplate>>
-generateSelfAliasingCodeTemplates(const Instruction &Instr) {
-  const AliasingConfigurations SelfAliasing(Instr, Instr);
+generateSelfAliasingCodeTemplates(InstructionTemplate Variant,
+                                  const BitVector &ForbiddenRegisters) {
+  const AliasingConfigurations SelfAliasing(
+      Variant.getInstr(), Variant.getInstr(), ForbiddenRegisters);
   if (SelfAliasing.empty())
     return make_error<SnippetGeneratorFailure>("empty self aliasing");
   std::vector<CodeTemplate> Result;
   Result.emplace_back();
   CodeTemplate &CT = Result.back();
-  InstructionTemplate IT(&Instr);
   if (SelfAliasing.hasImplicitAliasing()) {
     CT.Info = "implicit Self cycles, picking random values.";
   } else {
     CT.Info = "explicit self cycles, selecting one aliasing Conf.";
     // This is a self aliasing instruction so defs and uses are from the same
-    // instance, hence twice IT in the following call.
-    setRandomAliasing(SelfAliasing, IT, IT);
+    // instance, hence twice Variant in the following call.
+    setRandomAliasing(SelfAliasing, Variant, Variant);
   }
-  CT.Instructions.push_back(std::move(IT));
+  CT.Instructions.push_back(std::move(Variant));
   return std::move(Result);
 }
 
 Expected<std::vector<CodeTemplate>>
-generateUnconstrainedCodeTemplates(const Instruction &Instr, StringRef Msg) {
+generateUnconstrainedCodeTemplates(const InstructionTemplate &Variant,
+                                   StringRef Msg) {
   std::vector<CodeTemplate> Result;
   Result.emplace_back();
   CodeTemplate &CT = Result.back();
-  CT.Info = formatv("{0}, repeating an unconstrained assignment", Msg);
-  CT.Instructions.emplace_back(&Instr);
+  CT.Info =
+      std::string(formatv("{0}, repeating an unconstrained assignment", Msg));
+  CT.Instructions.push_back(std::move(Variant));
   return std::move(Result);
 }
 
@@ -175,8 +188,7 @@ size_t randomIndex(size_t Max) {
   return Distribution(randomGenerator());
 }
 
-template <typename C>
-static auto randomElement(const C &Container) -> decltype(Container[0]) {
+template <typename C> static decltype(auto) randomElement(const C &Container) {
   assert(!Container.empty() &&
          "Can't pick a random element from an empty container)");
   return Container[randomIndex(Container.size() - 1)];
@@ -206,6 +218,15 @@ size_t randomBit(const BitVector &Vector) {
   return *Itr;
 }
 
+std::optional<int> getFirstCommonBit(const BitVector &A, const BitVector &B) {
+  BitVector Intersect = A;
+  Intersect &= B;
+  int idx = Intersect.find_first();
+  if (idx != -1)
+    return idx;
+  return {};
+}
+
 void setRandomAliasing(const AliasingConfigurations &AliasingConfigurations,
                        InstructionTemplate &DefIB, InstructionTemplate &UseIB) {
   assert(!AliasingConfigurations.empty());
@@ -215,15 +236,69 @@ void setRandomAliasing(const AliasingConfigurations &AliasingConfigurations,
   setRegisterOperandValue(randomElement(RandomConf.Uses), UseIB);
 }
 
-void randomizeUnsetVariables(const ExegesisTarget &Target,
-                             const BitVector &ForbiddenRegs,
-                             InstructionTemplate &IT) {
+static Error randomizeMCOperand(const LLVMState &State,
+                                const Instruction &Instr, const Variable &Var,
+                                MCOperand &AssignedValue,
+                                const BitVector &ForbiddenRegs) {
+  const Operand &Op = Instr.getPrimaryOperand(Var);
+  if (Op.getExplicitOperandInfo().OperandType >=
+      MCOI::OperandType::OPERAND_FIRST_TARGET)
+    return State.getExegesisTarget().randomizeTargetMCOperand(
+        Instr, Var, AssignedValue, ForbiddenRegs);
+  switch (Op.getExplicitOperandInfo().OperandType) {
+  case MCOI::OperandType::OPERAND_IMMEDIATE:
+    // FIXME: explore immediate values too.
+    AssignedValue = MCOperand::createImm(1);
+    break;
+  case MCOI::OperandType::OPERAND_REGISTER: {
+    assert(Op.isReg());
+    auto AllowedRegs = Op.getRegisterAliasing().sourceBits();
+    assert(AllowedRegs.size() == ForbiddenRegs.size());
+    for (auto I : ForbiddenRegs.set_bits())
+      AllowedRegs.reset(I);
+    if (!AllowedRegs.any())
+      return make_error<Failure>(
+          Twine("no available registers:\ncandidates:\n")
+              .concat(debugString(State.getRegInfo(),
+                                  Op.getRegisterAliasing().sourceBits()))
+              .concat("\nforbidden:\n")
+              .concat(debugString(State.getRegInfo(), ForbiddenRegs)));
+    AssignedValue = MCOperand::createReg(randomBit(AllowedRegs));
+    break;
+  }
+  default:
+    break;
+  }
+  return Error::success();
+}
+
+Error randomizeUnsetVariables(const LLVMState &State,
+                              const BitVector &ForbiddenRegs,
+                              InstructionTemplate &IT) {
   for (const Variable &Var : IT.getInstr().Variables) {
     MCOperand &AssignedValue = IT.getValueFor(Var);
     if (!AssignedValue.isValid())
-      Target.randomizeMCOperand(IT.getInstr(), Var, AssignedValue,
-                                ForbiddenRegs);
+      if (auto Err = randomizeMCOperand(State, IT.getInstr(), Var,
+                                        AssignedValue, ForbiddenRegs))
+        return Err;
   }
+  return Error::success();
+}
+
+Error validateGeneratedInstruction(const LLVMState &State, const MCInst &Inst) {
+  for (const auto &Operand : Inst) {
+    if (!Operand.isValid()) {
+      // Mention the particular opcode - it is not necessarily the "main"
+      // opcode being benchmarked by this snippet. For example, serial snippet
+      // generator uses one more opcode when in SERIAL_VIA_NON_MEMORY_INSTR
+      // execution mode.
+      const auto OpcodeName = State.getInstrInfo().getName(Inst.getOpcode());
+      return make_error<Failure>("Not all operands were initialized by the "
+                                 "snippet generator for " +
+                                 OpcodeName + " opcode.");
+    }
+  }
+  return Error::success();
 }
 
 } // namespace exegesis

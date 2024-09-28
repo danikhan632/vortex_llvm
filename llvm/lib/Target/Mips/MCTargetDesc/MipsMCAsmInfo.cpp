@@ -12,7 +12,7 @@
 
 #include "MipsMCAsmInfo.h"
 #include "MipsABIInfo.h"
-#include "llvm/ADT/Triple.h"
+#include "llvm/TargetParser/Triple.h"
 
 using namespace llvm;
 
@@ -50,5 +50,4 @@ MipsMCAsmInfo::MipsMCAsmInfo(const Triple &TheTriple,
   ExceptionsType = ExceptionHandling::DwarfCFI;
   DwarfRegNumForCFI = true;
   HasMipsExpressions = true;
-  UseIntegratedAssembler = true;
 }

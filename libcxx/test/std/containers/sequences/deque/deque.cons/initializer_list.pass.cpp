@@ -6,12 +6,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-// UNSUPPORTED: c++98, c++03
+// UNSUPPORTED: c++03
 
 // <deque>
 
 // deque(initializer_list<value_type> il);
 
+#include "asan_testing.h"
 #include <deque>
 #include <cassert>
 
@@ -27,6 +28,7 @@ int main(int, char**)
     assert(d[1] == 4);
     assert(d[2] == 5);
     assert(d[3] == 6);
+    LIBCPP_ASSERT(is_double_ended_contiguous_container_asan_correct(d));
     }
     {
     std::deque<int, min_allocator<int>> d = {3, 4, 5, 6};
@@ -35,6 +37,7 @@ int main(int, char**)
     assert(d[1] == 4);
     assert(d[2] == 5);
     assert(d[3] == 6);
+    LIBCPP_ASSERT(is_double_ended_contiguous_container_asan_correct(d));
     }
 
   return 0;

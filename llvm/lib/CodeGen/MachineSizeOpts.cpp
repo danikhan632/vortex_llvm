@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/CodeGen/MachineSizeOpts.h"
+#include "llvm/CodeGen/MBFIWrapper.h"
 #include "llvm/Analysis/ProfileSummaryInfo.h"
 #include "llvm/CodeGen/MachineBlockFrequencyInfo.h"
 
@@ -23,100 +24,29 @@ extern cl::opt<bool> ForcePGSO;
 extern cl::opt<int> PgsoCutoffInstrProf;
 extern cl::opt<int> PgsoCutoffSampleProf;
 
-namespace machine_size_opts_detail {
-
-/// Like ProfileSummaryInfo::isColdBlock but for MachineBasicBlock.
-bool isColdBlock(const MachineBasicBlock *MBB,
-                 ProfileSummaryInfo *PSI,
-                 const MachineBlockFrequencyInfo *MBFI) {
-  auto Count = MBFI->getBlockProfileCount(MBB);
-  return Count && PSI->isColdCount(*Count);
-}
-
-/// Like ProfileSummaryInfo::isHotBlockNthPercentile but for MachineBasicBlock.
-static bool isHotBlockNthPercentile(int PercentileCutoff,
-                                    const MachineBasicBlock *MBB,
-                                    ProfileSummaryInfo *PSI,
-                                    const MachineBlockFrequencyInfo *MBFI) {
-  auto Count = MBFI->getBlockProfileCount(MBB);
-  return Count && PSI->isHotCountNthPercentile(PercentileCutoff, *Count);
-}
-
-/// Like ProfileSummaryInfo::isFunctionColdInCallGraph but for
-/// MachineFunction.
-bool isFunctionColdInCallGraph(
-    const MachineFunction *MF,
-    ProfileSummaryInfo *PSI,
-    const MachineBlockFrequencyInfo &MBFI) {
-  if (auto FunctionCount = MF->getFunction().getEntryCount())
-    if (!PSI->isColdCount(FunctionCount.getCount()))
-      return false;
-  for (const auto &MBB : *MF)
-    if (!isColdBlock(&MBB, PSI, &MBFI))
-      return false;
-  return true;
-}
-
-/// Like ProfileSummaryInfo::isFunctionHotInCallGraphNthPercentile but for
-/// MachineFunction.
-bool isFunctionHotInCallGraphNthPercentile(
-    int PercentileCutoff,
-    const MachineFunction *MF,
-    ProfileSummaryInfo *PSI,
-    const MachineBlockFrequencyInfo &MBFI) {
-  if (auto FunctionCount = MF->getFunction().getEntryCount())
-    if (PSI->isHotCountNthPercentile(PercentileCutoff,
-                                     FunctionCount.getCount()))
-      return true;
-  for (const auto &MBB : *MF)
-    if (isHotBlockNthPercentile(PercentileCutoff, &MBB, PSI, &MBFI))
-      return true;
-  return false;
-}
-} // namespace machine_size_opts_detail
-
-namespace {
-struct MachineBasicBlockBFIAdapter {
-  static bool isFunctionColdInCallGraph(const MachineFunction *MF,
-                                        ProfileSummaryInfo *PSI,
-                                        const MachineBlockFrequencyInfo &MBFI) {
-    return machine_size_opts_detail::isFunctionColdInCallGraph(MF, PSI, MBFI);
-  }
-  static bool isFunctionHotInCallGraphNthPercentile(
-      int CutOff,
-      const MachineFunction *MF,
-      ProfileSummaryInfo *PSI,
-      const MachineBlockFrequencyInfo &MBFI) {
-    return machine_size_opts_detail::isFunctionHotInCallGraphNthPercentile(
-        CutOff, MF, PSI, MBFI);
-  }
-  static bool isColdBlock(const MachineBasicBlock *MBB,
-                          ProfileSummaryInfo *PSI,
-                          const MachineBlockFrequencyInfo *MBFI) {
-    return machine_size_opts_detail::isColdBlock(MBB, PSI, MBFI);
-  }
-  static bool isHotBlockNthPercentile(int CutOff,
-                                      const MachineBasicBlock *MBB,
-                                      ProfileSummaryInfo *PSI,
-                                      const MachineBlockFrequencyInfo *MBFI) {
-    return machine_size_opts_detail::isHotBlockNthPercentile(
-        CutOff, MBB, PSI, MBFI);
-  }
-};
-} // end anonymous namespace
-
 bool llvm::shouldOptimizeForSize(const MachineFunction *MF,
                                  ProfileSummaryInfo *PSI,
                                  const MachineBlockFrequencyInfo *MBFI,
                                  PGSOQueryType QueryType) {
-  return shouldFuncOptimizeForSizeImpl<MachineBasicBlockBFIAdapter>(
-      MF, PSI, MBFI, QueryType);
+  return shouldFuncOptimizeForSizeImpl(MF, PSI, MBFI, QueryType);
 }
 
 bool llvm::shouldOptimizeForSize(const MachineBasicBlock *MBB,
                                  ProfileSummaryInfo *PSI,
                                  const MachineBlockFrequencyInfo *MBFI,
                                  PGSOQueryType QueryType) {
-  return shouldOptimizeForSizeImpl<MachineBasicBlockBFIAdapter>(
-      MBB, PSI, MBFI, QueryType);
+  assert(MBB);
+  return shouldOptimizeForSizeImpl(MBB, PSI, MBFI, QueryType);
+}
+
+bool llvm::shouldOptimizeForSize(const MachineBasicBlock *MBB,
+                                 ProfileSummaryInfo *PSI,
+                                 MBFIWrapper *MBFIW,
+                                 PGSOQueryType QueryType) {
+  assert(MBB);
+  if (!PSI || !MBFIW)
+    return false;
+  BlockFrequency BlockFreq = MBFIW->getBlockFreq(MBB);
+  return shouldOptimizeForSizeImpl(BlockFreq, PSI, &MBFIW->getMBFI(),
+                                   QueryType);
 }

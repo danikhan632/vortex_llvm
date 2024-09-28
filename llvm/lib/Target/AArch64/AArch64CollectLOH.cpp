@@ -100,11 +100,7 @@
 #include "AArch64.h"
 #include "AArch64InstrInfo.h"
 #include "AArch64MachineFunctionInfo.h"
-#include "llvm/ADT/BitVector.h"
-#include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SmallSet.h"
-#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
@@ -212,7 +208,7 @@ static bool isCandidateStore(const MachineInstr &MI, const MachineOperand &MO) {
     // In case we have str xA, [xA, #imm], this is two different uses
     // of xA and we cannot fold, otherwise the xA stored may be wrong,
     // even if #imm == 0.
-    return MI.getOperandNo(&MO) == 1 &&
+    return MO.getOperandNo() == 1 &&
            MI.getOperand(0).getReg() != MI.getOperand(1).getReg();
   }
 }
@@ -382,7 +378,7 @@ static bool handleMiddleInst(const MachineInstr &MI, LOHInfo &DefInfo,
 
 /// Update state when seeing and ADRP instruction.
 static void handleADRP(const MachineInstr &MI, AArch64FunctionInfo &AFI,
-                       LOHInfo &Info) {
+                       LOHInfo &Info, LOHInfo *LOHInfos) {
   if (Info.LastADRP != nullptr) {
     LLVM_DEBUG(dbgs() << "Adding MCLOH_AdrpAdrp:\n"
                       << '\t' << MI << '\t' << *Info.LastADRP);
@@ -393,12 +389,24 @@ static void handleADRP(const MachineInstr &MI, AArch64FunctionInfo &AFI,
   // Produce LOH directive if possible.
   if (Info.IsCandidate) {
     switch (Info.Type) {
-    case MCLOH_AdrpAdd:
+    case MCLOH_AdrpAdd: {
+      // ADRPs and ADDs for this candidate may be split apart if using
+      // GlobalISel instead of pseudo-expanded. If that happens, the
+      // def register of the ADD may have a use in between. Adding an LOH in
+      // this case can cause the linker to rewrite the ADRP to write to that
+      // register, clobbering the use.
+      const MachineInstr *AddMI = Info.MI0;
+      int DefIdx = mapRegToGPRIndex(MI.getOperand(0).getReg());
+      int OpIdx = mapRegToGPRIndex(AddMI->getOperand(0).getReg());
+      LOHInfo DefInfo = LOHInfos[OpIdx];
+      if (DefIdx != OpIdx && (DefInfo.OneUser || DefInfo.MultiUsers))
+        break;
       LLVM_DEBUG(dbgs() << "Adding MCLOH_AdrpAdd:\n"
                         << '\t' << MI << '\t' << *Info.MI0);
       AFI.addLOHDirective(MCLOH_AdrpAdd, {&MI, Info.MI0});
       ++NumADRSimpleCandidate;
       break;
+    }
     case MCLOH_AdrpLdr:
       if (supportLoadFromLiteral(*Info.MI0)) {
         LLVM_DEBUG(dbgs() << "Adding MCLOH_AdrpLdr:\n"
@@ -407,13 +415,37 @@ static void handleADRP(const MachineInstr &MI, AArch64FunctionInfo &AFI,
         ++NumADRPToLDR;
       }
       break;
-    case MCLOH_AdrpAddLdr:
+    case MCLOH_AdrpAddLdr: {
+      // There is a possibility that the linker may try to rewrite:
+      // adrp x0, @sym@PAGE
+      // add x1, x0, @sym@PAGEOFF
+      // [x0 = some other def]
+      // ldr x2, [x1]
+      //    ...into...
+      // adrp x0, @sym
+      // nop
+      // [x0 = some other def]
+      // ldr x2, [x0]
+      // ...if the offset to the symbol won't fit within a literal load.
+      // This causes the load to use the result of the adrp, which in this
+      // case has already been clobbered.
+      // FIXME: Implement proper liveness tracking for all registers. For now,
+      // don't emit the LOH if there are any instructions between the add and
+      // the ldr.
+      MachineInstr *AddMI = const_cast<MachineInstr *>(Info.MI1);
+      const MachineInstr *LdrMI = Info.MI0;
+      auto AddIt = MachineBasicBlock::iterator(AddMI);
+      auto EndIt = AddMI->getParent()->end();
+      if (AddMI->getIterator() == EndIt || LdrMI != &*next_nodbg(AddIt, EndIt))
+        break;
+
       LLVM_DEBUG(dbgs() << "Adding MCLOH_AdrpAddLdr:\n"
                         << '\t' << MI << '\t' << *Info.MI1 << '\t'
                         << *Info.MI0);
       AFI.addLOHDirective(MCLOH_AdrpAddLdr, {&MI, Info.MI1, Info.MI0});
       ++NumADDToLDR;
       break;
+    }
     case MCLOH_AdrpAddStr:
       if (Info.MI1 != nullptr) {
         LLVM_DEBUG(dbgs() << "Adding MCLOH_AdrpAddStr:\n"
@@ -492,10 +524,8 @@ static void handleNormalInst(const MachineInstr &MI, LOHInfo *LOHInfos) {
     // count as MultiUser or block optimization. This is especially important on
     // arm64_32, where any memory operation is likely to be an explicit use of
     // xN and an implicit use of wN (the base address register).
-    if (!UsesSeen.count(Idx)) {
+    if (UsesSeen.insert(Idx).second)
       handleUse(MI, MO, LOHInfos[Idx]);
-      UsesSeen.insert(Idx);
-    }
   }
 }
 
@@ -522,7 +552,8 @@ bool AArch64CollectLOH::runOnMachineFunction(MachineFunction &MF) {
 
     // Walk the basic block backwards and update the per register state machine
     // in the process.
-    for (const MachineInstr &MI : make_range(MBB.rbegin(), MBB.rend())) {
+    for (const MachineInstr &MI :
+         instructionsWithoutDebug(MBB.instr_rbegin(), MBB.instr_rend())) {
       unsigned Opcode = MI.getOpcode();
       switch (Opcode) {
       case AArch64::ADDXri:
@@ -544,7 +575,7 @@ bool AArch64CollectLOH::runOnMachineFunction(MachineFunction &MF) {
         const MachineOperand &Op0 = MI.getOperand(0);
         int Idx = mapRegToGPRIndex(Op0.getReg());
         if (Idx >= 0) {
-          handleADRP(MI, AFI, LOHInfos[Idx]);
+          handleADRP(MI, AFI, LOHInfos[Idx], LOHInfos);
           continue;
         }
         break;

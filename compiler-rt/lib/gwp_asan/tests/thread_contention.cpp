@@ -24,7 +24,7 @@ void asyncTask(gwp_asan::GuardedPoolAllocator *GPA,
   // Get ourselves a new allocation.
   for (unsigned i = 0; i < NumIterations; ++i) {
     volatile char *Ptr = reinterpret_cast<volatile char *>(
-        GPA->allocate(GPA->maximumAllocationSize()));
+        GPA->allocate(GPA->getAllocatorState()->maximumAllocationSize()));
     // Do any other threads have access to this page?
     EXPECT_EQ(*Ptr, 0);
 
@@ -44,12 +44,8 @@ void asyncTask(gwp_asan::GuardedPoolAllocator *GPA,
 
 void runThreadContentionTest(unsigned NumThreads, unsigned NumIterations,
                              gwp_asan::GuardedPoolAllocator *GPA) {
-
   std::atomic<bool> StartingGun{false};
   std::vector<std::thread> Threads;
-  if (std::thread::hardware_concurrency() < NumThreads) {
-    NumThreads = std::thread::hardware_concurrency();
-  }
 
   for (unsigned i = 0; i < NumThreads; ++i) {
     Threads.emplace_back(asyncTask, GPA, &StartingGun, NumIterations);

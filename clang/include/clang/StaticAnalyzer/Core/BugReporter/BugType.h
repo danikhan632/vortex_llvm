@@ -23,8 +23,6 @@ namespace clang {
 namespace ento {
 
 class BugReporter;
-class ExplodedNode;
-class ExprEngine;
 
 class BugType {
 private:
@@ -37,13 +35,13 @@ private:
   virtual void anchor();
 
 public:
-  BugType(CheckerNameRef CheckerName, StringRef Name, StringRef Cat,
-          bool SuppressOnSink = false)
-      : CheckerName(CheckerName), Description(Name), Category(Cat),
+  BugType(CheckerNameRef CheckerName, StringRef Desc,
+          StringRef Cat = categories::LogicError, bool SuppressOnSink = false)
+      : CheckerName(CheckerName), Description(Desc), Category(Cat),
         Checker(nullptr), SuppressOnSink(SuppressOnSink) {}
-  BugType(const CheckerBase *Checker, StringRef Name, StringRef Cat,
-          bool SuppressOnSink = false)
-      : CheckerName(Checker->getCheckerName()), Description(Name),
+  BugType(const CheckerBase *Checker, StringRef Desc,
+          StringRef Cat = categories::LogicError, bool SuppressOnSink = false)
+      : CheckerName(Checker->getCheckerName()), Description(Desc),
         Category(Cat), Checker(Checker), SuppressOnSink(SuppressOnSink) {}
   virtual ~BugType() = default;
 
@@ -66,25 +64,7 @@ public:
   bool isSuppressOnSink() const { return SuppressOnSink; }
 };
 
-class BuiltinBug : public BugType {
-  const std::string desc;
-  void anchor() override;
-public:
-  BuiltinBug(class CheckerNameRef checker, const char *name,
-             const char *description)
-      : BugType(checker, name, categories::LogicError), desc(description) {}
-
-  BuiltinBug(const CheckerBase *checker, const char *name,
-             const char *description)
-      : BugType(checker, name, categories::LogicError), desc(description) {}
-
-  BuiltinBug(const CheckerBase *checker, const char *name)
-      : BugType(checker, name, categories::LogicError), desc(name) {}
-
-  StringRef getDescription() const { return desc; }
-};
-
-} // end ento namespace
+} // namespace ento
 
 } // end clang namespace
 #endif

@@ -3,7 +3,7 @@
 ; RUN: llc -mtriple=arm64-none-linux-gnu -verify-machineinstrs -show-mc-encoding -code-model=tiny < %s | FileCheck %s --check-prefix=CHECK-TINY
 ; RUN: llc -mtriple=arm64-none-linux-gnu -filetype=obj < %s -code-model=tiny | llvm-objdump -r - | FileCheck --check-prefix=CHECK-TINY-RELOC %s
 ; FIXME: We currently error for the large code model
-; RUN: not llc -mtriple=arm64-none-linux-gnu -verify-machineinstrs -show-mc-encoding -code-model=large < %s 2>&1 | FileCheck %s --check-prefix=CHECK-LARGE
+; RUN: not --crash llc -mtriple=arm64-none-linux-gnu -verify-machineinstrs -show-mc-encoding -code-model=large < %s 2>&1 | FileCheck %s --check-prefix=CHECK-LARGE
 
 ; CHECK-LARGE: ELF TLS only supported in small memory model
 
@@ -11,7 +11,7 @@
 
 define i32 @test_initial_exec() {
 ; CHECK-LABEL: test_initial_exec:
-  %val = load i32, i32* @initial_exec_var
+  %val = load i32, ptr @initial_exec_var
 
 ; CHECK: adrp x[[GOTADDR:[0-9]+]], :gottprel:initial_exec_var
 ; CHECK: ldr x[[TP_OFFSET:[0-9]+]], [x[[GOTADDR]], :gottprel_lo12:initial_exec_var]
@@ -30,9 +30,9 @@ define i32 @test_initial_exec() {
   ret i32 %val
 }
 
-define i32* @test_initial_exec_addr() {
+define ptr @test_initial_exec_addr() {
 ; CHECK-LABEL: test_initial_exec_addr:
-  ret i32* @initial_exec_var
+  ret ptr @initial_exec_var
 
 ; CHECK: adrp x[[GOTADDR:[0-9]+]], :gottprel:initial_exec_var
 ; CHECK: ldr [[TP_OFFSET:x[0-9]+]], [x[[GOTADDR]], :gottprel_lo12:initial_exec_var]

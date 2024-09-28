@@ -20,7 +20,7 @@ user interface as possible.
 command line.  Tests can be either individual test files or directories to
 search for tests (see :ref:`test-discovery`).
 
-Each specified test will be executed (potentially in parallel) and once all
+Each specified test will be executed (potentially concurrently) and once all
 tests have been run :program:`lit` will print summary information on the number
 of tests which passed or failed (see :ref:`test-status-results`).  The
 :program:`lit` program will execute with a non-zero exit code if any tests
@@ -42,6 +42,12 @@ subset of the options specified on the command line, see
 parsing options from the command line.  ``LIT_OPTS`` is primarily useful for
 supplementing or overriding the command-line options supplied to :program:`lit`
 by ``check`` targets defined by a project's build system.
+
+:program:`lit` can also read options from response files which are specified as
+inputs using the ``@path/to/file.rsp`` syntax. Arguments read from a file must
+be one per line and are treated as if they were in the same place as the
+original file referencing argument on the command line. A response file can
+reference other response files.
 
 Users interested in the :program:`lit` architecture or designing a
 :program:`lit` testing implementation should see :ref:`lit-infrastructure`.
@@ -81,27 +87,26 @@ OUTPUT OPTIONS
 .. option:: -s, --succinct
 
  Show less output, for example don't show information on tests that pass.
+ Also show a progress bar, unless ``--no-progress-bar`` is specified.
 
 .. option:: -v, --verbose
 
  Show more information on test failures, for example the entire test output
  instead of just the test result.
 
+ Each command is printed before it is executed. This can be valuable for
+ debugging test failures, as the last printed command is the one that failed.
+ Moreover, :program:`lit` inserts ``'RUN: at line N'`` before each
+ command pipeline in the output to help you locate the source line of
+ the failed command.
+
 .. option:: -vv, --echo-all-commands
 
- Echo all commands to stdout, as they are being executed.
- This can be valuable for debugging test failures, as the last echoed command
- will be the one which has failed.
- :program:`lit` normally inserts a no-op command (``:`` in the case of bash)
- with argument ``'RUN: at line N'`` before each command pipeline, and this
- option also causes those no-op commands to be echoed to stdout to help you
- locate the source line of the failed command.
- This option implies ``--verbose``.
+ Deprecated alias for -v.
 
 .. option:: -a, --show-all
 
- Show more information about all tests, for example the entire test
- commandline and output.
+ Enable -v, but for all tests not just failed tests.
 
 .. option:: --no-progress-bar
 
@@ -150,13 +155,41 @@ EXECUTION OPTIONS
 
  Track the wall time individual tests take to execute and includes the results
  in the summary output.  This is useful for determining which tests in a test
- suite take the most time to execute.  Note that this option is most useful
- with ``-j 1``.
+ suite take the most time to execute.
+
+.. option:: --ignore-fail
+
+ Exit with status zero even if some tests fail.
 
 .. _selection-options:
 
 SELECTION OPTIONS
 -----------------
+
+By default, `lit` will run failing tests first, then run tests in descending
+execution time order to optimize concurrency.  The execution order can be
+changed using the :option:`--order` option.
+
+The timing data is stored in the `test_exec_root` in a file named
+`.lit_test_times.txt`. If this file does not exist, then `lit` checks the
+`test_source_root` for the file to optionally accelerate clean builds.
+
+.. option:: --shuffle
+
+ Run the tests in a random order, not failing/slowest first. Deprecated,
+ use :option:`--order` instead.
+
+.. option:: --per-test-coverage
+
+ Emit the necessary test coverage data, divided per test case (involves
+ setting a unique value to LLVM_PROFILE_FILE for each RUN). The coverage
+ data files will be emitted in the directory specified by `config.test_exec_root`.
+
+.. option:: --max-failures N
+
+ Stop execution after the given number ``N`` of failures.
+ An integer argument should be passed on the command line
+ prior to execution.
 
 .. option:: --max-tests=N
 
@@ -165,10 +198,8 @@ SELECTION OPTIONS
 .. option:: --max-time=N
 
  Spend at most ``N`` seconds (approximately) running tests and then terminate.
-
-.. option:: --shuffle
-
- Run the tests in a random order.
+ Note that this is not an alias for :option:`--timeout`; the two are
+ different kinds of maximums.
 
 .. option:: --num-shards=M
 
@@ -176,9 +207,22 @@ SELECTION OPTIONS
  "shards", and run only one of them.  Must be used with the
  ``--run-shard=N`` option, which selects the shard to run. The environment
  variable ``LIT_NUM_SHARDS`` can also be used in place of this
- option. These two options provide a coarse mechanism for paritioning large
+ option. These two options provide a coarse mechanism for partitioning large
  testsuites, for parallel execution on separate machines (say in a large
  testing farm).
+
+.. option:: --order={lexical,random,smart}
+
+ Define the order in which tests are run. The supported values are:
+
+ - lexical - tests will be run in lexical order according to the test file
+   path. This option is useful when predictable test order is desired.
+
+ - random - tests will be run in random order.
+
+ - smart - tests that failed previously will be run first, then the remaining
+   tests, all in descending execution time order. This is the default as it
+   optimizes concurrency.
 
 .. option:: --run-shard=N
 
@@ -187,12 +231,67 @@ SELECTION OPTIONS
  must be in the range ``1..M``. The environment variable
  ``LIT_RUN_SHARD`` can also be used in place of this option.
 
+.. option:: --timeout=N
+
+ Spend at most ``N`` seconds (approximately) running each individual test.
+ ``0`` means no time limit, and ``0`` is the default. Note that this is not an
+ alias for :option:`--max-time`; the two are different kinds of maximums.
+
 .. option:: --filter=REGEXP
 
   Run only those tests whose name matches the regular expression specified in
   ``REGEXP``. The environment variable ``LIT_FILTER`` can be also used in place
   of this option, which is especially useful in environments where the call
   to ``lit`` is issued indirectly.
+
+.. option:: --filter-out=REGEXP
+
+  Filter out those tests whose name matches the regular expression specified in
+  ``REGEXP``. The environment variable ``LIT_FILTER_OUT`` can be also used in
+  place of this option, which is especially useful in environments where the
+  call to ``lit`` is issued indirectly.
+
+.. option:: --xfail=LIST
+
+  Treat those tests whose name is in the semicolon separated list ``LIST`` as
+  ``XFAIL``. This can be helpful when one does not want to modify the test
+  suite. The environment variable ``LIT_XFAIL`` can be also used in place of
+  this option, which is especially useful in environments where the call to
+  ``lit`` is issued indirectly.
+
+  A test name can specified as a file name relative to the test suite directory.
+  For example:
+
+  .. code-block:: none
+
+    LIT_XFAIL="affinity/kmp-hw-subset.c;offloading/memory_manager.cpp"
+
+  In this case, all of the following tests are treated as ``XFAIL``:
+
+  .. code-block:: none
+
+    libomp :: affinity/kmp-hw-subset.c
+    libomptarget :: nvptx64-nvidia-cuda :: offloading/memory_manager.cpp
+    libomptarget :: x86_64-pc-linux-gnu :: offloading/memory_manager.cpp
+
+  Alternatively, a test name can be specified as the full test name
+  reported in LIT output.  For example, we can adjust the previous
+  example not to treat the ``nvptx64-nvidia-cuda`` version of
+  ``offloading/memory_manager.cpp`` as XFAIL:
+
+  .. code-block:: none
+
+    LIT_XFAIL="affinity/kmp-hw-subset.c;libomptarget :: x86_64-pc-linux-gnu :: offloading/memory_manager.cpp"
+
+.. option:: --xfail-not=LIST
+
+  Do not treat the specified tests as ``XFAIL``.  The environment variable
+  ``LIT_XFAIL_NOT`` can also be used in place of this option.  The syntax is the
+  same as for :option:`--xfail` and ``LIT_XFAIL``.  :option:`--xfail-not` and
+  ``LIT_XFAIL_NOT`` always override all other ``XFAIL`` specifications,
+  including an :option:`--xfail` appearing later on the command line.  The
+  primary purpose is to suppress an ``XPASS`` result without modifying a test
+  case that uses the ``XFAIL`` directive.
 
 ADDITIONAL OPTIONS
 ------------------
@@ -251,11 +350,16 @@ convenient and flexible support for out-of-tree builds.
 TEST STATUS RESULTS
 -------------------
 
-Each test ultimately produces one of the following six results:
+Each test ultimately produces one of the following eight results:
 
 **PASS**
 
  The test succeeded.
+
+**FLAKYPASS**
+
+ The test succeeded after being re-run more than once. This only applies to
+ tests containing an ``ALLOW_RETRIES:`` annotation.
 
 **XFAIL**
 
@@ -282,6 +386,11 @@ Each test ultimately produces one of the following six results:
 
  The test is not supported in this environment.  This is used by test formats
  which can report unsupported tests.
+
+**TIMEOUT**
+
+ The test was run, but it timed out before it was able to complete. This is
+ considered a failure.
 
 Depending on the test format tests may produce additional information about
 their status (generally only for failures).  See the :ref:`output-options`
@@ -347,6 +456,10 @@ executed, two important global variables are predefined:
  **environment** A dictionary representing the environment to use when executing
  tests in the suite.
 
+ **standalone_tests** When true, mark a directory with tests expected to be run
+ standalone. Test discovery is disabled for that directory. *lit.suffixes* and
+ *lit.excludes* must be empty when this variable is true.
+
  **suffixes** For **lit** test formats which scan directories for tests, this
  variable is a list of suffixes to identify test files.  Used by: *ShTest*.
 
@@ -400,11 +513,12 @@ be used to define subdirectories of optional tests, or to change other
 configuration parameters --- for example, to change the test format, or the
 suffixes which identify test files.
 
-PRE-DEFINED SUBSTITUTIONS
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+SUBSTITUTIONS
+~~~~~~~~~~~~~
 
-:program:`lit` provides various patterns that can be used with the RUN command.
-These are defined in TestRunner.py. The base set of substitutions are:
+:program:`lit` allows patterns to be substituted inside RUN commands. It also
+provides the following base set of substitutions, which are defined in
+TestRunner.py:
 
  ======================= ==============
   Macro                   Substitution
@@ -413,6 +527,9 @@ These are defined in TestRunner.py. The base set of substitutions are:
  %S                      source dir (directory of the file currently being run)
  %p                      same as %S
  %{pathsep}              path separator
+ %{fs-src-root}          root component of file system paths pointing to the LLVM checkout
+ %{fs-tmp-root}          root component of file system paths pointing to the test's temporary directory
+ %{fs-sep}               file system path separator
  %t                      temporary file name unique to the test
  %basename_t             The last path component of %t but without the ``.tmp`` extension
  %T                      parent directory of %t (not unique, deprecated, do not use)
@@ -422,6 +539,16 @@ These are defined in TestRunner.py. The base set of substitutions are:
  %/p                     %p but ``\`` is replaced by ``/``
  %/t                     %t but ``\`` is replaced by ``/``
  %/T                     %T but ``\`` is replaced by ``/``
+ %{s:real}               %s after expanding all symbolic links and substitute drives
+ %{S:real}               %S after expanding all symbolic links and substitute drives
+ %{p:real}               %p after expanding all symbolic links and substitute drives
+ %{t:real}               %t after expanding all symbolic links and substitute drives
+ %{T:real}               %T after expanding all symbolic links and substitute drives
+ %{/s:real}              %/s after expanding all symbolic links and substitute drives
+ %{/S:real}              %/S after expanding all symbolic links and substitute drives
+ %{/p:real}              %/p after expanding all symbolic links and substitute drives
+ %{/t:real}              %/t after expanding all symbolic links and substitute drives
+ %{/T:real}              %/T after expanding all symbolic links and substitute drives
  %{/s:regex_replacement} %/s but escaped for use in the replacement of a ``s@@@`` command in sed
  %{/S:regex_replacement} %/S but escaped for use in the replacement of a ``s@@@`` command in sed
  %{/p:regex_replacement} %/p but escaped for use in the replacement of a ``s@@@`` command in sed

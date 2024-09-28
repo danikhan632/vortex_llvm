@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-// UNSUPPORTED: c++98, c++03
+// UNSUPPORTED: c++03
 
 // Test that the header `poisoned_hash_helper.h` doesn't include any
 // headers that provide hash<T> specializations. This is required so that the
@@ -17,7 +17,7 @@
 
 #include "test_macros.h"
 
-template <class T, size_t = sizeof(T)>
+template <class T, std::size_t = sizeof(T)>
 constexpr bool is_complete_imp(int) { return true; }
 template <class> constexpr bool is_complete_imp(long) { return false; }
 template <class T> constexpr bool is_complete() { return is_complete_imp<T>(0); }

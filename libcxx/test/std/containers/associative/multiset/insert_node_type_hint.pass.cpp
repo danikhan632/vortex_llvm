@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-// UNSUPPORTED: c++98, c++03, c++11, c++14
+// UNSUPPORTED: c++03, c++11, c++14
 
 // <set>
 
@@ -36,7 +36,7 @@ void test(Container& c)
     {
         typename Container::node_type node = nf(i);
         assert(!node.empty());
-        size_t prev = c.size();
+        std::size_t prev = c.size();
         auto it = c.insert(c.end(), std::move(node));
         assert(prev + 1 == c.size());
         assert(*it == i);

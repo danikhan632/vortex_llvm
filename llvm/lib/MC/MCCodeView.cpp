@@ -17,6 +17,7 @@
 #include "llvm/DebugInfo/CodeView/Line.h"
 #include "llvm/DebugInfo/CodeView/SymbolRecord.h"
 #include "llvm/MC/MCAsmLayout.h"
+#include "llvm/MC/MCAssembler.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCObjectStreamer.h"
 #include "llvm/MC/MCValue.h"
@@ -25,7 +26,7 @@
 using namespace llvm;
 using namespace llvm::codeview;
 
-CodeViewContext::CodeViewContext() {}
+CodeViewContext::CodeViewContext() = default;
 
 CodeViewContext::~CodeViewContext() {
   // If someone inserted strings into the string table but never actually
@@ -172,9 +173,9 @@ void CodeViewContext::emitStringTable(MCObjectStreamer &OS) {
   MCSymbol *StringBegin = Ctx.createTempSymbol("strtab_begin", false),
            *StringEnd = Ctx.createTempSymbol("strtab_end", false);
 
-  OS.EmitIntValue(unsigned(DebugSubsectionKind::StringTable), 4);
+  OS.emitInt32(uint32_t(DebugSubsectionKind::StringTable));
   OS.emitAbsoluteSymbolDiff(StringEnd, StringBegin, 4);
-  OS.EmitLabel(StringBegin);
+  OS.emitLabel(StringBegin);
 
   // Put the string table data fragment here, if we haven't already put it
   // somewhere else. If somebody wants two string tables in their .s file, one
@@ -184,9 +185,9 @@ void CodeViewContext::emitStringTable(MCObjectStreamer &OS) {
     InsertedStrTabFragment = true;
   }
 
-  OS.EmitValueToAlignment(4, 0);
+  OS.emitValueToAlignment(Align(4), 0);
 
-  OS.EmitLabel(StringEnd);
+  OS.emitLabel(StringEnd);
 }
 
 void CodeViewContext::emitFileChecksums(MCObjectStreamer &OS) {
@@ -199,9 +200,9 @@ void CodeViewContext::emitFileChecksums(MCObjectStreamer &OS) {
   MCSymbol *FileBegin = Ctx.createTempSymbol("filechecksums_begin", false),
            *FileEnd = Ctx.createTempSymbol("filechecksums_end", false);
 
-  OS.EmitIntValue(unsigned(DebugSubsectionKind::FileChecksums), 4);
+  OS.emitInt32(uint32_t(DebugSubsectionKind::FileChecksums));
   OS.emitAbsoluteSymbolDiff(FileEnd, FileBegin, 4);
-  OS.EmitLabel(FileBegin);
+  OS.emitLabel(FileBegin);
 
   unsigned CurrentOffset = 0;
 
@@ -209,7 +210,7 @@ void CodeViewContext::emitFileChecksums(MCObjectStreamer &OS) {
   // user-provided file number.  Each entry may be a variable number of bytes
   // determined by the checksum kind and size.
   for (auto File : Files) {
-    OS.EmitAssignment(File.ChecksumTableOffset,
+    OS.emitAssignment(File.ChecksumTableOffset,
                       MCConstantExpr::create(CurrentOffset, Ctx));
     CurrentOffset += 4; // String table offset.
     if (!File.ChecksumKind) {
@@ -221,21 +222,21 @@ void CodeViewContext::emitFileChecksums(MCObjectStreamer &OS) {
       CurrentOffset = alignTo(CurrentOffset, 4);
     }
 
-    OS.EmitIntValue(File.StringTableOffset, 4);
+    OS.emitInt32(File.StringTableOffset);
 
     if (!File.ChecksumKind) {
       // There is no checksum.  Therefore zero the next two fields and align
       // back to 4 bytes.
-      OS.EmitIntValue(0, 4);
+      OS.emitInt32(0);
       continue;
     }
-    OS.EmitIntValue(static_cast<uint8_t>(File.Checksum.size()), 1);
-    OS.EmitIntValue(File.ChecksumKind, 1);
-    OS.EmitBytes(toStringRef(File.Checksum));
-    OS.EmitValueToAlignment(4);
+    OS.emitInt8(static_cast<uint8_t>(File.Checksum.size()));
+    OS.emitInt8(File.ChecksumKind);
+    OS.emitBytes(toStringRef(File.Checksum));
+    OS.emitValueToAlignment(Align(4));
   }
 
-  OS.EmitLabel(FileEnd);
+  OS.emitLabel(FileEnd);
 
   ChecksumOffsetsAssigned = true;
 }
@@ -252,14 +253,14 @@ void CodeViewContext::emitFileChecksumOffset(MCObjectStreamer &OS,
     Files.resize(Idx + 1);
 
   if (ChecksumOffsetsAssigned) {
-    OS.EmitSymbolValue(Files[Idx].ChecksumTableOffset, 4);
+    OS.emitSymbolValue(Files[Idx].ChecksumTableOffset, 4);
     return;
   }
 
   const MCSymbolRefExpr *SRE =
       MCSymbolRefExpr::create(Files[Idx].ChecksumTableOffset, OS.getContext());
 
-  OS.EmitValueImpl(SRE, 4);
+  OS.emitValueImpl(SRE, 4);
 }
 
 void CodeViewContext::addLineEntry(const MCCVLoc &LineEntry) {
@@ -274,32 +275,35 @@ void CodeViewContext::addLineEntry(const MCCVLoc &LineEntry) {
 std::vector<MCCVLoc>
 CodeViewContext::getFunctionLineEntries(unsigned FuncId) {
   std::vector<MCCVLoc> FilteredLines;
-  auto I = MCCVLineStartStop.find(FuncId);
-  if (I != MCCVLineStartStop.end()) {
-    MCCVFunctionInfo *SiteInfo = getCVFunctionInfo(FuncId);
-    for (size_t Idx = I->second.first, End = I->second.second; Idx != End;
-         ++Idx) {
-      unsigned LocationFuncId = MCCVLines[Idx].getFunctionId();
-      if (LocationFuncId == FuncId) {
-        // This was a .cv_loc directly for FuncId, so record it.
-        FilteredLines.push_back(MCCVLines[Idx]);
-      } else {
-        // Check if the current location is inlined in this function. If it is,
-        // synthesize a statement .cv_loc at the original inlined call site.
-        auto I = SiteInfo->InlinedAtMap.find(LocationFuncId);
-        if (I != SiteInfo->InlinedAtMap.end()) {
-          MCCVFunctionInfo::LineInfo &IA = I->second;
-          // Only add the location if it differs from the previous location.
-          // Large inlined calls will have many .cv_loc entries and we only need
-          // one line table entry in the parent function.
-          if (FilteredLines.empty() ||
-              FilteredLines.back().getFileNum() != IA.File ||
-              FilteredLines.back().getLine() != IA.Line ||
-              FilteredLines.back().getColumn() != IA.Col) {
-            FilteredLines.push_back(MCCVLoc(
-                MCCVLines[Idx].getLabel(),
-                FuncId, IA.File, IA.Line, IA.Col, false, false));
-          }
+  size_t LocBegin;
+  size_t LocEnd;
+  std::tie(LocBegin, LocEnd) = getLineExtentIncludingInlinees(FuncId);
+  if (LocBegin >= LocEnd) {
+    return FilteredLines;
+  }
+
+  MCCVFunctionInfo *SiteInfo = getCVFunctionInfo(FuncId);
+  for (size_t Idx = LocBegin; Idx != LocEnd; ++Idx) {
+    unsigned LocationFuncId = MCCVLines[Idx].getFunctionId();
+    if (LocationFuncId == FuncId) {
+      // This was a .cv_loc directly for FuncId, so record it.
+      FilteredLines.push_back(MCCVLines[Idx]);
+    } else {
+      // Check if the current location is inlined in this function. If it is,
+      // synthesize a statement .cv_loc at the original inlined call site.
+      auto I = SiteInfo->InlinedAtMap.find(LocationFuncId);
+      if (I != SiteInfo->InlinedAtMap.end()) {
+        MCCVFunctionInfo::LineInfo &IA = I->second;
+        // Only add the location if it differs from the previous location.
+        // Large inlined calls will have many .cv_loc entries and we only need
+        // one line table entry in the parent function.
+        if (FilteredLines.empty() ||
+            FilteredLines.back().getFileNum() != IA.File ||
+            FilteredLines.back().getLine() != IA.Line ||
+            FilteredLines.back().getColumn() != IA.Col) {
+          FilteredLines.push_back(MCCVLoc(MCCVLines[Idx].getLabel(), FuncId,
+                                          IA.File, IA.Line, IA.Col, false,
+                                          false));
         }
       }
     }
@@ -315,12 +319,32 @@ std::pair<size_t, size_t> CodeViewContext::getLineExtent(unsigned FuncId) {
   return I->second;
 }
 
+std::pair<size_t, size_t>
+CodeViewContext::getLineExtentIncludingInlinees(unsigned FuncId) {
+  size_t LocBegin;
+  size_t LocEnd;
+  std::tie(LocBegin, LocEnd) = getLineExtent(FuncId);
+
+  // Include all child inline call sites in our extent.
+  MCCVFunctionInfo *SiteInfo = getCVFunctionInfo(FuncId);
+  if (SiteInfo) {
+    for (auto &KV : SiteInfo->InlinedAtMap) {
+      unsigned ChildId = KV.first;
+      auto Extent = getLineExtent(ChildId);
+      LocBegin = std::min(LocBegin, Extent.first);
+      LocEnd = std::max(LocEnd, Extent.second);
+    }
+  }
+
+  return {LocBegin, LocEnd};
+}
+
 ArrayRef<MCCVLoc> CodeViewContext::getLinesForExtent(size_t L, size_t R) {
   if (R <= L)
-    return None;
+    return std::nullopt;
   if (L >= MCCVLines.size())
-    return None;
-  return makeArrayRef(&MCCVLines[L], R - L);
+    return std::nullopt;
+  return ArrayRef(&MCCVLines[L], R - L);
 }
 
 void CodeViewContext::emitLineTableForFunction(MCObjectStreamer &OS,
@@ -331,18 +355,18 @@ void CodeViewContext::emitLineTableForFunction(MCObjectStreamer &OS,
   MCSymbol *LineBegin = Ctx.createTempSymbol("linetable_begin", false),
            *LineEnd = Ctx.createTempSymbol("linetable_end", false);
 
-  OS.EmitIntValue(unsigned(DebugSubsectionKind::Lines), 4);
+  OS.emitInt32(uint32_t(DebugSubsectionKind::Lines));
   OS.emitAbsoluteSymbolDiff(LineEnd, LineBegin, 4);
-  OS.EmitLabel(LineBegin);
-  OS.EmitCOFFSecRel32(FuncBegin, /*Offset=*/0);
-  OS.EmitCOFFSectionIndex(FuncBegin);
+  OS.emitLabel(LineBegin);
+  OS.emitCOFFSecRel32(FuncBegin, /*Offset=*/0);
+  OS.emitCOFFSectionIndex(FuncBegin);
 
   // Actual line info.
   std::vector<MCCVLoc> Locs = getFunctionLineEntries(FuncId);
   bool HaveColumns = any_of(Locs, [](const MCCVLoc &LineEntry) {
     return LineEntry.getColumn() != 0;
   });
-  OS.EmitIntValue(HaveColumns ? int(LF_HaveColumns) : 0, 2);
+  OS.emitInt16(HaveColumns ? int(LF_HaveColumns) : 0);
   OS.emitAbsoluteSymbolDiff(FuncEnd, FuncBegin, 4);
 
   for (auto I = Locs.begin(), E = Locs.end(); I != E;) {
@@ -358,30 +382,30 @@ void CodeViewContext::emitLineTableForFunction(MCObjectStreamer &OS,
         Twine(getStringTableFragment()
                   ->getContents()[Files[CurFileNum - 1].StringTableOffset]) +
         "' begins");
-    OS.EmitCVFileChecksumOffsetDirective(CurFileNum);
-    OS.EmitIntValue(EntryCount, 4);
+    OS.emitCVFileChecksumOffsetDirective(CurFileNum);
+    OS.emitInt32(EntryCount);
     uint32_t SegmentSize = 12;
     SegmentSize += 8 * EntryCount;
     if (HaveColumns)
       SegmentSize += 4 * EntryCount;
-    OS.EmitIntValue(SegmentSize, 4);
+    OS.emitInt32(SegmentSize);
 
     for (auto J = I; J != FileSegEnd; ++J) {
       OS.emitAbsoluteSymbolDiff(J->getLabel(), FuncBegin, 4);
       unsigned LineData = J->getLine();
       if (J->isStmt())
         LineData |= LineInfo::StatementFlag;
-      OS.EmitIntValue(LineData, 4);
+      OS.emitInt32(LineData);
     }
     if (HaveColumns) {
       for (auto J = I; J != FileSegEnd; ++J) {
-        OS.EmitIntValue(J->getColumn(), 2);
-        OS.EmitIntValue(0, 2);
+        OS.emitInt16(J->getColumn());
+        OS.emitInt16(0);
       }
     }
     I = FileSegEnd;
   }
-  OS.EmitLabel(LineEnd);
+  OS.emitLabel(LineEnd);
 }
 
 static bool compressAnnotation(uint32_t Data, SmallVectorImpl<char> &Buffer) {
@@ -462,16 +486,7 @@ void CodeViewContext::encodeInlineLineTable(MCAsmLayout &Layout,
                                             MCCVInlineLineTableFragment &Frag) {
   size_t LocBegin;
   size_t LocEnd;
-  std::tie(LocBegin, LocEnd) = getLineExtent(Frag.SiteFuncId);
-
-  // Include all child inline call sites in our .cv_loc extent.
-  MCCVFunctionInfo *SiteInfo = getCVFunctionInfo(Frag.SiteFuncId);
-  for (auto &KV : SiteInfo->InlinedAtMap) {
-    unsigned ChildId = KV.first;
-    auto Extent = getLineExtent(ChildId);
-    LocBegin = std::min(LocBegin, Extent.first);
-    LocEnd = std::max(LocEnd, Extent.second);
-  }
+  std::tie(LocBegin, LocEnd) = getLineExtentIncludingInlinees(Frag.SiteFuncId);
 
   if (LocBegin >= LocEnd)
     return;
@@ -505,6 +520,8 @@ void CodeViewContext::encodeInlineLineTable(MCAsmLayout &Layout,
   MCCVFunctionInfo::LineInfo LastSourceLoc, CurSourceLoc;
   LastSourceLoc.File = Frag.StartFileId;
   LastSourceLoc.Line = Frag.StartLineNum;
+
+  MCCVFunctionInfo *SiteInfo = getCVFunctionInfo(Frag.SiteFuncId);
 
   SmallVectorImpl<char> &Buffer = Frag.getContents();
   Buffer.clear(); // Clear old contents if we went through relaxation.
@@ -563,10 +580,7 @@ void CodeViewContext::encodeInlineLineTable(MCAsmLayout &Layout,
     int LineDelta = CurSourceLoc.Line - LastSourceLoc.Line;
     unsigned EncodedLineDelta = encodeSignedNumber(LineDelta);
     unsigned CodeDelta = computeLabelDiff(Layout, LastLabel, Loc.getLabel());
-    if (CodeDelta == 0 && LineDelta != 0) {
-      compressAnnotation(BinaryAnnotationsOpCode::ChangeLineOffset, Buffer);
-      compressAnnotation(EncodedLineDelta, Buffer);
-    } else if (EncodedLineDelta < 0x8 && CodeDelta <= 0xf) {
+    if (EncodedLineDelta < 0x8 && CodeDelta <= 0xf) {
       // The ChangeCodeOffsetAndLineOffset combination opcode is used when the
       // encoded line delta uses 3 or fewer set bits and the code offset fits
       // in one nibble.
@@ -640,7 +654,7 @@ void CodeViewContext::encodeDefRange(MCAsmLayout &Layout,
     }
     unsigned NumGaps = J - I - 1;
 
-    support::endian::Writer LEWriter(OS, support::little);
+    support::endian::Writer LEWriter(OS, llvm::endianness::little);
 
     unsigned Bias = 0;
     // We must split the range into chunks of MaxDefRange, this is a fundamental
@@ -651,8 +665,6 @@ void CodeViewContext::encodeDefRange(MCAsmLayout &Layout,
       const MCSymbolRefExpr *SRE = MCSymbolRefExpr::create(RangeBegin, Ctx);
       const MCBinaryExpr *BE =
           MCBinaryExpr::createAdd(SRE, MCConstantExpr::create(Bias, Ctx), Ctx);
-      MCValue Res;
-      BE->evaluateAsRelocatable(Res, &Layout, /*Fixup=*/nullptr);
 
       // Each record begins with a 2-byte number indicating how large the record
       // is.

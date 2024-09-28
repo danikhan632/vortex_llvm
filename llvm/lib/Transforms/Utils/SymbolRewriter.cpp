@@ -57,7 +57,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Transforms/Utils/SymbolRewriter.h"
-#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/ilist.h"
@@ -69,8 +68,6 @@
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Value.h"
-#include "llvm/InitializePasses.h"
-#include "llvm/Pass.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -117,8 +114,9 @@ public:
   const std::string Target;
 
   ExplicitRewriteDescriptor(StringRef S, StringRef T, const bool Naked)
-      : RewriteDescriptor(DT), Source(Naked ? StringRef("\01" + S.str()) : S),
-        Target(T) {}
+      : RewriteDescriptor(DT),
+        Source(std::string(Naked ? StringRef("\01" + S.str()) : S)),
+        Target(std::string(T)) {}
 
   bool performOnModule(Module &M) override;
 
@@ -159,7 +157,8 @@ public:
   const std::string Transform;
 
   PatternRewriteDescriptor(StringRef P, StringRef T)
-    : RewriteDescriptor(DT), Pattern(P), Transform(T) { }
+      : RewriteDescriptor(DT), Pattern(std::string(P)),
+        Transform(std::string(T)) {}
 
   bool performOnModule(Module &M) override;
 
@@ -182,14 +181,14 @@ performOnModule(Module &M) {
 
     std::string Name = Regex(Pattern).sub(Transform, C.getName(), &Error);
     if (!Error.empty())
-      report_fatal_error("unable to transforn " + C.getName() + " in " +
+      report_fatal_error(Twine("unable to transforn ") + C.getName() + " in " +
                          M.getModuleIdentifier() + ": " + Error);
 
     if (C.getName() == Name)
       continue;
 
     if (GlobalObject *GO = dyn_cast<GlobalObject>(&C))
-      rewriteComdat(M, GO, C.getName(), Name);
+      rewriteComdat(M, GO, std::string(C.getName()), Name);
 
     if (Value *V = (M.*Get)(Name))
       C.setValueName(V->getValueName());
@@ -254,11 +253,11 @@ bool RewriteMapParser::parse(const std::string &MapFile,
       MemoryBuffer::getFile(MapFile);
 
   if (!Mapping)
-    report_fatal_error("unable to read rewrite map '" + MapFile + "': " +
-                       Mapping.getError().message());
+    report_fatal_error(Twine("unable to read rewrite map '") + MapFile +
+                       "': " + Mapping.getError().message());
 
   if (!parse(*Mapping, DL))
-    report_fatal_error("unable to parse rewrite map '" + MapFile + "'");
+    report_fatal_error(Twine("unable to parse rewrite map '") + MapFile + "'");
 
   return true;
 }
@@ -352,19 +351,19 @@ parseRewriteFunctionDescriptor(yaml::Stream &YS, yaml::ScalarNode *K,
     if (KeyValue.equals("source")) {
       std::string Error;
 
-      Source = Value->getValue(ValueStorage);
+      Source = std::string(Value->getValue(ValueStorage));
       if (!Regex(Source).isValid(Error)) {
         YS.printError(Field.getKey(), "invalid regex: " + Error);
         return false;
       }
     } else if (KeyValue.equals("target")) {
-      Target = Value->getValue(ValueStorage);
+      Target = std::string(Value->getValue(ValueStorage));
     } else if (KeyValue.equals("transform")) {
-      Transform = Value->getValue(ValueStorage);
+      Transform = std::string(Value->getValue(ValueStorage));
     } else if (KeyValue.equals("naked")) {
       std::string Undecorated;
 
-      Undecorated = Value->getValue(ValueStorage);
+      Undecorated = std::string(Value->getValue(ValueStorage));
       Naked = StringRef(Undecorated).lower() == "true" || Undecorated == "1";
     } else {
       YS.printError(Field.getKey(), "unknown key for function");
@@ -421,15 +420,15 @@ parseRewriteGlobalVariableDescriptor(yaml::Stream &YS, yaml::ScalarNode *K,
     if (KeyValue.equals("source")) {
       std::string Error;
 
-      Source = Value->getValue(ValueStorage);
+      Source = std::string(Value->getValue(ValueStorage));
       if (!Regex(Source).isValid(Error)) {
         YS.printError(Field.getKey(), "invalid regex: " + Error);
         return false;
       }
     } else if (KeyValue.equals("target")) {
-      Target = Value->getValue(ValueStorage);
+      Target = std::string(Value->getValue(ValueStorage));
     } else if (KeyValue.equals("transform")) {
-      Transform = Value->getValue(ValueStorage);
+      Transform = std::string(Value->getValue(ValueStorage));
     } else {
       YS.printError(Field.getKey(), "unknown Key for Global Variable");
       return false;
@@ -484,15 +483,15 @@ parseRewriteGlobalAliasDescriptor(yaml::Stream &YS, yaml::ScalarNode *K,
     if (KeyValue.equals("source")) {
       std::string Error;
 
-      Source = Value->getValue(ValueStorage);
+      Source = std::string(Value->getValue(ValueStorage));
       if (!Regex(Source).isValid(Error)) {
         YS.printError(Field.getKey(), "invalid regex: " + Error);
         return false;
       }
     } else if (KeyValue.equals("target")) {
-      Target = Value->getValue(ValueStorage);
+      Target = std::string(Value->getValue(ValueStorage));
     } else if (KeyValue.equals("transform")) {
-      Transform = Value->getValue(ValueStorage);
+      Transform = std::string(Value->getValue(ValueStorage));
     } else {
       YS.printError(Field.getKey(), "unknown key for Global Alias");
       return false;
@@ -514,37 +513,6 @@ parseRewriteGlobalAliasDescriptor(yaml::Stream &YS, yaml::ScalarNode *K,
         Source, Transform));
 
   return true;
-}
-
-namespace {
-
-class RewriteSymbolsLegacyPass : public ModulePass {
-public:
-  static char ID; // Pass identification, replacement for typeid
-
-  RewriteSymbolsLegacyPass();
-  RewriteSymbolsLegacyPass(SymbolRewriter::RewriteDescriptorList &DL);
-
-  bool runOnModule(Module &M) override;
-
-private:
-  RewriteSymbolPass Impl;
-};
-
-} // end anonymous namespace
-
-char RewriteSymbolsLegacyPass::ID = 0;
-
-RewriteSymbolsLegacyPass::RewriteSymbolsLegacyPass() : ModulePass(ID) {
-  initializeRewriteSymbolsLegacyPassPass(*PassRegistry::getPassRegistry());
-}
-
-RewriteSymbolsLegacyPass::RewriteSymbolsLegacyPass(
-    SymbolRewriter::RewriteDescriptorList &DL)
-    : ModulePass(ID), Impl(DL) {}
-
-bool RewriteSymbolsLegacyPass::runOnModule(Module &M) {
-  return Impl.runImpl(M);
 }
 
 PreservedAnalyses RewriteSymbolPass::run(Module &M, ModuleAnalysisManager &AM) {
@@ -570,16 +538,4 @@ void RewriteSymbolPass::loadAndParseMapFiles() {
 
   for (const auto &MapFile : MapFiles)
     Parser.parse(MapFile, &Descriptors);
-}
-
-INITIALIZE_PASS(RewriteSymbolsLegacyPass, "rewrite-symbols", "Rewrite Symbols",
-                false, false)
-
-ModulePass *llvm::createRewriteSymbolsPass() {
-  return new RewriteSymbolsLegacyPass();
-}
-
-ModulePass *
-llvm::createRewriteSymbolsPass(SymbolRewriter::RewriteDescriptorList &DL) {
-  return new RewriteSymbolsLegacyPass(DL);
 }

@@ -1,4 +1,4 @@
-//===-- Stream.cpp ----------------------------------------------*- C++ -*-===//
+//===-- Stream.cpp --------------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -8,30 +8,33 @@
 
 #include "lldb/Utility/Stream.h"
 
+#include "lldb/Utility/AnsiTerminal.h"
 #include "lldb/Utility/Endian.h"
 #include "lldb/Utility/VASPrintf.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/LEB128.h"
+#include "llvm/Support/Regex.h"
 
 #include <string>
 
-#include <inttypes.h>
-#include <stddef.h>
+#include <cinttypes>
+#include <cstddef>
 
 using namespace lldb;
 using namespace lldb_private;
 
-Stream::Stream(uint32_t flags, uint32_t addr_size, ByteOrder byte_order)
+Stream::Stream(uint32_t flags, uint32_t addr_size, ByteOrder byte_order,
+               bool colors)
     : m_flags(flags), m_addr_size(addr_size), m_byte_order(byte_order),
-      m_indent_level(0), m_forwarder(*this) {}
+      m_forwarder(*this, colors) {}
 
-Stream::Stream()
-    : m_flags(0), m_addr_size(4), m_byte_order(endian::InlHostByteOrder()),
-      m_indent_level(0), m_forwarder(*this) {}
+Stream::Stream(bool colors)
+    : m_flags(0), m_byte_order(endian::InlHostByteOrder()),
+      m_forwarder(*this, colors) {}
 
 // Destructor
-Stream::~Stream() {}
+Stream::~Stream() = default;
 
 ByteOrder Stream::SetByteOrder(ByteOrder byte_order) {
   ByteOrder old_byte_order = m_byte_order;
@@ -67,6 +70,31 @@ size_t Stream::PutCString(llvm::StringRef str) {
   if (m_flags.Test(eBinary))
     bytes_written += PutChar('\0');
   return bytes_written;
+}
+
+void Stream::PutCStringColorHighlighted(
+    llvm::StringRef text, std::optional<HighlightSettings> pattern_info) {
+  // Only apply color formatting when a pattern information is specified.
+  // Otherwise, output the text without color formatting.
+  if (!pattern_info.has_value()) {
+    PutCString(text);
+    return;
+  }
+
+  llvm::Regex reg_pattern(pattern_info->pattern);
+  llvm::SmallVector<llvm::StringRef, 1> matches;
+  llvm::StringRef remaining = text;
+  std::string format_str = lldb_private::ansi::FormatAnsiTerminalCodes(
+      pattern_info->prefix.str() + "%.*s" + pattern_info->suffix.str());
+  while (reg_pattern.match(remaining, &matches)) {
+    llvm::StringRef match = matches[0];
+    size_t match_start_pos = match.data() - remaining.data();
+    PutCString(remaining.take_front(match_start_pos));
+    Printf(format_str.c_str(), match.size(), match.data());
+    remaining = remaining.drop_front(match_start_pos + match.size());
+  }
+  if (remaining.size())
+    PutCString(remaining);
 }
 
 // Print a double quoted NULL terminated C string to the stream using the
@@ -126,15 +154,10 @@ size_t Stream::PrintfVarArg(const char *format, va_list args) {
 // Print and End of Line character to the stream
 size_t Stream::EOL() { return PutChar('\n'); }
 
-// Indent the current line using the current indentation level and print an
-// optional string following the indentation spaces.
-size_t Stream::Indent(const char *s) {
-  return Printf("%*.*s%s", m_indent_level, m_indent_level, "", s ? s : "");
-}
-
 size_t Stream::Indent(llvm::StringRef str) {
-  return Printf("%*.*s%s", m_indent_level, m_indent_level, "",
-                str.str().c_str());
+  const size_t ind_length = PutCString(std::string(m_indent_level, ' '));
+  const size_t str_length = PutCString(str);
+  return ind_length + str_length;
 }
 
 // Stream a character "ch" out to this stream.
@@ -348,8 +371,8 @@ size_t Stream::PutRawBytes(const void *s, size_t src_len,
     for (size_t i = 0; i < src_len; ++i)
       _PutHex8(src[i], false);
   } else {
-    for (size_t i = src_len - 1; i < src_len; --i)
-      _PutHex8(src[i], false);
+    for (size_t i = src_len; i > 0; --i)
+      _PutHex8(src[i - 1], false);
   }
   if (!binary_was_set)
     m_flags.Clear(eBinary);
@@ -361,6 +384,7 @@ size_t Stream::PutBytesAsRawHex8(const void *s, size_t src_len,
                                  ByteOrder src_byte_order,
                                  ByteOrder dst_byte_order) {
   ByteDelta delta(*this);
+
   if (src_byte_order == eByteOrderInvalid)
     src_byte_order = m_byte_order;
 
@@ -374,8 +398,8 @@ size_t Stream::PutBytesAsRawHex8(const void *s, size_t src_len,
     for (size_t i = 0; i < src_len; ++i)
       _PutHex8(src[i], false);
   } else {
-    for (size_t i = src_len - 1; i < src_len; --i)
-      _PutHex8(src[i], false);
+    for (size_t i = src_len; i > 0; --i)
+      _PutHex8(src[i - 1], false);
   }
   if (binary_is_set)
     m_flags.Set(eBinary);

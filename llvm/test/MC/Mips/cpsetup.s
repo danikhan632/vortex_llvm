@@ -1,24 +1,22 @@
 # RUN: llvm-mc -triple mips-unknown-linux -target-abi o32 -filetype=obj -o - %s | \
-# RUN:   llvm-objdump -d -r -z - | FileCheck -check-prefixes=ALL,O32 %s
+# RUN:   llvm-objdump --no-print-imm-hex -d -r -z - | FileCheck --check-prefixes=ALL,O32 %s
 
 # RUN: llvm-mc -triple mips-unknown-linux -target-abi o32 %s | \
-# RUN:   FileCheck -check-prefixes=ALL,ASM,ASM-O32 %s
+# RUN:   FileCheck -check-prefixes=ASM,ASM-O32 %s
 
-# FIXME: Now we check .cpsetup expansion for `-mno-shared` case only.
-#        We also need to implement/check the `-mshared` case.
 # RUN: llvm-mc -triple mips64-unknown-linux -target-abi n32 -filetype=obj -o - %s | \
-# RUN:   llvm-objdump -d -r -z - | \
+# RUN:   llvm-objdump --no-print-imm-hex -d -r -z - | \
 # RUN:   FileCheck -check-prefixes=ALL,NXX,N32 %s
 
 # RUN: llvm-mc -triple mips64-unknown-linux -target-abi n32 %s | \
-# RUN:   FileCheck -check-prefixes=ALL,ASM,ASM-N32 %s
+# RUN:   FileCheck -check-prefixes=ASM,ASM-N32 %s
 
 # RUN: llvm-mc -triple mips64-unknown-linux %s -filetype=obj -o - | \
-# RUN:   llvm-objdump -d -r -z - | \
+# RUN:   llvm-objdump --no-print-imm-hex -d -r -z - | \
 # RUN:   FileCheck -check-prefixes=ALL,NXX,N64 %s
 
 # RUN: llvm-mc -triple mips64-unknown-linux %s | \
-# RUN:   FileCheck -check-prefixes=ALL,ASM,ASM-N64 %s
+# RUN:   FileCheck -check-prefixes=ASM,ASM-N64 %s
 
         .text
         .option pic2
@@ -28,24 +26,30 @@ t1:
         .cpreturn
         nop
 
-# ALL-LABEL: t1:
+# ALL-LABEL: <t1>:
+# ASM-LABEL: t1:
 
 # O32-NOT: __cerror
 
 # NXX-NEXT: sd       $gp, 8($sp)
 # NXX-NEXT: lui      $gp, 0
-# N32-NEXT: R_MIPS_HI16 __gnu_local_gp
 # N64-NEXT: R_MIPS_GPREL16/R_MIPS_SUB/R_MIPS_HI16  __cerror
+# N32-NEXT: R_MIPS_GPREL16 __cerror
+# N32-NEXT: R_MIPS_SUB
+# N32-NEXT: R_MIPS_HI16
 # NXX-NEXT: addiu    $gp, $gp, 0
-# N32-NEXT: R_MIPS_LO16 __gnu_local_gp
 # N64-NEXT: R_MIPS_GPREL16/R_MIPS_SUB/R_MIPS_LO16  __cerror
+# N32-NEXT: R_MIPS_GPREL16 __cerror
+# N32-NEXT: R_MIPS_SUB
+# N32-NEXT: R_MIPS_LO16
+# N32-NEXT: addu     $gp, $gp, $25
 # N64-NEXT: daddu    $gp, $gp, $25
 
 # ASM-NEXT: .cpsetup $25, 8, __cerror
 
 # ALL-NEXT: nop
 
-# ASM-NEXT: .cpreturn
+# ASM: .cpreturn
 # NXX-NEXT: ld $gp, 8($sp)
 
 # ALL-NEXT: nop
@@ -56,24 +60,30 @@ t2:
         .cpreturn
         nop
 
-# ALL-LABEL: t2:
+# ALL-LABEL: <t2>:
+# ASM-LABEL: t2:
 
 # O32-NOT: __cerror
 
 # NXX-NEXT: move     $2, $gp
 # NXX-NEXT: lui      $gp, 0
-# N32-NEXT: R_MIPS_HI16 __gnu_local_gp
 # N64-NEXT: R_MIPS_GPREL16/R_MIPS_SUB/R_MIPS_HI16  __cerror
+# N32-NEXT: R_MIPS_GPREL16 __cerror
+# N32-NEXT: R_MIPS_SUB
+# N32-NEXT: R_MIPS_HI16
 # NXX-NEXT: addiu    $gp, $gp, 0
-# N32-NEXT: R_MIPS_LO16 __gnu_local_gp
 # N64-NEXT: R_MIPS_GPREL16/R_MIPS_SUB/R_MIPS_LO16  __cerror
+# N32-NEXT: R_MIPS_GPREL16 __cerror
+# N32-NEXT: R_MIPS_SUB
+# N32-NEXT: R_MIPS_LO16
+# N32-NEXT: addu     $gp, $gp, $25
 # N64-NEXT: daddu    $gp, $gp, $25
 
 # ASM-NEXT: .cpsetup $25, $2, __cerror
 
 # ALL-NEXT: nop
 
-# ASM-NEXT: .cpreturn
+# ASM: .cpreturn
 # NXX-NEXT: move $gp, $2
 
 # ALL-NEXT: nop
@@ -90,7 +100,8 @@ t3:
         nop
         sub $3, $3, $2
 
-# ALL-LABEL: t3:
+# ALL-LABEL: <t3>:
+# ASM-LABEL: t3:
 # ALL-NEXT:  nop
 
 # O32-NEXT:   nop
@@ -98,11 +109,16 @@ t3:
 
 # NXX-NEXT: move     $2, $gp
 # NXX-NEXT: lui      $gp, 0
-# N32-NEXT: {{^ *0+}}38: R_MIPS_HI16 __gnu_local_gp
 # N64-NEXT: {{^ *0+}}40: R_MIPS_GPREL16/R_MIPS_SUB/R_MIPS_HI16 .text
+# N32-NEXT: {{^ *0+}}40: R_MIPS_GPREL16 .text
+# N32-NEXT: R_MIPS_SUB
+# N32-NEXT: R_MIPS_HI16
 # NXX-NEXT: addiu    $gp, $gp, 0
-# N32-NEXT: {{^ *0+}}3c: R_MIPS_LO16 __gnu_local_gp
 # N64-NEXT: {{^ *0+}}44: R_MIPS_GPREL16/R_MIPS_SUB/R_MIPS_LO16 .text
+# N32-NEXT: {{^ *0+}}44: R_MIPS_GPREL16 .text
+# N32-NEXT: R_MIPS_SUB
+# N32-NEXT: R_MIPS_LO16
+# N32-NEXT: addu     $gp, $gp, $25
 # N64-NEXT: daddu    $gp, $gp, $25
 # NXX-NEXT: nop
 # NXX-NEXT: sub $3, $3, $2
@@ -129,7 +145,8 @@ t4:
 # by checking that the next instruction after the first
 # nop is also a 'nop'.
 
-# ALL-LABEL: t4:
+# ALL-LABEL: <t4>:
+# ASM-LABEL: t4:
 
 # NXX-NEXT: nop
 # NXX-NEXT: nop
@@ -147,17 +164,23 @@ t5:
         .cpsetup $25, ((8*4) - (3*8)), __cerror
         nop
 
-# ALL-LABEL: t5:
+# ALL-LABEL: <t5>:
+# ASM-LABEL: t5:
 
 # O32-NOT: __cerror
 
 # NXX-NEXT: sd       $gp, 8($sp)
 # NXX-NEXT: lui      $gp, 0
-# N32-NEXT: R_MIPS_HI16 __gnu_local_gp
 # N64-NEXT: R_MIPS_GPREL16/R_MIPS_SUB/R_MIPS_HI16  __cerror
+# N32-NEXT: R_MIPS_GPREL16 __cerror
+# N32-NEXT: R_MIPS_SUB
+# N32-NEXT: R_MIPS_HI16
 # NXX-NEXT: addiu    $gp, $gp, 0
-# N32-NEXT: R_MIPS_LO16 __gnu_local_gp
 # N64-NEXT: R_MIPS_GPREL16/R_MIPS_SUB/R_MIPS_LO16  __cerror
+# N32-NEXT: R_MIPS_GPREL16 __cerror
+# N32-NEXT: R_MIPS_SUB
+# N32-NEXT: R_MIPS_LO16
+# N32-NEXT: addu     $gp, $gp, $25
 # N64-NEXT: daddu    $gp, $gp, $25
 
 # ASM-NEXT: .cpsetup $25, 8, __cerror
@@ -171,25 +194,31 @@ IMM_8 = 8
         .cpreturn
         nop
 
-# ALL-LABEL: t1b:
+# ALL-LABEL: <t1b>:
+# ASM-LABEL: t1b:
 # ASM-NEXT: .set IMM_8, 8
 
 # O32-NOT: __cerror
 
 # NXX-NEXT: sd       $gp, 8($sp)
 # NXX-NEXT: lui      $gp, 0
-# N32-NEXT: R_MIPS_HI16 __gnu_local_gp
 # N64-NEXT: R_MIPS_GPREL16/R_MIPS_SUB/R_MIPS_HI16  __cerror
+# N32-NEXT: R_MIPS_GPREL16 __cerror
+# N32-NEXT: R_MIPS_SUB
+# N32-NEXT: R_MIPS_HI16
 # NXX-NEXT: addiu    $gp, $gp, 0
-# N32-NEXT: R_MIPS_LO16 __gnu_local_gp
 # N64-NEXT: R_MIPS_GPREL16/R_MIPS_SUB/R_MIPS_LO16  __cerror
+# N32-NEXT: R_MIPS_GPREL16 __cerror
+# N32-NEXT: R_MIPS_SUB
+# N32-NEXT: R_MIPS_LO16
+# N32-NEXT: addu     $gp, $gp, $25
 # N64-NEXT: daddu    $gp, $gp, $25
 
 # ASM-NEXT: .cpsetup $25, 8, __cerror
 
 # ALL-NEXT: nop
 
-# ASM-NEXT: .cpreturn
+# ASM: .cpreturn
 # NXX-NEXT: ld $gp, 8($sp)
 
 # ALL-NEXT: nop

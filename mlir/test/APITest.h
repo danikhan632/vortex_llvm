@@ -1,6 +1,6 @@
 //===- Test.h - Simple macros for API unit tests ----------------*- C++ -*-===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -33,7 +33,7 @@ struct TestRegistration {
     test_detail::tests().push_back(func);
   }
 };
-} // end namespace test_detail
+} // namespace test_detail
 
 /// Declares a test function with the given name and adds it to the list of
 /// known tests.  The body of the function must follow immediately.  Example:

@@ -20,9 +20,10 @@
 
 using namespace llvm;
 
-void clang::EmitClangCommentCommandInfo(RecordKeeper &Records, raw_ostream &OS) {
-  emitSourceFileHeader("A list of commands useable in documentation "
-                       "comments", OS);
+void clang::EmitClangCommentCommandInfo(RecordKeeper &Records,
+                                        raw_ostream &OS) {
+  emitSourceFileHeader("A list of commands useable in documentation comments",
+                       OS, Records);
 
   OS << "namespace {\n"
         "const CommandInfo Commands[] = {\n";
@@ -63,7 +64,7 @@ void clang::EmitClangCommentCommandInfo(RecordKeeper &Records, raw_ostream &OS) 
   std::vector<StringMatcher::StringPair> Matches;
   for (size_t i = 0, e = Tags.size(); i != e; ++i) {
     Record &Tag = *Tags[i];
-    std::string Name = Tag.getValueAsString("Name");
+    std::string Name = std::string(Tag.getValueAsString("Name"));
     std::string Return;
     raw_string_ostream(Return) << "return &Commands[" << i << "];";
     Matches.emplace_back(std::move(Name), std::move(Return));
@@ -82,6 +83,12 @@ static std::string MangleName(StringRef Str) {
     switch (Str[i]) {
     default:
       Mangled += Str[i];
+      break;
+    case '(':
+      Mangled += "lparen";
+      break;
+    case ')':
+      Mangled += "rparen";
       break;
     case '[':
       Mangled += "lsquare";
@@ -106,9 +113,10 @@ static std::string MangleName(StringRef Str) {
   return Mangled;
 }
 
-void clang::EmitClangCommentCommandList(RecordKeeper &Records, raw_ostream &OS) {
-  emitSourceFileHeader("A list of commands useable in documentation "
-                       "comments", OS);
+void clang::EmitClangCommentCommandList(RecordKeeper &Records,
+                                        raw_ostream &OS) {
+  emitSourceFileHeader("A list of commands useable in documentation comments",
+                       OS, Records);
 
   OS << "#ifndef COMMENT_COMMAND\n"
      << "#  define COMMENT_COMMAND(NAME)\n"

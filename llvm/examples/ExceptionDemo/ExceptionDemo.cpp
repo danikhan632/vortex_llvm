@@ -792,7 +792,7 @@ _Unwind_Reason_Code ourPersonality(int version, _Unwind_Action actions,
   }
 #endif
 
-  const uint8_t *lsda = _Unwind_GetLanguageSpecificData(context);
+  const uint8_t *lsda = (const uint8_t *)_Unwind_GetLanguageSpecificData(context);
 
 #ifdef DEBUG
   fprintf(stderr,
@@ -875,7 +875,7 @@ void generateStringPrint(llvm::LLVMContext &context,
   }
 
   llvm::Value *cast = builder.CreatePointerCast(stringVar,
-                                                builder.getInt8PtrTy());
+                                                builder.getPtrTy());
   builder.CreateCall(printFunct, cast);
 }
 
@@ -919,7 +919,7 @@ void generateIntegerPrint(llvm::LLVMContext &context,
   }
 
   llvm::Value *cast = builder.CreateBitCast(stringVar,
-                                            builder.getInt8PtrTy());
+                                            builder.getPtrTy());
   builder.CreateCall(&printFunct, {&toPrint, cast});
 }
 
@@ -970,7 +970,7 @@ static llvm::BasicBlock *createFinallyBlock(llvm::LLVMContext &context,
                                          ourExceptionNotThrownState->getType(),
                                          ourExceptionNotThrownState);
 
-  llvm::PointerType *exceptionStorageType = builder.getInt8PtrTy();
+  llvm::PointerType *exceptionStorageType = builder.getPtrTy();
   *exceptionStorage = createEntryBlockAlloca(toAddTo,
                                              "exceptionStorage",
                                              exceptionStorageType,
@@ -1289,7 +1289,7 @@ static llvm::Function *createCatchWrappedInvokeFunction(
   typeInfoThrown = builder.CreateStructGEP(ourExceptionType, typeInfoThrown, 0);
 
   llvm::Value *typeInfoThrownType =
-      builder.CreateStructGEP(builder.getInt8PtrTy(), typeInfoThrown, 0);
+      builder.CreateStructGEP(builder.getPtrTy(), typeInfoThrown, 0);
 
   generateIntegerPrint(context,
                        module,
@@ -1614,7 +1614,7 @@ static void createStandardUtilityFunctions(unsigned numTypeInfos,
                                           TypeArray(builder.getInt32Ty()));
 
   llvm::Type *caughtResultFieldTypes[] = {
-    builder.getInt8PtrTy(),
+    builder.getPtrTy(),
     builder.getInt32Ty()
   };
 
@@ -1697,7 +1697,7 @@ static void createStandardUtilityFunctions(unsigned numTypeInfos,
 
   argTypes.clear();
   argTypes.push_back(builder.getInt32Ty());
-  argTypes.push_back(builder.getInt8PtrTy());
+  argTypes.push_back(builder.getPtrTy());
 
   argNames.clear();
 
@@ -1716,7 +1716,7 @@ static void createStandardUtilityFunctions(unsigned numTypeInfos,
 
   argTypes.clear();
   argTypes.push_back(builder.getInt64Ty());
-  argTypes.push_back(builder.getInt8PtrTy());
+  argTypes.push_back(builder.getPtrTy());
 
   argNames.clear();
 
@@ -1734,7 +1734,7 @@ static void createStandardUtilityFunctions(unsigned numTypeInfos,
   retType = builder.getVoidTy();
 
   argTypes.clear();
-  argTypes.push_back(builder.getInt8PtrTy());
+  argTypes.push_back(builder.getPtrTy());
 
   argNames.clear();
 
@@ -1770,7 +1770,7 @@ static void createStandardUtilityFunctions(unsigned numTypeInfos,
   retType = builder.getVoidTy();
 
   argTypes.clear();
-  argTypes.push_back(builder.getInt8PtrTy());
+  argTypes.push_back(builder.getPtrTy());
 
   argNames.clear();
 
@@ -1785,7 +1785,7 @@ static void createStandardUtilityFunctions(unsigned numTypeInfos,
 
   // createOurException
 
-  retType = builder.getInt8PtrTy();
+  retType = builder.getPtrTy();
 
   argTypes.clear();
   argTypes.push_back(builder.getInt32Ty());
@@ -1806,7 +1806,7 @@ static void createStandardUtilityFunctions(unsigned numTypeInfos,
   retType = builder.getInt32Ty();
 
   argTypes.clear();
-  argTypes.push_back(builder.getInt8PtrTy());
+  argTypes.push_back(builder.getPtrTy());
 
   argNames.clear();
 
@@ -1826,7 +1826,7 @@ static void createStandardUtilityFunctions(unsigned numTypeInfos,
   retType = builder.getInt32Ty();
 
   argTypes.clear();
-  argTypes.push_back(builder.getInt8PtrTy());
+  argTypes.push_back(builder.getPtrTy());
 
   argNames.clear();
 
@@ -1849,8 +1849,8 @@ static void createStandardUtilityFunctions(unsigned numTypeInfos,
   argTypes.push_back(builder.getInt32Ty());
   argTypes.push_back(builder.getInt32Ty());
   argTypes.push_back(builder.getInt64Ty());
-  argTypes.push_back(builder.getInt8PtrTy());
-  argTypes.push_back(builder.getInt8PtrTy());
+  argTypes.push_back(builder.getPtrTy());
+  argTypes.push_back(builder.getPtrTy());
 
   argNames.clear();
 
@@ -1959,11 +1959,13 @@ int main(int argc, char *argv[]) {
 
     executionEngine->finalizeObject();
 
+#ifndef NDEBUG
     fprintf(stderr, "\nBegin module dump:\n\n");
 
     module->dump();
 
     fprintf(stderr, "\nEnd module dump:\n");
+#endif
 
     fprintf(stderr, "\n\nBegin Test:\n");
 

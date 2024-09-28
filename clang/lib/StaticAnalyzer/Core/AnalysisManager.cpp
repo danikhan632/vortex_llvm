@@ -13,7 +13,7 @@ using namespace ento;
 
 void AnalysisManager::anchor() { }
 
-AnalysisManager::AnalysisManager(ASTContext &ASTCtx,
+AnalysisManager::AnalysisManager(ASTContext &ASTCtx, Preprocessor &PP,
                                  const PathDiagnosticConsumers &PDC,
                                  StoreManagerCreator storemgr,
                                  ConstraintManagerCreator constraintmgr,
@@ -38,7 +38,7 @@ AnalysisManager::AnalysisManager(ASTContext &ASTCtx,
           Options.ShouldElideConstructors,
           /*addVirtualBaseBranches=*/true,
           injector),
-      Ctx(ASTCtx), LangOpts(ASTCtx.getLangOpts()),
+      Ctx(ASTCtx), PP(PP), LangOpts(ASTCtx.getLangOpts()),
       PathConsumers(PDC), CreateStoreMgr(storemgr),
       CreateConstraintMgr(constraintmgr), CheckerMgr(checkerMgr),
       options(Options) {
@@ -50,17 +50,14 @@ AnalysisManager::AnalysisManager(ASTContext &ASTCtx,
 
 AnalysisManager::~AnalysisManager() {
   FlushDiagnostics();
-  for (PathDiagnosticConsumers::iterator I = PathConsumers.begin(),
-       E = PathConsumers.end(); I != E; ++I) {
-    delete *I;
+  for (PathDiagnosticConsumer *Consumer : PathConsumers) {
+    delete Consumer;
   }
 }
 
 void AnalysisManager::FlushDiagnostics() {
   PathDiagnosticConsumer::FilesMade filesMade;
-  for (PathDiagnosticConsumers::iterator I = PathConsumers.begin(),
-       E = PathConsumers.end();
-       I != E; ++I) {
-    (*I)->FlushDiagnostics(&filesMade);
+  for (PathDiagnosticConsumer *Consumer : PathConsumers) {
+    Consumer->FlushDiagnostics(&filesMade);
   }
 }

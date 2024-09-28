@@ -8,6 +8,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "PathConfig.h"
+#include "llvm/ADT/SmallString.h"
 #include "llvm/Support/Path.h"
 
 namespace clang {
@@ -23,7 +24,7 @@ std::string getIncludePath(const SourceManager &SM, SourceLocation Loc,
     FilePath = SM.getFilename(Loc);
     if (FilePath.empty())
       return "";
-    if (!FilePath.endswith(".inc"))
+    if (!FilePath.ends_with(".inc"))
       break;
     FileID ID = SM.getFileID(Loc);
     Loc = SM.getIncludeLoc(ID);
@@ -34,7 +35,7 @@ std::string getIncludePath(const SourceManager &SM, SourceLocation Loc,
   SmallString<256> CleanedFilePath = FilePath;
   llvm::sys::path::remove_dots(CleanedFilePath, /*remove_dot_dot=*/false);
 
-  return CleanedFilePath.str();
+  return std::string(CleanedFilePath.str());
 }
 
 } // namespace find_all_symbols

@@ -15,7 +15,6 @@
 
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/BinaryFormat/COFF.h"
-#include "llvm/MC/SubtargetFeature.h"
 #include "llvm/Object/Binary.h"
 #include "llvm/Object/CVDebugRecord.h"
 #include "llvm/Object/Error.h"
@@ -24,6 +23,7 @@
 #include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/TargetParser/SubtargetFeature.h"
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -379,8 +379,8 @@ public:
   }
 
   bool isCommon() const {
-    return isExternal() && getSectionNumber() == COFF::IMAGE_SYM_UNDEFINED &&
-           getValue() != 0;
+    return (isExternal() || isSection()) &&
+           getSectionNumber() == COFF::IMAGE_SYM_UNDEFINED && getValue() != 0;
   }
 
   bool isUndefined() const {
@@ -576,25 +576,26 @@ struct coff_tls_directory {
 
   uint32_t getAlignment() const {
     // Bit [20:24] contains section alignment.
-    uint32_t Shift = (Characteristics & 0x00F00000) >> 20;
+    uint32_t Shift = (Characteristics & COFF::IMAGE_SCN_ALIGN_MASK) >> 20;
     if (Shift > 0)
       return 1U << (Shift - 1);
     return 0;
+  }
+
+  void setAlignment(uint32_t Align) {
+    uint32_t AlignBits = 0;
+    if (Align) {
+      assert(llvm::isPowerOf2_32(Align) && "alignment is not a power of 2");
+      assert(llvm::Log2_32(Align) <= 13 && "alignment requested is too large");
+      AlignBits = (llvm::Log2_32(Align) + 1) << 20;
+    }
+    Characteristics =
+        (Characteristics & ~COFF::IMAGE_SCN_ALIGN_MASK) | AlignBits;
   }
 };
 
 using coff_tls_directory32 = coff_tls_directory<support::little32_t>;
 using coff_tls_directory64 = coff_tls_directory<support::little64_t>;
-
-/// Bits in control flow guard flags as we understand them.
-enum class coff_guard_flags : uint32_t {
-  CFInstrumented = 0x00000100,
-  HasFidTable = 0x00000400,
-  ProtectDelayLoadIAT = 0x00001000,
-  DelayLoadIATSection = 0x00002000, // Delay load in separate section
-  HasLongJmpTable = 0x00010000,
-  FidTableHasFlags = 0x10000000, // Indicates that fid tables are 5 bytes
-};
 
 enum class frame_type : uint16_t { Fpo = 0, Trap = 1, Tss = 2, NonFpo = 3 };
 
@@ -650,6 +651,17 @@ struct coff_load_configuration32 {
   support::ulittle16_t Reserved2;
   support::ulittle32_t GuardRFVerifyStackPointerFunctionPointer;
   support::ulittle32_t HotPatchTableOffset;
+
+  // Added in MSVC 2019
+  support::ulittle32_t Reserved3;
+  support::ulittle32_t EnclaveConfigurationPointer;
+  support::ulittle32_t VolatileMetadataPointer;
+  support::ulittle32_t GuardEHContinuationTable;
+  support::ulittle32_t GuardEHContinuationCount;
+  support::ulittle32_t GuardXFGCheckFunctionPointer;
+  support::ulittle32_t GuardXFGDispatchFunctionPointer;
+  support::ulittle32_t GuardXFGTableDispatchFunctionPointer;
+  support::ulittle32_t CastGuardOsDeterminedFailureMode;
 };
 
 /// 64-bit load config (IMAGE_LOAD_CONFIG_DIRECTORY64)
@@ -697,6 +709,64 @@ struct coff_load_configuration64 {
   support::ulittle16_t Reserved2;
   support::ulittle64_t GuardRFVerifyStackPointerFunctionPointer;
   support::ulittle32_t HotPatchTableOffset;
+
+  // Added in MSVC 2019
+  support::ulittle32_t Reserved3;
+  support::ulittle64_t EnclaveConfigurationPointer;
+  support::ulittle64_t VolatileMetadataPointer;
+  support::ulittle64_t GuardEHContinuationTable;
+  support::ulittle64_t GuardEHContinuationCount;
+  support::ulittle64_t GuardXFGCheckFunctionPointer;
+  support::ulittle64_t GuardXFGDispatchFunctionPointer;
+  support::ulittle64_t GuardXFGTableDispatchFunctionPointer;
+  support::ulittle64_t CastGuardOsDeterminedFailureMode;
+};
+
+struct chpe_metadata {
+  support::ulittle32_t Version;
+  support::ulittle32_t CodeMap;
+  support::ulittle32_t CodeMapCount;
+  support::ulittle32_t CodeRangesToEntryPoints;
+  support::ulittle32_t RedirectionMetadata;
+  support::ulittle32_t __os_arm64x_dispatch_call_no_redirect;
+  support::ulittle32_t __os_arm64x_dispatch_ret;
+  support::ulittle32_t __os_arm64x_dispatch_call;
+  support::ulittle32_t __os_arm64x_dispatch_icall;
+  support::ulittle32_t __os_arm64x_dispatch_icall_cfg;
+  support::ulittle32_t AlternateEntryPoint;
+  support::ulittle32_t AuxiliaryIAT;
+  support::ulittle32_t CodeRangesToEntryPointsCount;
+  support::ulittle32_t RedirectionMetadataCount;
+  support::ulittle32_t GetX64InformationFunctionPointer;
+  support::ulittle32_t SetX64InformationFunctionPointer;
+  support::ulittle32_t ExtraRFETable;
+  support::ulittle32_t ExtraRFETableSize;
+  support::ulittle32_t __os_arm64x_dispatch_fptr;
+  support::ulittle32_t AuxiliaryIATCopy;
+};
+
+enum chpe_range_type { Arm64 = 0, Arm64EC = 1, Amd64 = 2 };
+
+struct chpe_range_entry {
+  support::ulittle32_t StartOffset;
+  support::ulittle32_t Length;
+
+  // The two low bits of StartOffset contain a range type.
+  static constexpr uint32_t TypeMask = 3;
+
+  uint32_t getStart() const { return StartOffset & ~TypeMask; }
+  uint16_t getType() const { return StartOffset & TypeMask; }
+};
+
+struct chpe_code_range_entry {
+  support::ulittle32_t StartRva;
+  support::ulittle32_t EndRva;
+  support::ulittle32_t EntryPoint;
+};
+
+struct chpe_redirection_entry {
+  support::ulittle32_t Source;
+  support::ulittle32_t Destination;
 };
 
 struct coff_runtime_function_x64 {
@@ -764,6 +834,8 @@ struct debug_h_header {
 
 class COFFObjectFile : public ObjectFile {
 private:
+  COFFObjectFile(MemoryBufferRef Object);
+
   friend class ImportDirectoryEntryRef;
   friend class ExportDirectoryEntryRef;
   const coff_file_header *COFFHeader;
@@ -784,25 +856,35 @@ private:
   const coff_base_reloc_block_header *BaseRelocEnd;
   const debug_directory *DebugDirectoryBegin;
   const debug_directory *DebugDirectoryEnd;
+  const coff_tls_directory32 *TLSDirectory32;
+  const coff_tls_directory64 *TLSDirectory64;
   // Either coff_load_configuration32 or coff_load_configuration64.
   const void *LoadConfig = nullptr;
+  const chpe_metadata *CHPEMetadata = nullptr;
 
-  std::error_code getString(uint32_t offset, StringRef &Res) const;
+  Expected<StringRef> getString(uint32_t offset) const;
 
   template <typename coff_symbol_type>
   const coff_symbol_type *toSymb(DataRefImpl Symb) const;
   const coff_section *toSec(DataRefImpl Sec) const;
   const coff_relocation *toRel(DataRefImpl Rel) const;
 
-  std::error_code initSymbolTablePtr();
-  std::error_code initImportTablePtr();
-  std::error_code initDelayImportTablePtr();
-  std::error_code initExportTablePtr();
-  std::error_code initBaseRelocPtr();
-  std::error_code initDebugDirectoryPtr();
-  std::error_code initLoadConfigPtr();
+  // Finish initializing the object and return success or an error.
+  Error initialize();
+
+  Error initSymbolTablePtr();
+  Error initImportTablePtr();
+  Error initDelayImportTablePtr();
+  Error initExportTablePtr();
+  Error initBaseRelocPtr();
+  Error initDebugDirectoryPtr();
+  Error initTLSDirectoryPtr();
+  Error initLoadConfigPtr();
 
 public:
+  static Expected<std::unique_ptr<COFFObjectFile>>
+  create(MemoryBufferRef Object);
+
   uintptr_t getSymbolTable() const {
     if (SymbolTable16)
       return reinterpret_cast<uintptr_t>(SymbolTable16);
@@ -812,8 +894,17 @@ public:
   }
 
   uint16_t getMachine() const {
-    if (COFFHeader)
+    if (COFFHeader) {
+      if (CHPEMetadata) {
+        switch (COFFHeader->Machine) {
+        case COFF::IMAGE_FILE_MACHINE_AMD64:
+          return COFF::IMAGE_FILE_MACHINE_ARM64EC;
+        case COFF::IMAGE_FILE_MACHINE_ARM64:
+          return COFF::IMAGE_FILE_MACHINE_ARM64X;
+        }
+      }
       return COFFHeader->Machine;
+    }
     if (COFFBigObjHeader)
       return COFFBigObjHeader->Machine;
     llvm_unreachable("no COFF header!");
@@ -878,6 +969,12 @@ public:
     return getRawNumberOfSymbols();
   }
 
+  uint32_t getStringTableSize() const { return StringTableSize; }
+
+  const export_directory_table_entry *getExportTable() const {
+    return ExportDirectory;
+  }
+
   const coff_load_configuration32 *getLoadConfig32() const {
     assert(!is64());
     return reinterpret_cast<const coff_load_configuration32 *>(LoadConfig);
@@ -887,6 +984,9 @@ public:
     assert(is64());
     return reinterpret_cast<const coff_load_configuration64 *>(LoadConfig);
   }
+
+  const chpe_metadata *getCHPEMetadata() const { return CHPEMetadata; }
+
   StringRef getRelocationTypeName(uint16_t Type) const;
 
 protected:
@@ -896,7 +996,7 @@ protected:
   uint32_t getSymbolAlignment(DataRefImpl Symb) const override;
   uint64_t getSymbolValueImpl(DataRefImpl Symb) const override;
   uint64_t getCommonSymbolSizeImpl(DataRefImpl Symb) const override;
-  uint32_t getSymbolFlags(DataRefImpl Symb) const override;
+  Expected<uint32_t> getSymbolFlags(DataRefImpl Symb) const override;
   Expected<SymbolRef::Type> getSymbolType(DataRefImpl Symb) const override;
   Expected<section_iterator> getSymbolSection(DataRefImpl Symb) const override;
   void moveSectionNext(DataRefImpl &Sec) const override;
@@ -912,6 +1012,7 @@ protected:
   bool isSectionData(DataRefImpl Sec) const override;
   bool isSectionBSS(DataRefImpl Sec) const override;
   bool isSectionVirtual(DataRefImpl Sec) const override;
+  bool isDebugSection(DataRefImpl Sec) const override;
   relocation_iterator section_rel_begin(DataRefImpl Sec) const override;
   relocation_iterator section_rel_end(DataRefImpl Sec) const override;
 
@@ -923,12 +1024,12 @@ protected:
                              SmallVectorImpl<char> &Result) const override;
 
 public:
-  COFFObjectFile(MemoryBufferRef Object, std::error_code &EC);
-
   basic_symbol_iterator symbol_begin() const override;
   basic_symbol_iterator symbol_end() const override;
   section_iterator section_begin() const override;
   section_iterator section_end() const override;
+
+  bool is64Bit() const override { return false; }
 
   const coff_section *getCOFFSection(const SectionRef &Section) const;
   COFFSymbolRef getCOFFSymbol(const DataRefImpl &Ref) const;
@@ -941,7 +1042,9 @@ public:
   StringRef getFileFormatName() const override;
   Triple::ArchType getArch() const override;
   Expected<uint64_t> getStartAddress() const override;
-  SubtargetFeatures getFeatures() const override { return SubtargetFeatures(); }
+  Expected<SubtargetFeatures> getFeatures() const override {
+    return SubtargetFeatures();
+  }
 
   import_directory_iterator import_directory_begin() const;
   import_directory_iterator import_directory_end() const;
@@ -967,6 +1070,13 @@ public:
     return make_range(debug_directory_begin(), debug_directory_end());
   }
 
+  const coff_tls_directory32 *getTLSDirectory32() const {
+    return TLSDirectory32;
+  }
+  const coff_tls_directory64 *getTLSDirectory64() const {
+    return TLSDirectory64;
+  }
+
   const dos_header *getDOSHeader() const {
     if (!PE32Header && !PE32PlusHeader)
       return nullptr;
@@ -980,49 +1090,30 @@ public:
   const pe32_header *getPE32Header() const { return PE32Header; }
   const pe32plus_header *getPE32PlusHeader() const { return PE32PlusHeader; }
 
-  std::error_code getDataDirectory(uint32_t index,
-                                   const data_directory *&Res) const;
-  std::error_code getSection(int32_t index, const coff_section *&Res) const;
-  std::error_code getSection(StringRef SectionName,
-                             const coff_section *&Res) const;
+  const data_directory *getDataDirectory(uint32_t index) const;
+  Expected<const coff_section *> getSection(int32_t index) const;
 
-  template <typename coff_symbol_type>
-  std::error_code getSymbol(uint32_t Index,
-                            const coff_symbol_type *&Res) const {
-    if (Index >= getNumberOfSymbols())
-      return object_error::parse_failed;
-
-    Res = reinterpret_cast<coff_symbol_type *>(getSymbolTable()) + Index;
-    return std::error_code();
-  }
   Expected<COFFSymbolRef> getSymbol(uint32_t index) const {
-    if (SymbolTable16) {
-      const coff_symbol16 *Symb = nullptr;
-      if (std::error_code EC = getSymbol(index, Symb))
-        return errorCodeToError(EC);
-      return COFFSymbolRef(Symb);
-    }
-    if (SymbolTable32) {
-      const coff_symbol32 *Symb = nullptr;
-      if (std::error_code EC = getSymbol(index, Symb))
-        return errorCodeToError(EC);
-      return COFFSymbolRef(Symb);
-    }
+    if (index >= getNumberOfSymbols())
+      return errorCodeToError(object_error::parse_failed);
+    if (SymbolTable16)
+      return COFFSymbolRef(SymbolTable16 + index);
+    if (SymbolTable32)
+      return COFFSymbolRef(SymbolTable32 + index);
     return errorCodeToError(object_error::parse_failed);
   }
 
   template <typename T>
-  std::error_code getAuxSymbol(uint32_t index, const T *&Res) const {
+  Error getAuxSymbol(uint32_t index, const T *&Res) const {
     Expected<COFFSymbolRef> S = getSymbol(index);
     if (Error E = S.takeError())
-      return errorToErrorCode(std::move(E));
+      return E;
     Res = reinterpret_cast<const T *>(S->getRawPtr());
-    return std::error_code();
+    return Error::success();
   }
 
-  std::error_code getSymbolName(COFFSymbolRef Symbol, StringRef &Res) const;
-  std::error_code getSymbolName(const coff_symbol_generic *Symbol,
-                                StringRef &Res) const;
+  Expected<StringRef> getSymbolName(COFFSymbolRef Symbol) const;
+  Expected<StringRef> getSymbolName(const coff_symbol_generic *Symbol) const;
 
   ArrayRef<uint8_t> getSymbolAuxData(COFFSymbolRef Symbol) const;
 
@@ -1044,29 +1135,31 @@ public:
                            ArrayRef<uint8_t> &Res) const;
 
   uint64_t getImageBase() const;
-  std::error_code getVaPtr(uint64_t VA, uintptr_t &Res) const;
-  std::error_code getRvaPtr(uint32_t Rva, uintptr_t &Res) const;
+  Error getVaPtr(uint64_t VA, uintptr_t &Res) const;
+  Error getRvaPtr(uint32_t Rva, uintptr_t &Res,
+                  const char *ErrorContext = nullptr) const;
 
   /// Given an RVA base and size, returns a valid array of bytes or an error
   /// code if the RVA and size is not contained completely within a valid
   /// section.
-  std::error_code getRvaAndSizeAsBytes(uint32_t RVA, uint32_t Size,
-                                       ArrayRef<uint8_t> &Contents) const;
+  Error getRvaAndSizeAsBytes(uint32_t RVA, uint32_t Size,
+                             ArrayRef<uint8_t> &Contents,
+                             const char *ErrorContext = nullptr) const;
 
-  std::error_code getHintName(uint32_t Rva, uint16_t &Hint,
+  Error getHintName(uint32_t Rva, uint16_t &Hint,
                               StringRef &Name) const;
 
   /// Get PDB information out of a codeview debug directory entry.
-  std::error_code getDebugPDBInfo(const debug_directory *DebugDir,
-                                  const codeview::DebugInfo *&Info,
-                                  StringRef &PDBFileName) const;
+  Error getDebugPDBInfo(const debug_directory *DebugDir,
+                        const codeview::DebugInfo *&Info,
+                        StringRef &PDBFileName) const;
 
   /// Get PDB information from an executable. If the information is not present,
   /// Info will be set to nullptr and PDBFileName will be empty. An error is
   /// returned only on corrupt object files. Convenience accessor that can be
   /// used if the debug directory is not already handy.
-  std::error_code getDebugPDBInfo(const codeview::DebugInfo *&Info,
-                                  StringRef &PDBFileName) const;
+  Error getDebugPDBInfo(const codeview::DebugInfo *&Info,
+                        StringRef &PDBFileName) const;
 
   bool isRelocatableObject() const override;
   bool is64() const { return PE32PlusHeader; }
@@ -1095,11 +1188,11 @@ public:
   imported_symbol_iterator lookup_table_end() const;
   iterator_range<imported_symbol_iterator> lookup_table_symbols() const;
 
-  std::error_code getName(StringRef &Result) const;
-  std::error_code getImportLookupTableRVA(uint32_t &Result) const;
-  std::error_code getImportAddressTableRVA(uint32_t &Result) const;
+  Error getName(StringRef &Result) const;
+  Error getImportLookupTableRVA(uint32_t &Result) const;
+  Error getImportAddressTableRVA(uint32_t &Result) const;
 
-  std::error_code
+  Error
   getImportTableEntry(const coff_import_directory_table_entry *&Result) const;
 
 private:
@@ -1122,10 +1215,10 @@ public:
   imported_symbol_iterator imported_symbol_end() const;
   iterator_range<imported_symbol_iterator> imported_symbols() const;
 
-  std::error_code getName(StringRef &Result) const;
-  std::error_code getDelayImportTable(
+  Error getName(StringRef &Result) const;
+  Error getDelayImportTable(
       const delay_import_directory_table_entry *&Result) const;
-  std::error_code getImportAddress(int AddrIndex, uint64_t &Result) const;
+  Error getImportAddress(int AddrIndex, uint64_t &Result) const;
 
 private:
   const delay_import_directory_table_entry *Table;
@@ -1144,14 +1237,14 @@ public:
   bool operator==(const ExportDirectoryEntryRef &Other) const;
   void moveNext();
 
-  std::error_code getDllName(StringRef &Result) const;
-  std::error_code getOrdinalBase(uint32_t &Result) const;
-  std::error_code getOrdinal(uint32_t &Result) const;
-  std::error_code getExportRVA(uint32_t &Result) const;
-  std::error_code getSymbolName(StringRef &Result) const;
+  Error getDllName(StringRef &Result) const;
+  Error getOrdinalBase(uint32_t &Result) const;
+  Error getOrdinal(uint32_t &Result) const;
+  Error getExportRVA(uint32_t &Result) const;
+  Error getSymbolName(StringRef &Result) const;
 
-  std::error_code isForwarder(bool &Result) const;
-  std::error_code getForwardTo(StringRef &Result) const;
+  Error isForwarder(bool &Result) const;
+  Error getForwardTo(StringRef &Result) const;
 
 private:
   const export_directory_table_entry *ExportTable;
@@ -1172,10 +1265,10 @@ public:
   bool operator==(const ImportedSymbolRef &Other) const;
   void moveNext();
 
-  std::error_code getSymbolName(StringRef &Result) const;
-  std::error_code isOrdinal(bool &Result) const;
-  std::error_code getOrdinal(uint16_t &Result) const;
-  std::error_code getHintNameRVA(uint32_t &Result) const;
+  Error getSymbolName(StringRef &Result) const;
+  Error isOrdinal(bool &Result) const;
+  Error getOrdinal(uint16_t &Result) const;
+  Error getHintNameRVA(uint32_t &Result) const;
 
 private:
   const import_lookup_table_entry32 *Entry32;
@@ -1194,8 +1287,8 @@ public:
   bool operator==(const BaseRelocRef &Other) const;
   void moveNext();
 
-  std::error_code getType(uint8_t &Type) const;
-  std::error_code getRVA(uint32_t &Result) const;
+  Error getType(uint8_t &Type) const;
+  Error getRVA(uint32_t &Result) const;
 
 private:
   const coff_base_reloc_block_header *Header;
@@ -1205,7 +1298,8 @@ private:
 class ResourceSectionRef {
 public:
   ResourceSectionRef() = default;
-  explicit ResourceSectionRef(StringRef Ref) : BBS(Ref, support::little) {}
+  explicit ResourceSectionRef(StringRef Ref)
+      : BBS(Ref, llvm::endianness::little) {}
 
   Error load(const COFFObjectFile *O);
   Error load(const COFFObjectFile *O, const SectionRef &S);
@@ -1226,7 +1320,7 @@ private:
   BinaryByteStream BBS;
 
   SectionRef Section;
-  const COFFObjectFile *Obj;
+  const COFFObjectFile *Obj = nullptr;
 
   std::vector<const coff_relocation *> Relocs;
 
@@ -1261,6 +1355,53 @@ struct FpoData {
   // cbFrame: frame pointer
   frame_type getFP() const { return static_cast<frame_type>(Attributes >> 14); }
 };
+
+class SectionStrippedError
+    : public ErrorInfo<SectionStrippedError, BinaryError> {
+public:
+  SectionStrippedError() { setErrorCode(object_error::section_stripped); }
+};
+
+inline std::optional<std::string>
+getArm64ECMangledFunctionName(StringRef Name) {
+  bool IsCppFn = Name[0] == '?';
+  if (IsCppFn && Name.find("$$h") != std::string::npos)
+    return std::nullopt;
+  if (!IsCppFn && Name[0] == '#')
+    return std::nullopt;
+
+  StringRef Prefix = "$$h";
+  size_t InsertIdx = 0;
+  if (IsCppFn) {
+    InsertIdx = Name.find("@@");
+    size_t ThreeAtSignsIdx = Name.find("@@@");
+    if (InsertIdx != std::string::npos && InsertIdx != ThreeAtSignsIdx) {
+      InsertIdx += 2;
+    } else {
+      InsertIdx = Name.find("@");
+      if (InsertIdx != std::string::npos)
+        InsertIdx++;
+    }
+  } else {
+    Prefix = "#";
+  }
+
+  return std::optional<std::string>(
+      (Name.substr(0, InsertIdx) + Prefix + Name.substr(InsertIdx)).str());
+}
+
+inline std::optional<std::string>
+getArm64ECDemangledFunctionName(StringRef Name) {
+  if (Name[0] == '#')
+    return std::string(Name.substr(1));
+  if (Name[0] != '?')
+    return std::nullopt;
+
+  std::pair<StringRef, StringRef> Pair = Name.split("$$h");
+  if (Pair.second.empty())
+    return std::nullopt;
+  return (Pair.first + Pair.second).str();
+}
 
 } // end namespace object
 

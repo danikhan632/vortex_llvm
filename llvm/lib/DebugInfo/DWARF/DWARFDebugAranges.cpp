@@ -7,26 +7,33 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/DebugInfo/DWARF/DWARFDebugAranges.h"
-#include "llvm/DebugInfo/DWARF/DWARFCompileUnit.h"
+#include "llvm/DebugInfo/DWARF/DWARFAddressRange.h"
 #include "llvm/DebugInfo/DWARF/DWARFContext.h"
+#include "llvm/DebugInfo/DWARF/DWARFDataExtractor.h"
 #include "llvm/DebugInfo/DWARF/DWARFDebugArangeSet.h"
-#include "llvm/Support/DataExtractor.h"
-#include "llvm/Support/WithColor.h"
+#include "llvm/DebugInfo/DWARF/DWARFObject.h"
+#include "llvm/DebugInfo/DWARF/DWARFUnit.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <set>
-#include <vector>
 
 using namespace llvm;
 
-void DWARFDebugAranges::extract(DataExtractor DebugArangesData) {
+void DWARFDebugAranges::extract(
+    DWARFDataExtractor DebugArangesData,
+    function_ref<void(Error)> RecoverableErrorHandler,
+    function_ref<void(Error)> WarningHandler) {
   if (!DebugArangesData.isValidOffset(0))
     return;
   uint64_t Offset = 0;
   DWARFDebugArangeSet Set;
 
-  while (Set.extract(DebugArangesData, &Offset)) {
+  while (DebugArangesData.isValidOffset(Offset)) {
+    if (Error E = Set.extract(DebugArangesData, &Offset, WarningHandler)) {
+      RecoverableErrorHandler(std::move(E));
+      return;
+    }
     uint64_t CUOffset = Set.getCompileUnitDIEOffset();
     for (const auto &Desc : Set.descriptors()) {
       uint64_t LowPC = Desc.Address;
@@ -43,9 +50,10 @@ void DWARFDebugAranges::generate(DWARFContext *CTX) {
     return;
 
   // Extract aranges from .debug_aranges section.
-  DataExtractor ArangesData(CTX->getDWARFObj().getArangesSection(),
-                            CTX->isLittleEndian(), 0);
-  extract(ArangesData);
+  DWARFDataExtractor ArangesData(CTX->getDWARFObj().getArangesSection(),
+                                 CTX->isLittleEndian(), 0);
+  extract(ArangesData, CTX->getRecoverableErrorHandler(),
+          CTX->getWarningHandler());
 
   // Generate aranges from DIEs: even if .debug_aranges section is present,
   // it may describe only a small subset of compilation units, so we need to
@@ -55,7 +63,7 @@ void DWARFDebugAranges::generate(DWARFContext *CTX) {
     if (ParsedCUOffsets.insert(CUOffset).second) {
       Expected<DWARFAddressRangesVector> CURanges = CU->collectAddressRanges();
       if (!CURanges)
-        WithColor::error() << toString(CURanges.takeError()) << '\n';
+        CTX->getRecoverableErrorHandler()(CURanges.takeError());
       else
         for (const auto &R : *CURanges)
           appendRange(CUOffset, R.LowPC, R.HighPC);

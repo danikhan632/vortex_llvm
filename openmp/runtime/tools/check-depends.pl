@@ -23,7 +23,7 @@ my $target_os;
 my $target_arch;
 
 # --------------------------------------------------------------------------------------------------
-# Ouput parse error.
+# Output parse error.
 #     $tool -- Name of tool.
 #     @bulk -- Output of the tool.
 #     $n    -- Number of line caused parse error.
@@ -90,7 +90,7 @@ sub get_deps_ldd($) {
 #  0x0000000000000005 (STRTAB)             0x9350
 #  ...
 #
-# Note: In contrast to ldd, readlef shows only direct dependencies.
+# Note: In contrast to ldd, readelf shows only direct dependencies.
 #
 sub get_deps_readelf($) {
 

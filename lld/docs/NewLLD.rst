@@ -5,7 +5,7 @@ The ELF Linker as a Library
 ---------------------------
 
 You can embed LLD to your program by linking against it and calling the linker's
-entry point function lld::elf::link.
+entry point function ``lld::lldMain``.
 
 The current policy is that it is your responsibility to give trustworthy object
 files. The function is guaranteed to return as long as you do not pass corrupted
@@ -248,7 +248,7 @@ Finally, the linker replaces bitcode symbols with ELF/COFF symbols,
 so that they are linked as if they were in the native format from the beginning.
 
 The details are described in this document.
-http://llvm.org/docs/LinkTimeOptimization.html
+https://llvm.org/docs/LinkTimeOptimization.html
 
 Glossary
 --------

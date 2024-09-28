@@ -56,9 +56,10 @@ private:
 public:
   RuntimeDyldCOFFX86_64(RuntimeDyld::MemoryManager &MM,
                         JITSymbolResolver &Resolver)
-    : RuntimeDyldCOFF(MM, Resolver), ImageBase(0) {}
+      : RuntimeDyldCOFF(MM, Resolver, 8, COFF::IMAGE_REL_AMD64_ADDR64),
+        ImageBase(0) {}
 
-  unsigned getStubAlignment() override { return 1; }
+  Align getStubAlignment() override { return Align(1); }
 
   // 2-byte jmp instruction + 32-bit relative address + 64-bit absolute jump
   unsigned getMaxStubSize() const override { return 14; }
@@ -112,11 +113,10 @@ public:
       // The MemoryManager can make sure this is always true by forcing the
       // memory layout to be: CodeSection < ReadOnlySection < ReadWriteSection.
       const uint64_t ImageBase = getImageBase();
-      if (Value < ImageBase || ((Value - ImageBase) > UINT32_MAX)) {
-        llvm::errs() << "IMAGE_REL_AMD64_ADDR32NB relocation requires an"
-                     << "ordered section layout.\n";
-        write32BitOffset(Target, 0, 0);
-      } else {
+      if (Value < ImageBase || ((Value - ImageBase) > UINT32_MAX))
+        report_fatal_error("IMAGE_REL_AMD64_ADDR32NB relocation requires an "
+                           "ordered section layout");
+      else {
         write32BitOffset(Target, RE.Addend, Value - ImageBase);
       }
       break;
@@ -131,6 +131,13 @@ public:
       assert(static_cast<int64_t>(RE.Addend) <= INT32_MAX && "Relocation overflow");
       assert(static_cast<int64_t>(RE.Addend) >= INT32_MIN && "Relocation underflow");
       writeBytesUnaligned(RE.Addend, Target, 4);
+      break;
+    }
+
+    case COFF::IMAGE_REL_AMD64_SECTION: {
+      assert(static_cast<int16_t>(RE.SectionID) <= INT16_MAX && "Relocation overflow");
+      assert(static_cast<int16_t>(RE.SectionID) >= INT16_MIN && "Relocation underflow");
+      writeBytesUnaligned(RE.SectionID, Target, 2);
       break;
     }
 
@@ -202,7 +209,7 @@ public:
       return SectionOrError.takeError();
     object::section_iterator SecI = *SectionOrError;
     // If there is no section, this must be an external reference.
-    const bool IsExtern = SecI == Obj.section_end();
+    bool IsExtern = SecI == Obj.section_end();
 
     // Determine the Addend used to adjust the relocation value.
     uint64_t RelType = RelI->getType();
@@ -214,7 +221,25 @@ public:
     Expected<StringRef> TargetNameOrErr = Symbol->getName();
     if (!TargetNameOrErr)
       return TargetNameOrErr.takeError();
+
     StringRef TargetName = *TargetNameOrErr;
+    unsigned TargetSectionID = 0;
+    uint64_t TargetOffset = 0;
+
+    if (TargetName.starts_with(getImportSymbolPrefix())) {
+      assert(IsExtern && "DLLImport not marked extern?");
+      TargetSectionID = SectionID;
+      TargetOffset = getDLLImportOffset(SectionID, Stubs, TargetName);
+      TargetName = StringRef();
+      IsExtern = false;
+    } else if (!IsExtern) {
+      if (auto TargetSectionIDOrErr =
+              findOrEmitSection(Obj, *SecI, SecI->isText(), ObjSectionToID))
+        TargetSectionID = *TargetSectionIDOrErr;
+      else
+        return TargetSectionIDOrErr.takeError();
+      TargetOffset = getSymbolOffset(*Symbol);
+    }
 
     switch (RelType) {
 
@@ -253,14 +278,6 @@ public:
       RelocationEntry RE(SectionID, Offset, RelType, Addend);
       addRelocationForSymbol(RE, TargetName);
     } else {
-      bool IsCode = SecI->isText();
-      unsigned TargetSectionID;
-      if (auto TargetSectionIDOrErr =
-          findOrEmitSection(Obj, *SecI, IsCode, ObjSectionToID))
-        TargetSectionID = *TargetSectionIDOrErr;
-      else
-        return TargetSectionIDOrErr.takeError();
-      uint64_t TargetOffset = getSymbolOffset(*Symbol);
       RelocationEntry RE(SectionID, Offset, RelType, TargetOffset + Addend);
       addRelocationForSection(RE, TargetSectionID);
     }

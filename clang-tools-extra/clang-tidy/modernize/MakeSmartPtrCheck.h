@@ -16,9 +16,7 @@
 #include "llvm/ADT/StringRef.h"
 #include <string>
 
-namespace clang {
-namespace tidy {
-namespace modernize {
+namespace clang::tidy::modernize {
 
 /// Base class for MakeSharedCheck and MakeUniqueCheck.
 class MakeSmartPtrCheck : public ClangTidyCheck {
@@ -41,22 +39,22 @@ protected:
   virtual SmartPtrTypeMatcher getSmartPointerTypeMatcher() const = 0;
 
   /// Returns whether the C++ version is compatible with current check.
-  virtual bool isLanguageVersionSupported(const LangOptions &LangOpts) const;
+  bool isLanguageVersionSupported(const LangOptions &LangOpts) const override;
 
   static const char PointerType[];
 
 private:
-  std::unique_ptr<utils::IncludeInserter> Inserter;
-  const utils::IncludeSorter::IncludeStyle IncludeStyle;
-  const std::string MakeSmartPtrFunctionHeader;
-  const std::string MakeSmartPtrFunctionName;
+  utils::IncludeInserter Inserter;
+  const StringRef MakeSmartPtrFunctionHeader;
+  const StringRef MakeSmartPtrFunctionName;
   const bool IgnoreMacros;
+  const bool IgnoreDefaultInitialization;
 
   void checkConstruct(SourceManager &SM, ASTContext *Ctx,
                       const CXXConstructExpr *Construct, const QualType *Type,
                       const CXXNewExpr *New);
   void checkReset(SourceManager &SM, ASTContext *Ctx,
-                  const CXXMemberCallExpr *Member, const CXXNewExpr *New);
+                  const CXXMemberCallExpr *Reset, const CXXNewExpr *New);
 
   /// Returns true when the fixes for replacing CXXNewExpr are generated.
   bool replaceNew(DiagnosticBuilder &Diag, const CXXNewExpr *New,
@@ -64,8 +62,6 @@ private:
   void insertHeader(DiagnosticBuilder &Diag, FileID FD);
 };
 
-} // namespace modernize
-} // namespace tidy
-} // namespace clang
+} // namespace clang::tidy::modernize
 
 #endif // LLVM_CLANG_TOOLS_EXTRA_CLANG_TIDY_MODERNIZE_MAKE_SMART_PTR_H

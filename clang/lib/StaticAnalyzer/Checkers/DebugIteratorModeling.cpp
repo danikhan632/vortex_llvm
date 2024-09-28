@@ -13,6 +13,7 @@
 #include "clang/StaticAnalyzer/Checkers/BuiltinCheckerRegistration.h"
 #include "clang/StaticAnalyzer/Core/BugReporter/BugType.h"
 #include "clang/StaticAnalyzer/Core/Checker.h"
+#include "clang/StaticAnalyzer/Core/PathSensitive/CallDescription.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/CallEvent.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/CheckerContext.h"
 
@@ -27,13 +28,9 @@ namespace {
 class DebugIteratorModeling
   : public Checker<eval::Call> {
 
-  std::unique_ptr<BugType> DebugMsgBugType;
+  const BugType DebugMsgBugType{this, "Checking analyzer assumptions", "debug",
+                                /*SuppressOnSink=*/true};
 
-  template <typename Getter>
-  void analyzerContainerDataField(const CallExpr *CE, CheckerContext &C,
-                                  Getter get) const;
-  void analyzerContainerBegin(const CallExpr *CE, CheckerContext &C) const;
-  void analyzerContainerEnd(const CallExpr *CE, CheckerContext &C) const;
   template <typename Getter>
   void analyzerIteratorDataField(const CallExpr *CE, CheckerContext &C,
                                  Getter get, SVal Default) const;
@@ -46,31 +43,19 @@ class DebugIteratorModeling
                                                  CheckerContext &) const;
 
   CallDescriptionMap<FnCheck> Callbacks = {
-    {{0, "clang_analyzer_container_begin", 1},
-     &DebugIteratorModeling::analyzerContainerBegin},
-    {{0, "clang_analyzer_container_end", 1},
-     &DebugIteratorModeling::analyzerContainerEnd},
-    {{0, "clang_analyzer_iterator_position", 1},
-     &DebugIteratorModeling::analyzerIteratorPosition},
-    {{0, "clang_analyzer_iterator_container", 1},
-     &DebugIteratorModeling::analyzerIteratorContainer},
-    {{0, "clang_analyzer_iterator_validity", 1},
-     &DebugIteratorModeling::analyzerIteratorValidity},
+      {{{"clang_analyzer_iterator_position"}, 1},
+       &DebugIteratorModeling::analyzerIteratorPosition},
+      {{{"clang_analyzer_iterator_container"}, 1},
+       &DebugIteratorModeling::analyzerIteratorContainer},
+      {{{"clang_analyzer_iterator_validity"}, 1},
+       &DebugIteratorModeling::analyzerIteratorValidity},
   };
 
 public:
-  DebugIteratorModeling();
-
   bool evalCall(const CallEvent &Call, CheckerContext &C) const;
 };
 
 } //namespace
-
-DebugIteratorModeling::DebugIteratorModeling() {
-  DebugMsgBugType.reset(
-      new BugType(this, "Checking analyzer assumptions", "debug",
-                  /*SuppressOnSink=*/true));
-}
 
 bool DebugIteratorModeling::evalCall(const CallEvent &Call,
                                      CheckerContext &C) const {
@@ -84,49 +69,6 @@ bool DebugIteratorModeling::evalCall(const CallEvent &Call,
 
   (this->**Handler)(CE, C);
   return true;
-}
-
-template <typename Getter>
-void DebugIteratorModeling::analyzerContainerDataField(const CallExpr *CE,
-                                                       CheckerContext &C,
-                                                       Getter get) const {
-  if (CE->getNumArgs() == 0) {
-    reportDebugMsg("Missing container argument", C);
-    return;
-  }
-
-  auto State = C.getState();
-  const MemRegion *Cont = C.getSVal(CE->getArg(0)).getAsRegion();
-  if (Cont) {
-    const auto *Data = getContainerData(State, Cont);
-    if (Data) {
-      SymbolRef Field = get(Data);
-      if (Field) {
-        State = State->BindExpr(CE, C.getLocationContext(),
-                                nonloc::SymbolVal(Field));
-        C.addTransition(State);
-        return;
-      }
-    }
-  }
-
-  auto &BVF = C.getSValBuilder().getBasicValueFactory();
-  State = State->BindExpr(CE, C.getLocationContext(),
-                   nonloc::ConcreteInt(BVF.getValue(llvm::APSInt::get(0))));
-}
-
-void DebugIteratorModeling::analyzerContainerBegin(const CallExpr *CE,
-                                                   CheckerContext &C) const {
-  analyzerContainerDataField(CE, C, [](const ContainerData *D) {
-      return D->getBegin();
-    });
-}
-
-void DebugIteratorModeling::analyzerContainerEnd(const CallExpr *CE,
-                                                 CheckerContext &C) const {
-  analyzerContainerDataField(CE, C, [](const ContainerData *D) {
-      return D->getEnd();
-    });
 }
 
 template <typename Getter>
@@ -182,8 +124,8 @@ ExplodedNode *DebugIteratorModeling::reportDebugMsg(llvm::StringRef Msg,
     return nullptr;
 
   auto &BR = C.getBugReporter();
-  BR.emitReport(std::make_unique<PathSensitiveBugReport>(*DebugMsgBugType,
-                                                         Msg, N));
+  BR.emitReport(
+      std::make_unique<PathSensitiveBugReport>(DebugMsgBugType, Msg, N));
   return N;
 }
 
@@ -191,6 +133,6 @@ void ento::registerDebugIteratorModeling(CheckerManager &mgr) {
   mgr.registerChecker<DebugIteratorModeling>();
 }
 
-bool ento::shouldRegisterDebugIteratorModeling(const LangOptions &LO) {
+bool ento::shouldRegisterDebugIteratorModeling(const CheckerManager &mgr) {
   return true;
 }

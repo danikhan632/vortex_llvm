@@ -6,19 +6,20 @@
 //
 //===----------------------------------------------------------------------===//
 #include "Annotations.h"
-#include "Context.h"
 #include "Protocol.h"
 #include "SourceCode.h"
 #include "TestTU.h"
+#include "support/Context.h"
 #include "clang/Basic/LangOptions.h"
 #include "clang/Basic/SourceLocation.h"
+#include "clang/Basic/TokenKinds.h"
 #include "clang/Format/Format.h"
 #include "llvm/Support/Error.h"
-#include "llvm/Support/raw_os_ostream.h"
-#include "llvm/Testing/Support/Annotations.h"
+#include "llvm/Testing/Annotations/Annotations.h"
 #include "llvm/Testing/Support/Error.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include <optional>
 #include <tuple>
 
 namespace clang {
@@ -26,13 +27,14 @@ namespace clangd {
 namespace {
 
 using llvm::Failed;
+using llvm::FailedWithMessage;
 using llvm::HasValue;
 
 MATCHER_P2(Pos, Line, Col, "") {
   return arg.line == int(Line) && arg.character == int(Col);
 }
 
-MATCHER_P(MacroName, Name, "") { return arg.Name == Name; }
+MATCHER_P(macroName, Name, "") { return arg.Name == Name; }
 
 /// A helper to make tests easier to read.
 Position position(int Line, int Character) {
@@ -40,13 +42,6 @@ Position position(int Line, int Character) {
   Pos.line = Line;
   Pos.character = Character;
   return Pos;
-}
-
-Range range(const std::pair<int, int> &P1, const std::pair<int, int> &P2) {
-  Range Range;
-  Range.start = position(P1.first, P1.second);
-  Range.end = position(P2.first, P2.second);
-  return Range;
 }
 
 TEST(SourceCodeTests, lspLength) {
@@ -75,6 +70,21 @@ TEST(SourceCodeTests, lspLength) {
   EXPECT_EQ(lspLength("¥"), 1UL);
   // astral
   EXPECT_EQ(lspLength("😂"), 1UL);
+}
+
+TEST(SourceCodeTests, lspLengthBadUTF8) {
+  // Results are not well-defined if source file isn't valid UTF-8.
+  // However we shouldn't crash or return something totally wild.
+  const char *BadUTF8[] = {"\xa0", "\xff\xff\xff\xff\xff"};
+
+  for (OffsetEncoding Encoding :
+       {OffsetEncoding::UTF8, OffsetEncoding::UTF16, OffsetEncoding::UTF32}) {
+    WithContextValue UTF32(kCurrentOffsetEncoding, Encoding);
+    for (const char *Bad : BadUTF8) {
+      EXPECT_GE(lspLength(Bad), 0u);
+      EXPECT_LE(lspLength(Bad), strlen(Bad));
+    }
+  }
 }
 
 // The = → 🡆 below are ASCII (1 byte), BMP (3 bytes), and astral (4 bytes).
@@ -215,8 +225,9 @@ TEST(SourceCodeTests, PositionToOffset) {
     for (unsigned I = 0; I <= L.Length; ++I)
       EXPECT_THAT_EXPECTED(positionToOffset(File, position(L.Number, I)),
                            llvm::HasValue(L.Offset + I));
-    EXPECT_THAT_EXPECTED(positionToOffset(File, position(L.Number, L.Length+1)),
-                         llvm::HasValue(L.Offset + L.Length));
+    EXPECT_THAT_EXPECTED(
+        positionToOffset(File, position(L.Number, L.Length + 1)),
+        llvm::HasValue(L.Offset + L.Length));
     EXPECT_THAT_EXPECTED(
         positionToOffset(File, position(L.Number, L.Length + 1), false),
         llvm::Failed()); // out of range
@@ -272,14 +283,6 @@ TEST(SourceCodeTests, OffsetToPosition) {
   EXPECT_THAT(offsetToPosition(File, 30), Pos(2, 11)) << "out of bounds";
 }
 
-TEST(SourceCodeTests, IsRangeConsecutive) {
-  EXPECT_TRUE(isRangeConsecutive(range({2, 2}, {2, 3}), range({2, 3}, {2, 4})));
-  EXPECT_FALSE(
-      isRangeConsecutive(range({0, 2}, {0, 3}), range({2, 3}, {2, 4})));
-  EXPECT_FALSE(
-      isRangeConsecutive(range({2, 2}, {2, 3}), range({2, 4}, {2, 5})));
-}
-
 TEST(SourceCodeTests, SourceLocationInMainFile) {
   Annotations Source(R"cpp(
     ^in^t ^foo
@@ -312,58 +315,14 @@ TEST(SourceCodeTests, SourceLocationInMainFile) {
   }
 }
 
-TEST(SourceCodeTests, GetBeginningOfIdentifier) {
-  std::string Preamble = R"cpp(
-struct Bar { int func(); };
-#define MACRO(X) void f() { X; }
-Bar* bar;
-  )cpp";
-  // First ^ is the expected beginning, last is the search position.
-  for (const std::string &Text : std::vector<std::string>{
-           "int ^f^oo();", // inside identifier
-           "int ^foo();",  // beginning of identifier
-           "int ^foo^();", // end of identifier
-           "int foo(^);",  // non-identifier
-           "^int foo();",  // beginning of file (can't back up)
-           "int ^f0^0();", // after a digit (lexing at N-1 is wrong)
-           "/^/ comments", // non-interesting token
-           "void f(int abc) { abc ^ ++; }",    // whitespace
-           "void f(int abc) { ^abc^++; }",     // range of identifier
-           "void f(int abc) { ++^abc^; }",     // range of identifier
-           "void f(int abc) { ++^abc; }",      // range of identifier
-           "void f(int abc) { ^+^+abc; }",     // range of operator
-           "void f(int abc) { ^abc^ ++; }",    // range of identifier
-           "void f(int abc) { abc ^++^; }",    // range of operator
-           "void f(int abc) { ^++^ abc; }",    // range of operator
-           "void f(int abc) { ++ ^abc^; }",    // range of identifier
-           "void f(int abc) { ^++^/**/abc; }", // range of operator
-           "void f(int abc) { ++/**/^abc; }",  // range of identifier
-           "void f(int abc) { ^abc^/**/++; }", // range of identifier
-           "void f(int abc) { abc/**/^++; }",  // range of operator
-           "void f() {^ }", // outside of identifier and operator
-           "int ^λλ^λ();",  // UTF-8 handled properly when backing up
-
-           // identifier in macro arg
-           "MACRO(bar->^func())",  // beginning of identifier
-           "MACRO(bar->^fun^c())", // inside identifier
-           "MACRO(bar->^func^())", // end of identifier
-           "MACRO(^bar->func())",  // begin identifier
-           "MACRO(^bar^->func())", // end identifier
-           "^MACRO(bar->func())",  // beginning of macro name
-           "^MAC^RO(bar->func())", // inside macro name
-           "^MACRO^(bar->func())", // end of macro name
-       }) {
-    std::string WithPreamble = Preamble + Text;
-    Annotations TestCase(WithPreamble);
-    auto AST = TestTU::withCode(TestCase.code()).build();
-    const auto &SourceMgr = AST.getSourceManager();
-    SourceLocation Actual = getBeginningOfIdentifier(
-        TestCase.points().back(), SourceMgr, AST.getLangOpts());
-    Position ActualPos = offsetToPosition(
-        TestCase.code(),
-        SourceMgr.getFileOffset(SourceMgr.getSpellingLoc(Actual)));
-    EXPECT_EQ(TestCase.points().front(), ActualPos) << Text;
-  }
+TEST(SourceCodeTests, isReservedName) {
+  EXPECT_FALSE(isReservedName(""));
+  EXPECT_FALSE(isReservedName("_"));
+  EXPECT_FALSE(isReservedName("foo"));
+  EXPECT_FALSE(isReservedName("_foo"));
+  EXPECT_TRUE(isReservedName("__foo"));
+  EXPECT_TRUE(isReservedName("_Foo"));
+  EXPECT_FALSE(isReservedName("foo__bar")) << "FIXME";
 }
 
 TEST(SourceCodeTests, CollectIdentifiers) {
@@ -389,11 +348,106 @@ TEST(SourceCodeTests, CollectWords) {
   // this is a comment
   std::string getSomeText() { return "magic word"; }
   )cpp");
-  std::set<std::string> ActualWords(Words.keys().begin(), Words.keys().end());
-  std::set<std::string> ExpectedWords = {"define",  "fizz",    "buzz",  "this",
-                                         "comment", "string", "some", "text",
-                                         "return",  "magic",  "word"};
+  std::set<StringRef> ActualWords(Words.keys().begin(), Words.keys().end());
+  std::set<StringRef> ExpectedWords = {"define",  "fizz",   "buzz", "this",
+                                       "comment", "string", "some", "text",
+                                       "return",  "magic",  "word"};
   EXPECT_EQ(ActualWords, ExpectedWords);
+}
+
+class SpelledWordsTest : public ::testing::Test {
+  std::optional<ParsedAST> AST;
+
+  std::optional<SpelledWord> tryWord(const char *Text) {
+    llvm::Annotations A(Text);
+    auto TU = TestTU::withCode(A.code());
+    AST = TU.build();
+    auto SW = SpelledWord::touching(
+        AST->getSourceManager().getComposedLoc(
+            AST->getSourceManager().getMainFileID(), A.point()),
+        AST->getTokens(), AST->getLangOpts());
+    if (A.ranges().size()) {
+      llvm::StringRef Want = A.code().slice(A.range().Begin, A.range().End);
+      EXPECT_EQ(Want, SW->Text) << Text;
+    }
+    return SW;
+  }
+
+protected:
+  SpelledWord word(const char *Text) {
+    auto Result = tryWord(Text);
+    EXPECT_TRUE(Result) << Text;
+    return Result.value_or(SpelledWord());
+  }
+
+  void noWord(const char *Text) { EXPECT_FALSE(tryWord(Text)) << Text; }
+};
+
+TEST_F(SpelledWordsTest, HeuristicBoundaries) {
+  word("// [[^foo]] ");
+  word("// [[f^oo]] ");
+  word("// [[foo^]] ");
+  word("// [[foo^]]+bar ");
+  noWord("//^ foo ");
+  noWord("// foo ^");
+}
+
+TEST_F(SpelledWordsTest, LikelyIdentifier) {
+  EXPECT_FALSE(word("// ^foo ").LikelyIdentifier);
+  EXPECT_TRUE(word("// [[^foo_bar]] ").LikelyIdentifier);
+  EXPECT_TRUE(word("// [[^fooBar]] ").LikelyIdentifier);
+  EXPECT_FALSE(word("// H^TTP ").LikelyIdentifier);
+  EXPECT_TRUE(word("// \\p [[^foo]] ").LikelyIdentifier);
+  EXPECT_TRUE(word("// @param[in] [[^foo]] ").LikelyIdentifier);
+  EXPECT_TRUE(word("// `[[f^oo]]` ").LikelyIdentifier);
+  EXPECT_TRUE(word("// bar::[[f^oo]] ").LikelyIdentifier);
+  EXPECT_TRUE(word("// [[f^oo]]::bar ").LikelyIdentifier);
+}
+
+TEST_F(SpelledWordsTest, Comment) {
+  auto W = word("// [[^foo]]");
+  EXPECT_FALSE(W.PartOfSpelledToken);
+  EXPECT_FALSE(W.SpelledToken);
+  EXPECT_FALSE(W.ExpandedToken);
+}
+
+TEST_F(SpelledWordsTest, PartOfString) {
+  auto W = word(R"( auto str = "foo [[^bar]] baz"; )");
+  ASSERT_TRUE(W.PartOfSpelledToken);
+  EXPECT_EQ(W.PartOfSpelledToken->kind(), tok::string_literal);
+  EXPECT_FALSE(W.SpelledToken);
+  EXPECT_FALSE(W.ExpandedToken);
+}
+
+TEST_F(SpelledWordsTest, DisabledSection) {
+  auto W = word(R"cpp(
+    #if 0
+    foo [[^bar]] baz
+    #endif
+    )cpp");
+  ASSERT_TRUE(W.SpelledToken);
+  EXPECT_EQ(W.SpelledToken->kind(), tok::identifier);
+  EXPECT_EQ(W.SpelledToken, W.PartOfSpelledToken);
+  EXPECT_FALSE(W.ExpandedToken);
+}
+
+TEST_F(SpelledWordsTest, Macros) {
+  auto W = word(R"cpp(
+    #define ID(X) X
+    ID(int [[^i]]);
+    )cpp");
+  ASSERT_TRUE(W.SpelledToken);
+  EXPECT_EQ(W.SpelledToken->kind(), tok::identifier);
+  EXPECT_EQ(W.SpelledToken, W.PartOfSpelledToken);
+  ASSERT_TRUE(W.ExpandedToken);
+  EXPECT_EQ(W.ExpandedToken->kind(), tok::identifier);
+
+  W = word(R"cpp(
+    #define OBJECT Expansion;
+    int [[^OBJECT]];
+    )cpp");
+  EXPECT_TRUE(W.SpelledToken);
+  EXPECT_FALSE(W.ExpandedToken) << "Expanded token is spelled differently";
 }
 
 TEST(SourceCodeTests, VisibleNamespaces) {
@@ -467,9 +521,10 @@ TEST(SourceCodeTests, VisibleNamespaces) {
           {""},
       },
   };
-  for (const auto& Case : Cases) {
+  for (const auto &Case : Cases) {
     EXPECT_EQ(Case.second,
-              visibleNamespaces(Case.first, format::getLLVMStyle()))
+              visibleNamespaces(Case.first, format::getFormattingLangOpts(
+                                                format::getLLVMStyle())))
         << Case.first;
   }
 }
@@ -481,14 +536,30 @@ TEST(SourceCodeTests, GetMacros) {
    )cpp");
   TestTU TU = TestTU::withCode(Code.code());
   auto AST = TU.build();
-  auto Loc = getBeginningOfIdentifier(Code.point(), AST.getSourceManager(),
-                                      AST.getLangOpts());
-  auto Result = locateMacroAt(Loc, AST.getPreprocessor());
+  auto CurLoc = sourceLocationInMainFile(AST.getSourceManager(), Code.point());
+  ASSERT_TRUE(bool(CurLoc));
+  const auto *Id = syntax::spelledIdentifierTouching(*CurLoc, AST.getTokens());
+  ASSERT_TRUE(Id);
+  auto Result = locateMacroAt(*Id, AST.getPreprocessor());
   ASSERT_TRUE(Result);
-  EXPECT_THAT(*Result, MacroName("MACRO"));
+  EXPECT_THAT(*Result, macroName("MACRO"));
 }
 
-TEST(SourceCodeTests, IsInsideMainFile){
+TEST(SourceCodeTests, WorksAtBeginOfFile) {
+  Annotations Code("^MACRO");
+  TestTU TU = TestTU::withCode(Code.code());
+  TU.HeaderCode = "#define MACRO int x;";
+  auto AST = TU.build();
+  auto CurLoc = sourceLocationInMainFile(AST.getSourceManager(), Code.point());
+  ASSERT_TRUE(bool(CurLoc));
+  const auto *Id = syntax::spelledIdentifierTouching(*CurLoc, AST.getTokens());
+  ASSERT_TRUE(Id);
+  auto Result = locateMacroAt(*Id, AST.getPreprocessor());
+  ASSERT_TRUE(Result);
+  EXPECT_THAT(*Result, macroName("MACRO"));
+}
+
+TEST(SourceCodeTests, IsInsideMainFile) {
   TestTU TU;
   TU.HeaderCode = R"cpp(
     #define DEFINE_CLASS(X) class X {};
@@ -499,23 +570,28 @@ TEST(SourceCodeTests, IsInsideMainFile){
     class Header {};
   )cpp";
   TU.Code = R"cpp(
+    #define DEFINE_MAIN4 class Main4{};
     class Main1 {};
     DEFINE_CLASS(Main2)
     DEFINE_YY
     class Main {};
+    DEFINE_MAIN4
   )cpp";
   TU.ExtraArgs.push_back("-DHeader=Header3");
   TU.ExtraArgs.push_back("-DMain=Main3");
   auto AST = TU.build();
-  const auto& SM = AST.getSourceManager();
+  const auto &SM = AST.getSourceManager();
   auto DeclLoc = [&AST](llvm::StringRef Name) {
     return findDecl(AST, Name).getLocation();
   };
   for (const auto *HeaderDecl : {"Header1", "Header2", "Header3"})
-    EXPECT_FALSE(isInsideMainFile(DeclLoc(HeaderDecl), SM));
+    EXPECT_FALSE(isInsideMainFile(DeclLoc(HeaderDecl), SM)) << HeaderDecl;
 
-  for (const auto *MainDecl : {"Main1", "Main2", "Main3", "YY"})
-    EXPECT_TRUE(isInsideMainFile(DeclLoc(MainDecl), SM));
+  for (const auto *MainDecl : {"Main1", "Main2", "Main3", "Main4", "YY"})
+    EXPECT_TRUE(isInsideMainFile(DeclLoc(MainDecl), SM)) << MainDecl;
+
+  // Main4 is *spelled* in the preamble, but in the main-file part of it.
+  EXPECT_TRUE(isInsideMainFile(SM.getSpellingLoc(DeclLoc("Main4")), SM));
 }
 
 // Test for functions toHalfOpenFileRange and getHalfOpenFileRange
@@ -558,7 +634,7 @@ TEST(SourceCodeTests, HalfOpenFileRange) {
     const NamedDecl &Decl = findUnqualifiedDecl(AST, Name);
     auto FileRange = toHalfOpenFileRange(SM, LangOpts, Decl.getSourceRange());
     SCOPED_TRACE("Checking range: " + Name);
-    ASSERT_NE(FileRange, llvm::None);
+    ASSERT_NE(FileRange, std::nullopt);
     Range HalfOpenRange = SourceRangeToRange(*FileRange);
     EXPECT_EQ(HalfOpenRange, Test.ranges(Name)[0]);
   };
@@ -587,7 +663,7 @@ TEST(SourceCodeTests, HalfOpenFileRangePathologicalPreprocessor) {
   const auto &Func = cast<FunctionDecl>(findDecl(AST, "test"));
   const auto &Body = cast<CompoundStmt>(Func.getBody());
   const auto &Loop = cast<WhileStmt>(*Body->child_begin());
-  llvm::Optional<SourceRange> Range = toHalfOpenFileRange(
+  std::optional<SourceRange> Range = toHalfOpenFileRange(
       AST.getSourceManager(), AST.getLangOpts(), Loop->getSourceRange());
   ASSERT_TRUE(Range) << "Failed to get file range";
   EXPECT_EQ(AST.getSourceManager().getFileOffset(Range->getBegin()),
@@ -607,7 +683,7 @@ $foo^#include "foo.inc"
   TU.AdditionalFiles["foo.inc"] = "int foo;\n";
   TU.AdditionalFiles["bar.inc"] = "int bar;\n";
   auto AST = TU.build();
-  const auto& SM = AST.getSourceManager();
+  const auto &SM = AST.getSourceManager();
 
   FileID Foo = SM.getFileID(findDecl(AST, "foo").getLocation());
   EXPECT_EQ(SM.getFileOffset(includeHashLoc(Foo, SM)),
@@ -671,8 +747,9 @@ TEST(SourceCodeTests, GetEligiblePoints) {
   for (auto Case : Cases) {
     Annotations Test(Case.Code);
 
-    auto Res = getEligiblePoints(Test.code(), Case.FullyQualifiedName,
-                                 format::getLLVMStyle());
+    auto Res = getEligiblePoints(
+        Test.code(), Case.FullyQualifiedName,
+        format::getFormattingLangOpts(format::getLLVMStyle()));
     EXPECT_THAT(Res.EligiblePoints, testing::ElementsAreArray(Test.points()))
         << Test.code();
     EXPECT_EQ(Res.EnclosingNamespace, Case.EnclosingNamespace) << Test.code();
@@ -721,6 +798,277 @@ TEST(SourceCodeTests, isHeaderFile) {
   // want to treat it as a header.
   LangOpts.IsHeaderFile = false;
   EXPECT_TRUE(isHeaderFile("header.h", LangOpts));
+}
+
+TEST(SourceCodeTests, isKeywords) {
+  LangOptions LangOpts;
+  LangOpts.CPlusPlus20 = true;
+  EXPECT_TRUE(isKeyword("int", LangOpts));
+  EXPECT_TRUE(isKeyword("return", LangOpts));
+  EXPECT_TRUE(isKeyword("co_await", LangOpts));
+
+  // these are identifiers (not keywords!) with special meaning in some
+  // contexts.
+  EXPECT_FALSE(isKeyword("final", LangOpts));
+  EXPECT_FALSE(isKeyword("override", LangOpts));
+}
+
+struct IncrementalTestStep {
+  llvm::StringRef Src;
+  llvm::StringRef Contents;
+};
+
+int rangeLength(llvm::StringRef Code, const Range &Rng) {
+  llvm::Expected<size_t> Start = positionToOffset(Code, Rng.start);
+  llvm::Expected<size_t> End = positionToOffset(Code, Rng.end);
+  assert(Start);
+  assert(End);
+  return *End - *Start;
+}
+
+/// Send the changes one by one to updateDraft, verify the intermediate results.
+void stepByStep(llvm::ArrayRef<IncrementalTestStep> Steps) {
+  std::string Code = Annotations(Steps.front().Src).code().str();
+
+  for (size_t I = 1; I < Steps.size(); I++) {
+    Annotations SrcBefore(Steps[I - 1].Src);
+    Annotations SrcAfter(Steps[I].Src);
+    llvm::StringRef Contents = Steps[I - 1].Contents;
+    TextDocumentContentChangeEvent Event{
+        SrcBefore.range(),
+        rangeLength(SrcBefore.code(), SrcBefore.range()),
+        Contents.str(),
+    };
+
+    EXPECT_THAT_ERROR(applyChange(Code, Event), llvm::Succeeded());
+    EXPECT_EQ(Code, SrcAfter.code());
+  }
+}
+
+TEST(ApplyEditsTest, Simple) {
+  // clang-format off
+  IncrementalTestStep Steps[] =
+    {
+      // Replace a range
+      {
+R"cpp(static int
+hello[[World]]()
+{})cpp",
+        "Universe"
+      },
+      // Delete a range
+      {
+R"cpp(static int
+hello[[Universe]]()
+{})cpp",
+        ""
+      },
+      // Add a range
+      {
+R"cpp(static int
+hello[[]]()
+{})cpp",
+        "Monde"
+      },
+      {
+R"cpp(static int
+helloMonde()
+{})cpp",
+        ""
+      }
+    };
+  // clang-format on
+
+  stepByStep(Steps);
+}
+
+TEST(ApplyEditsTest, MultiLine) {
+  // clang-format off
+  IncrementalTestStep Steps[] =
+    {
+      // Replace a range
+      {
+R"cpp(static [[int
+helloWorld]]()
+{})cpp",
+R"cpp(char
+welcome)cpp"
+      },
+      // Delete a range
+      {
+R"cpp(static char[[
+welcome]]()
+{})cpp",
+        ""
+      },
+      // Add a range
+      {
+R"cpp(static char[[]]()
+{})cpp",
+        R"cpp(
+cookies)cpp"
+      },
+      // Replace the whole file
+      {
+R"cpp([[static char
+cookies()
+{}]])cpp",
+        R"cpp(#include <stdio.h>
+)cpp"
+      },
+      // Delete the whole file
+      {
+        R"cpp([[#include <stdio.h>
+]])cpp",
+        "",
+      },
+      // Add something to an empty file
+      {
+        "[[]]",
+        R"cpp(int main() {
+)cpp",
+      },
+      {
+        R"cpp(int main() {
+)cpp",
+        ""
+      }
+    };
+  // clang-format on
+
+  stepByStep(Steps);
+}
+
+TEST(ApplyEditsTest, WrongRangeLength) {
+  std::string Code = "int main() {}\n";
+
+  TextDocumentContentChangeEvent Change;
+  Change.range.emplace();
+  Change.range->start.line = 0;
+  Change.range->start.character = 0;
+  Change.range->end.line = 0;
+  Change.range->end.character = 2;
+  Change.rangeLength = 10;
+
+  EXPECT_THAT_ERROR(applyChange(Code, Change),
+                    FailedWithMessage("Change's rangeLength (10) doesn't match "
+                                      "the computed range length (2)."));
+}
+
+// Test that we correct observed buggy edits from Neovim.
+TEST(ApplyEditsTets, BuggyNeovimEdits) {
+  TextDocumentContentChangeEvent Change;
+  Change.range.emplace();
+
+  // https://github.com/neovim/neovim/issues/17085
+  // Adding a blank line after a (missing) newline
+  std::string Code = "a";
+  Change.range->start.line = 1;
+  Change.range->start.character = 0;
+  Change.range->end.line = 1;
+  Change.range->start.character = 0;
+  Change.rangeLength = 0;
+  Change.text = "\n";
+  EXPECT_THAT_ERROR(applyChange(Code, Change), llvm::Succeeded());
+  EXPECT_EQ(Code, "a\n\n");
+
+  // https://github.com/neovim/neovim/issues/17085#issuecomment-1269162264
+  // Replacing the (missing) newline with \n\n in an empty file.
+  Code = "";
+  Change.range->start.line = 0;
+  Change.range->start.character = 0;
+  Change.range->end.line = 1;
+  Change.range->end.character = 0;
+  Change.rangeLength = 1;
+  Change.text = "\n\n";
+
+  EXPECT_THAT_ERROR(applyChange(Code, Change), llvm::Succeeded());
+  EXPECT_EQ(Code, "\n\n");
+
+  // We do not apply the heuristic fixes if the rangeLength doesn't match.
+  Code = "";
+  Change.rangeLength = 0;
+  EXPECT_THAT_ERROR(applyChange(Code, Change),
+                    FailedWithMessage("Change's rangeLength (0) doesn't match "
+                                      "the computed range length (1)."));
+}
+
+TEST(ApplyEditsTest, EndBeforeStart) {
+  std::string Code = "int main() {}\n";
+
+  TextDocumentContentChangeEvent Change;
+  Change.range.emplace();
+  Change.range->start.line = 0;
+  Change.range->start.character = 5;
+  Change.range->end.line = 0;
+  Change.range->end.character = 3;
+
+  EXPECT_THAT_ERROR(
+      applyChange(Code, Change),
+      FailedWithMessage(
+          "Range's end position (0:3) is before start position (0:5)"));
+}
+
+TEST(ApplyEditsTest, StartCharOutOfRange) {
+  std::string Code = "int main() {}\n";
+
+  TextDocumentContentChangeEvent Change;
+  Change.range.emplace();
+  Change.range->start.line = 0;
+  Change.range->start.character = 100;
+  Change.range->end.line = 0;
+  Change.range->end.character = 100;
+  Change.text = "foo";
+
+  EXPECT_THAT_ERROR(
+      applyChange(Code, Change),
+      FailedWithMessage("utf-16 offset 100 is invalid for line 0"));
+}
+
+TEST(ApplyEditsTest, EndCharOutOfRange) {
+  std::string Code = "int main() {}\n";
+
+  TextDocumentContentChangeEvent Change;
+  Change.range.emplace();
+  Change.range->start.line = 0;
+  Change.range->start.character = 0;
+  Change.range->end.line = 0;
+  Change.range->end.character = 100;
+  Change.text = "foo";
+
+  EXPECT_THAT_ERROR(
+      applyChange(Code, Change),
+      FailedWithMessage("utf-16 offset 100 is invalid for line 0"));
+}
+
+TEST(ApplyEditsTest, StartLineOutOfRange) {
+  std::string Code = "int main() {}\n";
+
+  TextDocumentContentChangeEvent Change;
+  Change.range.emplace();
+  Change.range->start.line = 100;
+  Change.range->start.character = 0;
+  Change.range->end.line = 100;
+  Change.range->end.character = 0;
+  Change.text = "foo";
+
+  EXPECT_THAT_ERROR(applyChange(Code, Change),
+                    FailedWithMessage("Line value is out of range (100)"));
+}
+
+TEST(ApplyEditsTest, EndLineOutOfRange) {
+  std::string Code = "int main() {}\n";
+
+  TextDocumentContentChangeEvent Change;
+  Change.range.emplace();
+  Change.range->start.line = 0;
+  Change.range->start.character = 0;
+  Change.range->end.line = 100;
+  Change.range->end.character = 0;
+  Change.text = "foo";
+
+  EXPECT_THAT_ERROR(applyChange(Code, Change),
+                    FailedWithMessage("Line value is out of range (100)"));
 }
 
 } // namespace

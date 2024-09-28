@@ -1,241 +1,381 @@
 //===- Utils.h - Utilities to support the Linalg dialect --------*- C++ -*-===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef MLIR_DIALECT_LINALG_UTILS_H_
-#define MLIR_DIALECT_LINALG_UTILS_H_
+#ifndef MLIR_DIALECT_LINALG_UTILS_UTILS_H
+#define MLIR_DIALECT_LINALG_UTILS_UTILS_H
 
-#include "mlir/Dialect/Linalg/IR/LinalgOps.h"
-#include "mlir/Dialect/LoopOps/LoopOps.h"
-#include "mlir/Dialect/StandardOps/Ops.h"
-#include "mlir/EDSC/Helpers.h"
-
-#include "llvm/ADT/SetVector.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/Utils/StructuredOpsUtils.h"
+#include "llvm/ADT/StringSet.h"
+#include <optional>
 
 namespace mlir {
 class AffineExpr;
 class AffineMap;
-class OperationFolder;
+class PatternRewriter;
 
-namespace edsc {
+namespace affine {
+class AffineForOp;
+} // namespace affine
 
-/// A LoopRangeBuilder is a generic NestedBuilder for loop.for operations.
-/// More specifically it is meant to be used as a temporary object for
-/// representing any nested MLIR construct that is "related to" an mlir::Value
-/// (for now an induction variable).
-class LoopRangeBuilder : public NestedBuilder {
-public:
-  /// Constructs a new loop.for and captures the associated induction
-  /// variable. A ValueHandle pointer is passed as the first argument and is the
-  /// *only* way to capture the loop induction variable.
-  LoopRangeBuilder(ValueHandle *iv, ValueHandle range);
-  LoopRangeBuilder(ValueHandle *iv, Value range);
-  LoopRangeBuilder(ValueHandle *iv, SubViewOp::Range range);
-
-  LoopRangeBuilder(const LoopRangeBuilder &) = delete;
-  LoopRangeBuilder(LoopRangeBuilder &&) = default;
-
-  LoopRangeBuilder &operator=(const LoopRangeBuilder &) = delete;
-  LoopRangeBuilder &operator=(LoopRangeBuilder &&) = default;
-
-  /// The only purpose of this operator is to serve as a sequence point so that
-  /// the evaluation of `fun` (which build IR snippets in a scoped fashion) is
-  /// scoped within a LoopRangeBuilder.
-  ValueHandle operator()(std::function<void(void)> fun = nullptr);
-};
-
-/// Helper class to sugar building loop.for loop nests from ranges.
-/// This is similar to edsc::AffineLoopNestBuilder except it works on ranges
-/// directly. In the current implementation it produces loop.for operations.
-class LoopNestRangeBuilder {
-public:
-  LoopNestRangeBuilder(ArrayRef<edsc::ValueHandle *> ivs,
-                       ArrayRef<edsc::ValueHandle> ranges);
-  LoopNestRangeBuilder(ArrayRef<edsc::ValueHandle *> ivs,
-                       ArrayRef<Value> ranges);
-  LoopNestRangeBuilder(ArrayRef<edsc::ValueHandle *> ivs,
-                       ArrayRef<SubViewOp::Range> ranges);
-  edsc::ValueHandle operator()(std::function<void(void)> fun = nullptr);
-
-private:
-  SmallVector<LoopRangeBuilder, 4> loops;
-};
-
-/// Helper template class for building loop.for and affine.loop nests from
-/// ranges.
-template <typename LoopTy> class GenericLoopNestRangeBuilder {
-public:
-  GenericLoopNestRangeBuilder(ArrayRef<edsc::ValueHandle *> ivs,
-                              ArrayRef<Value> ranges);
-  void operator()(std::function<void(void)> fun = nullptr) { (*builder)(fun); }
-
-private:
-  typedef typename std::conditional<std::is_same<LoopTy, AffineForOp>::value,
-                                    AffineLoopNestBuilder,
-                                    LoopNestRangeBuilder>::type BuilderType;
-  std::unique_ptr<BuilderType> builder;
-};
-
-} // namespace edsc
+namespace tensor {
+class ExtractSliceOp;
+} // namespace tensor
 
 namespace linalg {
-class LinalgDependenceGraph;
 
+//===----------------------------------------------------------------------===//
+// Utilities for inferring various semantics properties of Linalg ops.
+//===----------------------------------------------------------------------===//
+
+//===----------------------------------------------------------------------===//
+// General utilities
+//===----------------------------------------------------------------------===//
+
+/// Check if all indexing maps are projected permutations.
+bool allIndexingsAreProjectedPermutation(LinalgOp op);
+
+/// Detect whether `r` has only ConstantOp, ElementwiseMappable and YieldOp.
+bool hasOnlyScalarElementwiseOp(Region &r);
+
+/// Check if a LinalgOp is an element-wise operation.
+bool isElementwise(LinalgOp op);
+
+/// Check if iterator type has "parallel" semantics.
+bool isParallelIterator(utils::IteratorType iteratorType);
+
+/// Check if iterator type  has "reduction" semantics.
+bool isReductionIterator(utils::IteratorType iteratorType);
+
+/// Create a tensor::PadOp that pads `source` to the size of the statically
+/// sized `type` whose static sizes are assumed to be greater than the dynamic
+/// `source` size. The padding introduces trailing `pad` values until the
+/// target size is met. If `source` is defined by one or more LinalgOps that
+/// have been padded with the same value and sizes, return their padded result
+/// instead of creating a tensor::PadOp.
+///
+/// Example:
+/// ```
+/// %0 = tensor.extract_slice %arg0 [%iv0, %iv1] [%sz0, %sz1]
+/// %1 = tensor.pad %0 low[0, 0] high[...] { tensor.yield %cst }
+/// %2 = linalg.matmul ins(...) outs(%1)
+/// %3 = tensor.extract_slice %2 [0, 0] [%sz0, %sz1]
+/// ```
+/// makeComposedPadHighOp(source=%3, pad=%cst) returns %2
+/// makeComposedPadHighOp(source=%3, pad=%other_cst) returns %4
+/// ```
+/// %4 = tensor.pad %3 low[0, 0] high[...] { tensor.yield %other_cst }
+/// ```
+Value makeComposedPadHighOp(OpBuilder &b, Location loc, RankedTensorType type,
+                            Value source, Value pad, bool nofold);
+
+/// Returns a GenericOp that transposes `inputTensor` into `outputTensor`
+/// using `transposeVector` to permute the `inputTensor` dimensions.
+GenericOp makeTransposeOp(OpBuilder &b, Location loc, Value inputTensor,
+                          Value outputTensor,
+                          ArrayRef<int64_t> transposeVector);
+
+/// Returns GenericOp that copies an n-D memref. Unlike the current
+/// implementation of memref::CopyOp, this op can further tile, lower to loops
+/// or vectorize.
+GenericOp makeMemRefCopyOp(OpBuilder &b, Location loc, Value from, Value to);
+
+/// Get the reassociation maps to fold the result of a extract_slice (or
+/// source of a insert_slice) operation with given offsets, and sizes to its
+/// rank-reduced version. This is only done for the cases where the size is 1
+/// and offset is 0. Strictly speaking the offset 0 is not required in
+/// general, but non-zero offsets are not handled by SPIR-V backend at this
+/// point (and potentially cannot be handled).
+std::optional<SmallVector<ReassociationIndices>>
+getReassociationMapForFoldingUnitDims(ArrayRef<OpFoldResult> mixedSizes);
+
+//===----------------------------------------------------------------------===//
+// Fusion / Tiling utilities
+//===----------------------------------------------------------------------===//
+
+/// The type of loops to be generated during tiling.
+enum class LinalgTilingLoopType {
+  Loops = 0,
+  AffineLoops = 1,
+  ParallelLoops = 2
+};
+
+/// Computes tile offsets, given a list of loop `ivs` and `tileSizes`. In case
+/// a tile size is zero (i.e., no tiling), the corresponding offset is also
+/// zero.
+SmallVector<OpFoldResult> computeTileOffsets(OpBuilder &b, Location loc,
+                                             ArrayRef<OpFoldResult> ivs,
+                                             ArrayRef<OpFoldResult> tileSizes);
+
+/// Computes tile sizes, given a list of `tileSizes` and dimension
+/// sizes (`sizeBounds`). In case a tile size is zero (i.e., no tiling), the
+/// corresponding result size is the corresponding value from `sizeBounds`.
+/// Note: The returned tile sizes are closed intervals.
+SmallVector<OpFoldResult> computeTileSizes(OpBuilder &b, Location loc,
+                                           ArrayRef<OpFoldResult> tileSizes,
+                                           ArrayRef<OpFoldResult> sizeBounds);
+
+/// Returns the list of tensor output types produced when the given structured
+/// operation `op` is applied to the given `operands`. Note that `operands`
+/// are not necessarily the actual operands of `op`.
+SmallVector<Type> getTensorOutputTypes(LinalgOp op, ValueRange operands);
+
+/// Creates `insert_slice` ops that insert `results` back into larger tensors
+/// they were originally extracted from with `extract_slice` before being
+/// passed as `operands` to the given structured operation `op` or its clone.
+/// Note that `operands` are not necessarily the actual operands of `op`, the
+/// operation serves only as metadata container for operand types and
+/// positions.
+SmallVector<Value> insertSlicesBack(OpBuilder &builder, Location loc,
+                                    LinalgOp op, ValueRange operands,
+                                    ValueRange results);
+
+/// A struct containg offsets-sizes-strides arguments of the tiled shape.
+struct SliceParameters {
+  SmallVector<OpFoldResult> offsets;
+  SmallVector<OpFoldResult> sizes;
+  SmallVector<OpFoldResult> strides;
+};
+
+/// Computes SliceParameters for a single `valueToTile` assuming that its user
+/// is being tiled with the given loop bounds `lbs` and `ubs` and the tile
+/// sizes `tileSizes`.
+///
+/// `omitPartialTileCheck` controls whether to omit the partial/boundary tile
+/// condition check in cases where we statically know that it is unnecessary.
+SliceParameters
+computeSliceParameters(OpBuilder &builder, Location loc, Value valueToTile,
+                       ArrayRef<OpFoldResult> tileSizes, AffineMap map,
+                       ArrayRef<OpFoldResult> lbs, ArrayRef<OpFoldResult> ubs,
+                       ArrayRef<OpFoldResult> subShapeSizes,
+                       bool omitPartialTileCheck);
+
+/// Computes SliceParamaters for all `valuesToTile` of the given `linalgOp`,
+/// assuming `linalgOp` is being fused into a loop nest. Calls
+/// `computeSliceParameters` for every individual value.
+///
+/// Note that a constant zero in `tileSizes` means no tiling at that implicit
+/// loop. The number of non-zero values in `tileSizes` should be equal to the
+/// number of values in `ivs`.
+///
+/// Some of the `valuesToTile` won't be affected by tiling. For these values,
+/// std::nullopt will be returned.
+SmallVector<std::optional<SliceParameters>>
+computeAllSliceParameters(OpBuilder &builder, Location loc, LinalgOp linalgOp,
+                          ValueRange valuesToTile, ArrayRef<OpFoldResult> ivs,
+                          ArrayRef<OpFoldResult> tileSizes,
+                          ArrayRef<OpFoldResult> sizeBounds,
+                          bool omitPartialTileCheck);
+
+/// Creates an extract_slice/subview op for a single `valueToTile` with
+/// `builder`. This new operation extracts a tile of `valueToTile`, starting
+/// at offsets `lbs` and with sizes `subShapeSizes`. `omitPartialTileCheck`
+/// controls whether to omit the partial/boundary tile condition check in
+/// cases where we statically know that it is unnecessary.
+Value makeTiledShape(OpBuilder &builder, Location loc, Value valueToTile,
+                     ArrayRef<OpFoldResult> tileSizes, AffineMap map,
+                     ArrayRef<OpFoldResult> lbs, ArrayRef<OpFoldResult> ubs,
+                     ArrayRef<OpFoldResult> subShapeSizes,
+                     bool omitPartialTileCheck);
+
+/// Creates extract_slice/subview ops for all `valuesToTile` of the given
+/// `linalgOp` with `builder`, assuming `linalgOp` is being fused into a loop
+/// nest for tiling with the given induction variables `ivs` and tile sizes
+/// `tileSizes`. `sizeBounds` are the iteration space bounds for *all* the
+/// implicit loops in `linalgOp`. `omitPartialTileCheck` controls whether to
+/// omit the partial/boundary tile condition check in cases where we
+/// statically know that it is unnecessary.
+///
+/// Note that a constant zero in `tileSizes` means no tiling at that implicit
+/// loop. The number of non-zero values in `tileSizes` should be equal to the
+/// number of values in `ivs`.
+SmallVector<Value> makeTiledShapes(OpBuilder &builder, Location loc,
+                                   LinalgOp linalgOp, ValueRange valuesToTile,
+                                   ArrayRef<OpFoldResult> ivs,
+                                   ArrayRef<OpFoldResult> tileSizes,
+                                   ArrayRef<OpFoldResult> sizeBounds,
+                                   bool omitPartialTileCheck);
+
+/// Add the specified offsets to any `linalg.index` ops contained in the given
+/// `linalgOp`. The offsets are provided in the same order as iteration space
+/// dimensions. Null offests are assumed to be zero.
+void offsetIndices(OpBuilder &b, LinalgOp linalgOp,
+                   ArrayRef<OpFoldResult> offests);
+void offsetIndices(RewriterBase &b, LinalgOp linalgOp,
+                   ArrayRef<OpFoldResult> offests);
+
+/// A struct containing the Linalg producer before and after fusion.
+/// When operating on tensors, `fusedProducer` may feed into a `tensor.cast`
+/// op before the consumer Linalg op, until enough canonicalizations have
+/// applied.
 struct FusionInfo {
   LinalgOp originalProducer;
   LinalgOp fusedProducer;
 };
 
-/// Checks whether the specific `producer` is the last write to exactly the
-/// whole `consumedView`. This checks structural dominance, that the dependence
-/// is a RAW without any interleaved write to any piece of `consumedView`.
-bool isProducerLastWriteOfView(const LinalgDependenceGraph &graph,
-                               LinalgOp consumer, Value consumedView,
-                               LinalgOp producer);
+/// Tensor counterpart of `fuseProducerOfBuffer`.
+/// This implements the fusion part of the "tileAndFuse on tensors"
+/// transformation and thus requires the `consumerOpOperand` to be a
+/// `extract_slice` op (generally obtained by applying the tiling
+/// transformation).
+FailureOr<FusionInfo> fuseProducerOfTensor(OpBuilder &b,
+                                           OpOperand &consumerOpOperand);
 
-/// Checks whether fusing the specific `producer` of the `consumedView` is
-/// feasible. This checks `producer` is the last write of `consumedView` and
-/// that no interleaved dependence would be violated (RAW, WAR or WAW).
-bool isFusableInto(const LinalgDependenceGraph &graph, LinalgOp consumer,
-                   Value consumedView, LinalgOp producer);
+/// Tensor counterpart of `fuseProducerOfBuffer`.
+/// This implements the fusion part of the "tileAndFuse on tensors"
+/// transformation and thus requires the `consumerOpOperand` to be a
+/// `extract_slice` op (generally obtained by applying the tiling
+/// transformation). Assumes `producerOfTensor` is a Linalg op that produces
+/// `consumerOpOperand`.
+FailureOr<FusionInfo> fuseProducerOfTensor(OpBuilder &b,
+                                           OpResult producerOpResult,
+                                           OpOperand &consumerOpOperand);
 
-/// Fuses producer into consumer if the producer is structurally feasible and
-/// the fusion would not violate dependencies.
-/// When non-null, the optional pointer `folder` is used to call into the
-/// `createAndFold` builder method. If `folder` is null, the regular `create`
-/// method is called.
-Optional<FusionInfo> fuseProducerOf(OpBuilder &b, LinalgOp consumer,
-                                    unsigned consumerIdx,
-                                    const LinalgDependenceGraph &graph,
-                                    OperationFolder *folder = nullptr);
+//===----------------------------------------------------------------------===//
+// Distribution utilities
+//===----------------------------------------------------------------------===//
 
-/// Returns the linearized list of all view dimensions in a linalgOp. Applying
-/// the inverse, concatenated loopToOperandRangeMaps to this list allows the
-/// derivation of loop ranges for any linalgOp.
-template <typename ConcreteOp>
-SmallVector<Value, 8> getViewSizes(ConcreteOp linalgOp) {
-  SmallVector<Value, 8> res;
-  for (auto v : linalgOp.getInputsAndOutputBuffers()) {
-    MemRefType t = v.getType().template cast<MemRefType>();
-    for (unsigned i = 0; i < t.getRank(); ++i)
-      res.push_back(edsc::intrinsics::dim(v, i));
-  }
-  return res;
-}
+/// Scheme used to distribute loops to processors.
+enum class DistributionMethod {
+  /// Cyclic distribution where no assumption is made about the dynamic
+  /// relationship between number of processors and number of iterations of
+  /// the
+  /// distributed loop. Distributes the following loop
+  ///
+  /// scf.parallel (%iv) = (%lb) to (%ub) step (%step)
+  ///
+  /// to
+  ///
+  /// scf.parallel(%iv)= (%lb + %procId * %step) to (%ub) step (%step *
+  /// %nprocs)
+  Cyclic = 0,
 
-/// Returns the values obtained by applying `map` to the list of values.
-/// When non-null, the optional pointer `folder` is used to call into the
-/// `createAndFold` builder method. If `folder` is null, the regular `create`
-/// method is called.
-SmallVector<Value, 4> applyMapToValues(OpBuilder &b, Location loc,
-                                       AffineMap map, ArrayRef<Value> values,
-                                       OperationFolder *folder = nullptr);
+  /// Cyclic distribution where the number of processors can be assumed to be
+  /// more than or equal to the number of iterations of the distributed loop.
+  /// In
+  /// such cases, a simple in-bounds check is enough (instead of materializing
+  /// a
+  /// loop). Distributes the following loop
+  ///
+  /// scf.parallel (%iv) = (%lb) to (%ub) step (%step)
+  ///
+  /// to
+  ///
+  /// %iv = %lb + %procId * %step
+  /// %cond = arith.cmpi "slt", %iv, %ub
+  /// scf.if %cond {
+  ///   ...
+  /// }
+  CyclicNumProcsGeNumIters = 1,
 
-struct TiledLinalgOp {
-  LinalgOp op;
-  SmallVector<loop::ForOp, 8> loops;
+  /// Cyclic distribution where the number of processors can be assumed to be
+  ///  equal to the number of iterations of the distributed loop. In such
+  ///  cases,
+  ///  no bounds check is needed. Distributes the following loop
+  ///
+  /// scf.parallel (%iv) = (%lb) to (%ub) step (%step)
+  ///
+  /// to
+  ///
+  /// %iv = %lb + %procId * %step
+  CyclicNumProcsEqNumIters = 2,
+
+  /// No Distribution.
+  None = 3
 };
 
-/// Performs standalone tiling of a single LinalgOp by `tileSizes`.
-/// and permute the loop nest according to `permutation`
-/// The permutation is expressed as a list of integers that specify
-/// the new ordering of the loop nest. The length of `permutation`
-/// must be equal to the length of `tileSizes`.
-/// E.g. the permutation `(i,j,k) -> (j,k,i)` will be expressed with
-/// `permutation = [1,2,0]`. All values in `permutation` must be
-/// integers, in the range 0..`tileSizes.size()` without duplications
-/// (i.e. `[1,1,2]` is an invalid permutation). An empty list
-/// states for the identity permutation.
-/// Returns a struct containing the tiled loops in the specified order
-/// and the cloned op if successful, llvm::None otherwise.
-/// When non-null, the optional pointer `folder` is used to call into the
-/// `createAndFold` builder method. If `folder` is null, the regular `create`
-/// method is called.
-Optional<TiledLinalgOp> tileLinalgOp(OpBuilder &b, LinalgOp op,
-                                     ArrayRef<Value> tileSizes,
-                                     ArrayRef<unsigned> permutation = {},
-                                     OperationFolder *folder = nullptr);
+/// Callback function type used to get processor ID, and number of processors
+/// used for distribution for all parallel loops generated.
+struct ProcInfo {
+  Value procId;
+  Value nprocs;
+  DistributionMethod distributionMethod;
+};
+using ProcInfoCallBackFn = std::function<SmallVector<ProcInfo>(
+    OpBuilder &b, Location loc, ArrayRef<Range> parallelLoopRanges)>;
 
-/// Performs standalone tiling of a single LinalgOp by constant `tileSizes`.
-/// and permute the loop nest according to `permutation`
-/// The permutation is expressed as a list of integers that specify
-/// the new ordering of the loop nest. The length of `permutation`
-/// must be equal to the length of `tileSizes`.
-/// E.g. the permutation `(i,j,k) -> (j,k,i)` will be expressed with
-/// `permutation = [1,2,0]`. All values in `permutation` must be
-/// integers, in the range 0..`tileSizes.size()` without duplications
-/// (i.e. `[1,1,2]` is an invalid permutation). An empty list
-/// states for the identity permutation.
-/// Returns a struct containing the tiled loops in the specified order
-/// and the cloned op if successful, llvm::None otherwise.
-/// When non-null, the optional pointer `folder` is used to call into the
-/// `createAndFold` builder method. If `folder` is null, the regular `create`
-/// method is called.
-Optional<TiledLinalgOp> tileLinalgOp(OpBuilder &b, LinalgOp op,
-                                     ArrayRef<int64_t> tileSizes,
-                                     ArrayRef<unsigned> permutation = {},
-                                     OperationFolder *folder = nullptr);
-
-template <typename... Args>
-Optional<TiledLinalgOp> tileLinalgOperation(OpBuilder &b, Operation *op,
-                                            Args... args) {
-  return tileLinalgOp(b, cast<LinalgOp>(op), args...);
-}
-
-struct PromotionInfo {
-  Value buffer;
-  Value fullLocalView;
-  Value partialLocalView;
+/// Options that allow distribution of loops generated in Linalg transforms to
+/// processors while generating the loops.
+struct LinalgLoopDistributionOptions {
+  /// Callback function that returns the Values for processor ID (`procId`),
+  /// and number of processors (`nprocs`) used to execute the parallel loops.
+  /// The number of `{procId, nprocs}` pairs returned must be equal to the
+  /// number of `parallelLoopRanges` passed into the callback. The
+  /// `parallelLoopRanges` are ranges of the outer parallel loops of the
+  /// operation that do have non-zero tile sizes specified.
+  ProcInfoCallBackFn procInfo;
 };
 
-/// Promotes the `subViews` into a new buffer allocated at the insertion point
-/// `b`. For now, promotion occurs in 3 steps:
-///   1. Create a new buffer for a full tile (i.e. not clipped at the boundary).
-///   2. Take a full view on the buffer and `linalg.fill` it with zeros (use
-///      float zero for now).
-///   3. Take a partial slice of the full view in step 2. and copy into it.
-/// Infers statically sized buffers from subViews unless `dynamicBuffers` is
-/// true.
-///
-/// Returns a list of PromotionInfo which hold the promoted buffer and the
-/// full and partial views indexing into the buffer.
-SmallVector<PromotionInfo, 8>
-promoteSubViews(OpBuilder &b, Location loc, ArrayRef<Value> subViews,
-                bool dynamicBuffers = false, OperationFolder *folder = nullptr);
+/// Update the `lb`, `ub` and `step` to get per processor `lb`, `ub` and
+/// `step`.
+void updateBoundsForCyclicDistribution(OpBuilder &builder, Location loc,
+                                       Value procId, Value nprocs, Value &lb,
+                                       Value &ub, Value &step);
 
-/// Returns all the operands of `linalgOp` that are not views.
-/// Asserts that these operands are value types to allow transformations like
-/// tiling to just use the values when cloning `linalgOp`.
-SmallVector<Value, 4> getAssumedNonViewOperands(LinalgOp linalgOp);
+//===----------------------------------------------------------------------===//
+// Fusion on tensor utilities
+//===----------------------------------------------------------------------===//
 
-/// Apply the permutation defined by `permutation` to `inVec`.
-/// Element `i` in `inVec` is mapped to location `j = permutation[i]`.
-/// E.g.: for an input vector `inVec = ['a', 'b', 'c']` and a permutation vector
-/// `permutation = [2, 0, 1]`, this function leaves `inVec = ['c', 'a', 'b']`.
-template <typename T, unsigned N>
-void applyPermutationToVector(SmallVector<T, N> &inVec,
-                              ArrayRef<unsigned> permutation) {
-  SmallVector<T, N> auxVec(inVec.size());
-  for (unsigned i = 0; i < permutation.size(); ++i)
-    auxVec[i] = inVec[permutation[i]];
-  inVec = auxVec;
+//===----------------------------------------------------------------------===//
+// Generic op region utilities
+//===----------------------------------------------------------------------===//
+
+/// A struct containing common matchers over linalg op's region.
+struct RegionMatcher {
+  enum class BinaryOpKind {
+    IAdd,
+  };
+
+  /// Matches the given linalg op if its body is performing binary operation
+  /// on int or float scalar values and returns the binary op kind.
+  ///
+  /// The linalg op's region is expected to be
+  /// ```
+  /// {
+  ///   ^bb(%a: <scalar-type>, %b: <scalar-type>):
+  ///     %0 = <binary-op> %a, %b: <scalar-type>
+  ///     linalg.yield %0: <scalar-type>
+  /// }
+  /// ```
+  static std::optional<BinaryOpKind> matchAsScalarBinaryOp(GenericOp op);
+};
+
+//===----------------------------------------------------------------------===//
+// Loop nest utilities
+//===----------------------------------------------------------------------===//
+
+/// Utility class used to generate nested loops with ranges described by
+/// `loopRanges` and loop type described by the `iteratorTypes`.
+/// `bodyBuilderFn` is used to generate the body of the innermost loop. It is
+/// passed a range of loop induction variables and a range of operand values
+/// to use.
+template <typename LoopTy>
+struct GenerateLoopNest {
+  static void doit(OpBuilder &b, Location loc, ArrayRef<Range> loopRanges,
+                   LinalgOp linalgOp,
+                   ArrayRef<utils::IteratorType> iteratorTypes,
+                   function_ref<scf::ValueVector(OpBuilder &, Location,
+                                                 ValueRange, ValueRange)>
+                       bodyBuilderFn,
+                   ArrayRef<linalg::ProcInfo> procInfo = {});
+};
+
+/// Returns an attribute list that excludes pre-defined attributes.
+template <typename OpTy>
+SmallVector<NamedAttribute> getPrunedAttributeList(OpTy op) {
+  auto elidedAttrs = llvm::to_vector(op.getAttributeNames());
+  if (isa<linalg::LinalgOp>(op.getOperation()))
+    elidedAttrs.push_back(LinalgDialect::kMemoizedIndexingMapsAttrName);
+  return getPrunedAttributeList(op, elidedAttrs);
 }
-
-/// Prepares the SubView promotion later performed by `promoteSubViews`
-/// (where most of the transformation happens). It arranges the new
-/// operands for `LinalgOp op` and deallocates the new buffer(s)
-/// It is the entry point for declarative transformation
-/// Returns the cloned `LinalgOp` with the new operands
-LinalgOp promoteSubViewOperands(OpBuilder &b, LinalgOp op,
-                                llvm::SetVector<Value> subViews,
-                                bool dynamicBuffers = false,
-                                OperationFolder *folder = nullptr);
 
 } // namespace linalg
 } // namespace mlir
 
-#endif // MLIR_DIALECT_LINALG_UTILS_H_
+#endif // MLIR_DIALECT_LINALG_UTILS_UTILS_H

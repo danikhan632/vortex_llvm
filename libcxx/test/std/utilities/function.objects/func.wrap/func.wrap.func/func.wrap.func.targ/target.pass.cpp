@@ -6,6 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+// UNSUPPORTED: c++03
+
 // <functional>
 
 // class function<R(ArgTypes...)>
@@ -18,6 +20,8 @@
 //   requires Callable<T, ArgTypes...> && Convertible<Callable<T, ArgTypes...>::result_type, R>
 //   const T*
 //   target() const;
+
+// UNSUPPORTED: no-rtti
 
 #include <functional>
 #include <new>

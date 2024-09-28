@@ -24,6 +24,7 @@ int main(int argc, char **argv) {
   #pragma omp target data map(to: a) device (S1) // expected-error {{'S1' does not refer to a value}}
   #pragma omp target data map(to: a) device (-2) // expected-error {{argument to 'device' clause must be a non-negative integer value}}
   #pragma omp target data map(to: a) device (-10u)
+  #pragma omp target data map(to: a) device (ancestor: -10u) // expected-error {{use of undeclared identifier 'ancestor'}} expected-error {{expected ')'}} expected-note {{to match this '('}}
   #pragma omp target data map(to: a) device (3.14) // expected-error {{expression must have integral or unscoped enumeration type, not 'double'}}
   foo();
 

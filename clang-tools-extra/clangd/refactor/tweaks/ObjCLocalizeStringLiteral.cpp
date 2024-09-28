@@ -6,19 +6,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "Logger.h"
 #include "ParsedAST.h"
-#include "SourceCode.h"
 #include "refactor/Tweak.h"
+#include "support/Logger.h"
 #include "clang/AST/ExprObjC.h"
-#include "clang/Basic/LangOptions.h"
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/Tooling/Core/Replacement.h"
-#include "llvm/ADT/None.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/ADT/iterator_range.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Error.h"
 
@@ -34,8 +29,10 @@ namespace {
 ///   NSLocalizedString(@"description", @"")
 class ObjCLocalizeStringLiteral : public Tweak {
 public:
-  const char *id() const override final;
-  Intent intent() const override { return Intent::Refactor; }
+  const char *id() const final;
+  llvm::StringLiteral kind() const override {
+    return CodeAction::REFACTOR_KIND;
+  }
 
   bool prepare(const Selection &Inputs) override;
   Expected<Tweak::Effect> apply(const Selection &Inputs) override;
@@ -63,15 +60,18 @@ bool ObjCLocalizeStringLiteral::prepare(const Selection &Inputs) {
 
 Expected<Tweak::Effect>
 ObjCLocalizeStringLiteral::apply(const Selection &Inputs) {
-  auto &SM = Inputs.AST->getSourceManager();
-  auto &LangOpts = Inputs.AST->getASTContext().getLangOpts();
+  auto *AST = Inputs.AST;
+  auto &SM = AST->getSourceManager();
+  const auto &TB = AST->getTokens();
+  auto Toks = TB.spelledForExpanded(TB.expandedTokens(Str->getSourceRange()));
+  if (!Toks || Toks->empty())
+    return error("Failed to find tokens to replace.");
+  // Insert `NSLocalizedString(` before the literal.
   auto Reps = tooling::Replacements(tooling::Replacement(
-      SM, CharSourceRange::getCharRange(Str->getBeginLoc()),
-      "NSLocalizedString(", LangOpts));
-  SourceLocation EndLoc = Lexer::getLocForEndOfToken(
-      Str->getEndLoc(), 0, Inputs.AST->getSourceManager(), LangOpts);
-  if (auto Err = Reps.add(tooling::Replacement(
-          SM, CharSourceRange::getCharRange(EndLoc), ", @\"\")", LangOpts)))
+      SM, Toks->front().location(), 0, "NSLocalizedString("));
+  // Insert `, @"")` after the literal.
+  if (auto Err = Reps.add(
+          tooling::Replacement(SM, Toks->back().endLocation(), 0, ", @\"\")")))
     return std::move(Err);
   return Effect::mainFileEdit(SM, std::move(Reps));
 }

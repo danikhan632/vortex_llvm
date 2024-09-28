@@ -13,6 +13,7 @@
 #ifndef LLVM_LIB_TARGET_SPARC_MCTARGETDESC_SPARCMCTARGETDESC_H
 #define LLVM_LIB_TARGET_SPARC_MCTARGETDESC_SPARCMCTARGETDESC_H
 
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/DataTypes.h"
 
 #include <memory>
@@ -27,19 +28,26 @@ class MCRegisterInfo;
 class MCSubtargetInfo;
 class MCTargetOptions;
 class Target;
-class Triple;
-class StringRef;
-class raw_pwrite_stream;
-class raw_ostream;
 
 MCCodeEmitter *createSparcMCCodeEmitter(const MCInstrInfo &MCII,
-                                        const MCRegisterInfo &MRI,
                                         MCContext &Ctx);
 MCAsmBackend *createSparcAsmBackend(const Target &T, const MCSubtargetInfo &STI,
                                     const MCRegisterInfo &MRI,
                                     const MCTargetOptions &Options);
 std::unique_ptr<MCObjectTargetWriter> createSparcELFObjectWriter(bool Is64Bit,
                                                                  uint8_t OSABI);
+
+// Defines symbolic names for Sparc v9 ASI tag names.
+namespace SparcASITag {
+struct ASITag {
+  const char *Name;
+  const char *AltName;
+  unsigned Encoding;
+};
+
+#define GET_ASITagsList_DECL
+#include "SparcGenSearchableTables.inc"
+} // end namespace SparcASITag
 } // End llvm namespace
 
 // Defines symbolic names for Sparc registers.  This defines a mapping from
@@ -51,6 +59,7 @@ std::unique_ptr<MCObjectTargetWriter> createSparcELFObjectWriter(bool Is64Bit,
 // Defines symbolic names for the Sparc instructions.
 //
 #define GET_INSTRINFO_ENUM
+#define GET_INSTRINFO_MC_HELPER_DECLS
 #include "SparcGenInstrInfo.inc"
 
 #define GET_SUBTARGETINFO_ENUM

@@ -16,10 +16,10 @@
 #include "X86.h"
 #include "llvm/ADT/PostOrderIterator.h"
 #include "llvm/Analysis/CFG.h"
-#include "llvm/Analysis/EHPersonalities.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/WinEHFuncInfo.h"
-#include "llvm/IR/CallSite.h"
+#include "llvm/IR/CFG.h"
+#include "llvm/IR/EHPersonalities.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
@@ -67,13 +67,13 @@ private:
 
   Function *generateLSDAInEAXThunk(Function *ParentFunc);
 
-  bool isStateStoreNeeded(EHPersonality Personality, CallSite CS);
-  void rewriteSetJmpCallSite(IRBuilder<> &Builder, Function &F, CallSite CS,
-                             Value *State);
+  bool isStateStoreNeeded(EHPersonality Personality, CallBase &Call);
+  void rewriteSetJmpCall(IRBuilder<> &Builder, Function &F, CallBase &Call,
+                         Value *State);
   int getBaseStateForBB(DenseMap<BasicBlock *, ColorVector> &BlockColors,
                         WinEHFuncInfo &FuncInfo, BasicBlock *BB);
-  int getStateForCallSite(DenseMap<BasicBlock *, ColorVector> &BlockColors,
-                          WinEHFuncInfo &FuncInfo, CallSite CS);
+  int getStateForCall(DenseMap<BasicBlock *, ColorVector> &BlockColors,
+                      WinEHFuncInfo &FuncInfo, CallBase &Call);
 
   // Module-level type getters.
   Type *getEHLinkRegistrationType();
@@ -109,7 +109,7 @@ private:
   /// The linked list node subobject inside of RegNode.
   Value *Link = nullptr;
 };
-}
+} // namespace
 
 FunctionPass *llvm::createX86WinEHStatePass() { return new WinEHStatePass(); }
 
@@ -172,7 +172,7 @@ bool WinEHStatePass::runOnFunction(Function &F) {
   if (!HasPads)
     return false;
 
-  Type *Int8PtrType = Type::getInt8PtrTy(TheModule->getContext());
+  Type *Int8PtrType = PointerType::getUnqual(TheModule->getContext());
   SetJmp3 = TheModule->getOrInsertFunction(
       "_setjmp3", FunctionType::get(
                       Type::getInt32Ty(TheModule->getContext()),
@@ -212,8 +212,9 @@ Type *WinEHStatePass::getEHLinkRegistrationType() {
   LLVMContext &Context = TheModule->getContext();
   EHLinkRegistrationTy = StructType::create(Context, "EHRegistrationNode");
   Type *FieldTys[] = {
-      EHLinkRegistrationTy->getPointerTo(0), // EHRegistrationNode *Next
-      Type::getInt8PtrTy(Context) // EXCEPTION_DISPOSITION (*Handler)(...)
+      PointerType::getUnqual(
+          EHLinkRegistrationTy->getContext()), // EHRegistrationNode *Next
+      PointerType::getUnqual(Context) // EXCEPTION_DISPOSITION (*Handler)(...)
   };
   EHLinkRegistrationTy->setBody(FieldTys, false);
   return EHLinkRegistrationTy;
@@ -230,9 +231,9 @@ Type *WinEHStatePass::getCXXEHRegistrationType() {
     return CXXEHRegistrationTy;
   LLVMContext &Context = TheModule->getContext();
   Type *FieldTys[] = {
-      Type::getInt8PtrTy(Context), // void *SavedESP
-      getEHLinkRegistrationType(), // EHRegistrationNode SubRecord
-      Type::getInt32Ty(Context)    // int32_t TryLevel
+      PointerType::getUnqual(Context), // void *SavedESP
+      getEHLinkRegistrationType(),     // EHRegistrationNode SubRecord
+      Type::getInt32Ty(Context)        // int32_t TryLevel
   };
   CXXEHRegistrationTy =
       StructType::create(FieldTys, "CXXExceptionRegistration");
@@ -252,11 +253,11 @@ Type *WinEHStatePass::getSEHRegistrationType() {
     return SEHRegistrationTy;
   LLVMContext &Context = TheModule->getContext();
   Type *FieldTys[] = {
-      Type::getInt8PtrTy(Context), // void *SavedESP
-      Type::getInt8PtrTy(Context), // void *ExceptionPointers
-      getEHLinkRegistrationType(), // EHRegistrationNode SubRecord
-      Type::getInt32Ty(Context),   // int32_t EncodedScopeTable
-      Type::getInt32Ty(Context)    // int32_t TryLevel
+      PointerType::getUnqual(Context), // void *SavedESP
+      PointerType::getUnqual(Context), // void *ExceptionPointers
+      getEHLinkRegistrationType(),     // EHRegistrationNode SubRecord
+      Type::getInt32Ty(Context),       // int32_t EncodedScopeTable
+      Type::getInt32Ty(Context)        // int32_t TryLevel
   };
   SEHRegistrationTy = StructType::create(FieldTys, "SEHExceptionRegistration");
   return SEHRegistrationTy;
@@ -274,7 +275,7 @@ void WinEHStatePass::emitExceptionRegistrationRecord(Function *F) {
   Type *RegNodeTy;
 
   IRBuilder<> Builder(&F->getEntryBlock(), F->getEntryBlock().begin());
-  Type *Int8PtrType = Builder.getInt8PtrTy();
+  Type *Int8PtrType = Builder.getPtrTy();
   Type *Int32Ty = Builder.getInt32Ty();
   Type *VoidTy = Builder.getVoidTy();
 
@@ -282,8 +283,7 @@ void WinEHStatePass::emitExceptionRegistrationRecord(Function *F) {
     RegNodeTy = getCXXEHRegistrationType();
     RegNode = Builder.CreateAlloca(RegNodeTy);
     // SavedESP = llvm.stacksave()
-    Value *SP = Builder.CreateCall(
-        Intrinsic::getDeclaration(TheModule, Intrinsic::stacksave), {});
+    Value *SP = Builder.CreateStackSave();
     Builder.CreateStore(SP, Builder.CreateStructGEP(RegNodeTy, RegNode, 0));
     // TryLevel = -1
     StateFieldIndex = 2;
@@ -312,8 +312,7 @@ void WinEHStatePass::emitExceptionRegistrationRecord(Function *F) {
       EHGuardNode = Builder.CreateAlloca(Int32Ty);
 
     // SavedESP = llvm.stacksave()
-    Value *SP = Builder.CreateCall(
-        Intrinsic::getDeclaration(TheModule, Intrinsic::stacksave), {});
+    Value *SP = Builder.CreateStackSave();
     Builder.CreateStore(SP, Builder.CreateStructGEP(RegNodeTy, RegNode, 0));
     // TryLevel = -2 / -1
     StateFieldIndex = 4;
@@ -337,7 +336,7 @@ void WinEHStatePass::emitExceptionRegistrationRecord(Function *F) {
       Value *FrameAddr = Builder.CreateCall(
           Intrinsic::getDeclaration(
               TheModule, Intrinsic::frameaddress,
-              Builder.getInt8PtrTy(
+              Builder.getPtrTy(
                   TheModule->getDataLayout().getAllocaAddrSpace())),
           Builder.getInt32(0), "frameaddr");
       Value *FrameAddrI32 = Builder.CreatePtrToInt(FrameAddr, Int32Ty);
@@ -370,9 +369,8 @@ void WinEHStatePass::emitExceptionRegistrationRecord(Function *F) {
 }
 
 Value *WinEHStatePass::emitEHLSDA(IRBuilder<> &Builder, Function *F) {
-  Value *FI8 = Builder.CreateBitCast(F, Type::getInt8PtrTy(F->getContext()));
   return Builder.CreateCall(
-      Intrinsic::getDeclaration(TheModule, Intrinsic::x86_seh_lsda), FI8);
+      Intrinsic::getDeclaration(TheModule, Intrinsic::x86_seh_lsda), F);
 }
 
 /// Generate a thunk that puts the LSDA of ParentFunc in EAX and then calls
@@ -385,14 +383,14 @@ Value *WinEHStatePass::emitEHLSDA(IRBuilder<> &Builder, Function *F) {
 Function *WinEHStatePass::generateLSDAInEAXThunk(Function *ParentFunc) {
   LLVMContext &Context = ParentFunc->getContext();
   Type *Int32Ty = Type::getInt32Ty(Context);
-  Type *Int8PtrType = Type::getInt8PtrTy(Context);
+  Type *Int8PtrType = PointerType::getUnqual(Context);
   Type *ArgTys[5] = {Int8PtrType, Int8PtrType, Int8PtrType, Int8PtrType,
                      Int8PtrType};
   FunctionType *TrampolineTy =
-      FunctionType::get(Int32Ty, makeArrayRef(&ArgTys[0], 4),
+      FunctionType::get(Int32Ty, ArrayRef(&ArgTys[0], 4),
                         /*isVarArg=*/false);
   FunctionType *TargetFuncTy =
-      FunctionType::get(Int32Ty, makeArrayRef(&ArgTys[0], 5),
+      FunctionType::get(Int32Ty, ArrayRef(&ArgTys[0], 5),
                         /*isVarArg=*/false);
   Function *Trampoline =
       Function::Create(TrampolineTy, GlobalValue::InternalLinkage,
@@ -404,11 +402,9 @@ Function *WinEHStatePass::generateLSDAInEAXThunk(Function *ParentFunc) {
   BasicBlock *EntryBB = BasicBlock::Create(Context, "entry", Trampoline);
   IRBuilder<> Builder(EntryBB);
   Value *LSDA = emitEHLSDA(Builder, ParentFunc);
-  Value *CastPersonality =
-      Builder.CreateBitCast(PersonalityFn, TargetFuncTy->getPointerTo());
   auto AI = Trampoline->arg_begin();
   Value *Args[5] = {LSDA, &*AI++, &*AI++, &*AI++, &*AI++};
-  CallInst *Call = Builder.CreateCall(TargetFuncTy, CastPersonality, Args);
+  CallInst *Call = Builder.CreateCall(TargetFuncTy, PersonalityFn, Args);
   // Can't use musttail due to prototype mismatch, but we can use tail.
   Call->setTailCall(true);
   // Set inreg so we pass it in EAX.
@@ -422,14 +418,13 @@ void WinEHStatePass::linkExceptionRegistration(IRBuilder<> &Builder,
   // Emit the .safeseh directive for this function.
   Handler->addFnAttr("safeseh");
 
+  LLVMContext &C = Builder.getContext();
   Type *LinkTy = getEHLinkRegistrationType();
   // Handler = Handler
-  Value *HandlerI8 = Builder.CreateBitCast(Handler, Builder.getInt8PtrTy());
-  Builder.CreateStore(HandlerI8, Builder.CreateStructGEP(LinkTy, Link, 1));
+  Builder.CreateStore(Handler, Builder.CreateStructGEP(LinkTy, Link, 1));
   // Next = [fs:00]
-  Constant *FSZero =
-      Constant::getNullValue(LinkTy->getPointerTo()->getPointerTo(257));
-  Value *Next = Builder.CreateLoad(LinkTy->getPointerTo(), FSZero);
+  Constant *FSZero = Constant::getNullValue(PointerType::get(C, 257));
+  Value *Next = Builder.CreateLoad(PointerType::getUnqual(C), FSZero);
   Builder.CreateStore(Next, Builder.CreateStructGEP(LinkTy, Link, 0));
   // [fs:00] = Link
   Builder.CreateStore(Link, FSZero);
@@ -442,12 +437,13 @@ void WinEHStatePass::unlinkExceptionRegistration(IRBuilder<> &Builder) {
     Builder.Insert(GEP);
     Link = GEP;
   }
+
+  LLVMContext &C = Builder.getContext();
   Type *LinkTy = getEHLinkRegistrationType();
   // [fs:00] = Link->Next
-  Value *Next = Builder.CreateLoad(LinkTy->getPointerTo(),
+  Value *Next = Builder.CreateLoad(PointerType::getUnqual(C),
                                    Builder.CreateStructGEP(LinkTy, Link, 0));
-  Constant *FSZero =
-      Constant::getNullValue(LinkTy->getPointerTo()->getPointerTo(257));
+  Constant *FSZero = Constant::getNullValue(PointerType::get(C, 257));
   Builder.CreateStore(Next, FSZero);
 }
 
@@ -455,16 +451,14 @@ void WinEHStatePass::unlinkExceptionRegistration(IRBuilder<> &Builder) {
 // The idea behind _setjmp3 is that it takes an optional number of personality
 // specific parameters to indicate how to restore the personality-specific frame
 // state when longjmp is initiated.  Typically, the current TryLevel is saved.
-void WinEHStatePass::rewriteSetJmpCallSite(IRBuilder<> &Builder, Function &F,
-                                           CallSite CS, Value *State) {
+void WinEHStatePass::rewriteSetJmpCall(IRBuilder<> &Builder, Function &F,
+                                       CallBase &Call, Value *State) {
   // Don't rewrite calls with a weird number of arguments.
-  if (CS.getNumArgOperands() != 2)
+  if (Call.arg_size() != 2)
     return;
 
-  Instruction *Inst = CS.getInstruction();
-
   SmallVector<OperandBundleDef, 1> OpBundles;
-  CS.getOperandBundlesAsDefs(OpBundles);
+  Call.getOperandBundlesAsDefs(OpBundles);
 
   SmallVector<Value *, 3> OptionalArgs;
   if (Personality == EHPersonality::MSVC_CXX) {
@@ -482,29 +476,27 @@ void WinEHStatePass::rewriteSetJmpCallSite(IRBuilder<> &Builder, Function &F,
 
   SmallVector<Value *, 5> Args;
   Args.push_back(
-      Builder.CreateBitCast(CS.getArgOperand(0), Builder.getInt8PtrTy()));
+      Builder.CreateBitCast(Call.getArgOperand(0), Builder.getPtrTy()));
   Args.push_back(Builder.getInt32(OptionalArgs.size()));
   Args.append(OptionalArgs.begin(), OptionalArgs.end());
 
-  CallSite NewCS;
-  if (CS.isCall()) {
-    auto *CI = cast<CallInst>(Inst);
+  CallBase *NewCall;
+  if (auto *CI = dyn_cast<CallInst>(&Call)) {
     CallInst *NewCI = Builder.CreateCall(SetJmp3, Args, OpBundles);
     NewCI->setTailCallKind(CI->getTailCallKind());
-    NewCS = NewCI;
+    NewCall = NewCI;
   } else {
-    auto *II = cast<InvokeInst>(Inst);
-    NewCS = Builder.CreateInvoke(
+    auto *II = cast<InvokeInst>(&Call);
+    NewCall = Builder.CreateInvoke(
         SetJmp3, II->getNormalDest(), II->getUnwindDest(), Args, OpBundles);
   }
-  NewCS.setCallingConv(CS.getCallingConv());
-  NewCS.setAttributes(CS.getAttributes());
-  NewCS->setDebugLoc(CS->getDebugLoc());
+  NewCall->setCallingConv(Call.getCallingConv());
+  NewCall->setAttributes(Call.getAttributes());
+  NewCall->setDebugLoc(Call.getDebugLoc());
 
-  Instruction *NewInst = NewCS.getInstruction();
-  NewInst->takeName(Inst);
-  Inst->replaceAllUsesWith(NewInst);
-  Inst->eraseFromParent();
+  NewCall->takeName(&Call);
+  Call.replaceAllUsesWith(NewCall);
+  Call.eraseFromParent();
 }
 
 // Figure out what state we should assign calls in this block.
@@ -527,17 +519,17 @@ int WinEHStatePass::getBaseStateForBB(
 }
 
 // Calculate the state a call-site is in.
-int WinEHStatePass::getStateForCallSite(
+int WinEHStatePass::getStateForCall(
     DenseMap<BasicBlock *, ColorVector> &BlockColors, WinEHFuncInfo &FuncInfo,
-    CallSite CS) {
-  if (auto *II = dyn_cast<InvokeInst>(CS.getInstruction())) {
+    CallBase &Call) {
+  if (auto *II = dyn_cast<InvokeInst>(&Call)) {
     // Look up the state number of the EH pad this unwinds to.
     assert(FuncInfo.InvokeStateMap.count(II) && "invoke has no state!");
     return FuncInfo.InvokeStateMap[II];
   }
   // Possibly throwing call instructions have no actions to take after
   // an unwind. Ensure they are in the -1 state.
-  return getBaseStateForBB(BlockColors, FuncInfo, CS.getParent());
+  return getBaseStateForBB(BlockColors, FuncInfo, Call.getParent());
 }
 
 // Calculate the intersection of all the FinalStates for a BasicBlock's
@@ -618,23 +610,20 @@ static int getSuccState(DenseMap<BasicBlock *, int> &InitialStates, Function &F,
 }
 
 bool WinEHStatePass::isStateStoreNeeded(EHPersonality Personality,
-                                        CallSite CS) {
-  if (!CS)
-    return false;
-
+                                        CallBase &Call) {
   // If the function touches memory, it needs a state store.
   if (isAsynchronousEHPersonality(Personality))
-    return !CS.doesNotAccessMemory();
+    return !Call.doesNotAccessMemory();
 
   // If the function throws, it needs a state store.
-  return !CS.doesNotThrow();
+  return !Call.doesNotThrow();
 }
 
 void WinEHStatePass::addStateStores(Function &F, WinEHFuncInfo &FuncInfo) {
   // Mark the registration node. The backend needs to know which alloca it is so
   // that it can recover the original frame pointer.
   IRBuilder<> Builder(RegNode->getNextNode());
-  Value *RegNodeI8 = Builder.CreateBitCast(RegNode, Builder.getInt8PtrTy());
+  Value *RegNodeI8 = Builder.CreateBitCast(RegNode, Builder.getPtrTy());
   Builder.CreateCall(
       Intrinsic::getDeclaration(TheModule, Intrinsic::x86_seh_ehregnode),
       {RegNodeI8});
@@ -642,7 +631,7 @@ void WinEHStatePass::addStateStores(Function &F, WinEHFuncInfo &FuncInfo) {
   if (EHGuardNode) {
     IRBuilder<> Builder(EHGuardNode->getNextNode());
     Value *EHGuardNodeI8 =
-        Builder.CreateBitCast(EHGuardNode, Builder.getInt8PtrTy());
+        Builder.CreateBitCast(EHGuardNode, Builder.getPtrTy());
     Builder.CreateCall(
         Intrinsic::getDeclaration(TheModule, Intrinsic::x86_seh_ehguard),
         {EHGuardNodeI8});
@@ -672,11 +661,11 @@ void WinEHStatePass::addStateStores(Function &F, WinEHFuncInfo &FuncInfo) {
     if (&F.getEntryBlock() == BB)
       InitialState = FinalState = ParentBaseState;
     for (Instruction &I : *BB) {
-      CallSite CS(&I);
-      if (!isStateStoreNeeded(Personality, CS))
+      auto *Call = dyn_cast<CallBase>(&I);
+      if (!Call || !isStateStoreNeeded(Personality, *Call))
         continue;
 
-      int State = getStateForCallSite(BlockColors, FuncInfo, CS);
+      int State = getStateForCall(BlockColors, FuncInfo, *Call);
       if (InitialState == OverdefinedState)
         InitialState = State;
       FinalState = State;
@@ -739,11 +728,11 @@ void WinEHStatePass::addStateStores(Function &F, WinEHFuncInfo &FuncInfo) {
                       << " PrevState=" << PrevState << '\n');
 
     for (Instruction &I : *BB) {
-      CallSite CS(&I);
-      if (!isStateStoreNeeded(Personality, CS))
+      auto *Call = dyn_cast<CallBase>(&I);
+      if (!Call || !isStateStoreNeeded(Personality, *Call))
         continue;
 
-      int State = getStateForCallSite(BlockColors, FuncInfo, CS);
+      int State = getStateForCall(BlockColors, FuncInfo, *Call);
       if (State != PrevState)
         insertStateNumberStore(&I, State);
       PrevState = State;
@@ -756,35 +745,35 @@ void WinEHStatePass::addStateStores(Function &F, WinEHFuncInfo &FuncInfo) {
         insertStateNumberStore(BB->getTerminator(), EndState->second);
   }
 
-  SmallVector<CallSite, 1> SetJmp3CallSites;
+  SmallVector<CallBase *, 1> SetJmp3Calls;
   for (BasicBlock *BB : RPOT) {
     for (Instruction &I : *BB) {
-      CallSite CS(&I);
-      if (!CS)
+      auto *Call = dyn_cast<CallBase>(&I);
+      if (!Call)
         continue;
-      if (CS.getCalledValue()->stripPointerCasts() !=
+      if (Call->getCalledOperand()->stripPointerCasts() !=
           SetJmp3.getCallee()->stripPointerCasts())
         continue;
 
-      SetJmp3CallSites.push_back(CS);
+      SetJmp3Calls.push_back(Call);
     }
   }
 
-  for (CallSite CS : SetJmp3CallSites) {
-    auto &BBColors = BlockColors[CS->getParent()];
+  for (CallBase *Call : SetJmp3Calls) {
+    auto &BBColors = BlockColors[Call->getParent()];
     BasicBlock *FuncletEntryBB = BBColors.front();
     bool InCleanup = isa<CleanupPadInst>(FuncletEntryBB->getFirstNonPHI());
 
-    IRBuilder<> Builder(CS.getInstruction());
+    IRBuilder<> Builder(Call);
     Value *State;
     if (InCleanup) {
       Value *StateField = Builder.CreateStructGEP(RegNode->getAllocatedType(),
                                                   RegNode, StateFieldIndex);
       State = Builder.CreateLoad(Builder.getInt32Ty(), StateField);
     } else {
-      State = Builder.getInt32(getStateForCallSite(BlockColors, FuncInfo, CS));
+      State = Builder.getInt32(getStateForCall(BlockColors, FuncInfo, *Call));
     }
-    rewriteSetJmpCallSite(Builder, F, CS, State);
+    rewriteSetJmpCall(Builder, F, *Call, State);
   }
 }
 

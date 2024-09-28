@@ -14,25 +14,24 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "dfa-emitter"
-
 #include "CodeGenSchedule.h"
 #include "CodeGenTarget.h"
 #include "DFAEmitter.h"
-#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/TableGen/Record.h"
 #include "llvm/TableGen/TableGenBackend.h"
 #include <cassert>
 #include <cstdint>
+#include <deque>
 #include <map>
 #include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+#define DEBUG_TYPE "dfa-emitter"
 
 using namespace llvm;
 
@@ -93,7 +92,7 @@ public:
 } // end anonymous namespace
 
 DFAPacketizerEmitter::DFAPacketizerEmitter(RecordKeeper &R)
-    : TargetName(CodeGenTarget(R).getName()), Records(R) {}
+    : TargetName(std::string(CodeGenTarget(R).getName())), Records(R) {}
 
 int DFAPacketizerEmitter::collectAllFuncUnits(
     ArrayRef<const CodeGenProcModel *> ProcModels) {
@@ -120,7 +119,7 @@ int DFAPacketizerEmitter::collectAllFuncUnits(
       assert((j < DFA_MAX_RESOURCES) &&
              "Exceeded maximum number of representable resources");
       uint64_t FuncResources = 1ULL << j;
-      FUNameToBitsMap[FUs[j]->getName()] = FuncResources;
+      FUNameToBitsMap[std::string(FUs[j]->getName())] = FuncResources;
       LLVM_DEBUG(dbgs() << " " << FUs[j]->getName() << ":0x"
                         << Twine::utohexstr(FuncResources));
     }
@@ -152,13 +151,13 @@ int DFAPacketizerEmitter::collectAllComboFuncs(ArrayRef<Record *> ComboFuncList)
       Record *ComboFunc = FuncData->getValueAsDef("TheComboFunc");
       const std::vector<Record *> &FuncList =
           FuncData->getValueAsListOfDefs("FuncList");
-      const std::string &ComboFuncName = ComboFunc->getName();
+      const std::string &ComboFuncName = std::string(ComboFunc->getName());
       uint64_t ComboBit = FUNameToBitsMap[ComboFuncName];
       uint64_t ComboResources = ComboBit;
       LLVM_DEBUG(dbgs() << "      combo: " << ComboFuncName << ":0x"
                         << Twine::utohexstr(ComboResources) << "\n");
-      for (unsigned k = 0, M = FuncList.size(); k < M; ++k) {
-        std::string FuncName = FuncList[k]->getName();
+      for (auto *K : FuncList) {
+        std::string FuncName = std::string(K->getName());
         uint64_t FuncResources = FUNameToBitsMap[FuncName];
         LLVM_DEBUG(dbgs() << "        " << FuncName << ":0x"
                           << Twine::utohexstr(FuncResources) << "\n");
@@ -181,7 +180,7 @@ DFAPacketizerEmitter::getResourcesForItinerary(Record *Itinerary) {
   for (Record *StageDef : Itinerary->getValueAsListOfDefs("Stages")) {
     uint64_t StageResources = 0;
     for (Record *Unit : StageDef->getValueAsListOfDefs("Units")) {
-      StageResources |= FUNameToBitsMap[Unit->getName()];
+      StageResources |= FUNameToBitsMap[std::string(Unit->getName())];
     }
     if (StageResources != 0)
       Resources.push_back(StageResources);
@@ -207,6 +206,7 @@ void DFAPacketizerEmitter::createScheduleClasses(unsigned ItineraryIdx,
 // Run the worklist algorithm to generate the DFA.
 //
 void DFAPacketizerEmitter::run(raw_ostream &OS) {
+  emitSourceFileHeader("Target DFA Packetizer Tables", OS);
   OS << "\n"
      << "#include \"llvm/CodeGen/DFAPacketizer.h\"\n";
   OS << "namespace llvm {\n";
@@ -219,7 +219,7 @@ void DFAPacketizerEmitter::run(raw_ostream &OS) {
   for (const CodeGenProcModel &ProcModel : CGS.procModels()) {
     if (ProcModel.hasItineraries()) {
       auto NS = ProcModel.ItinsDef->getValueAsString("PacketizerNamespace");
-      ItinsByNamespace[NS].push_back(&ProcModel);
+      ItinsByNamespace[std::string(NS)].push_back(&ProcModel);
     }
   }
 
@@ -246,7 +246,8 @@ void DFAPacketizerEmitter::emitForItineraries(
 
   // Output the mapping from ScheduleClass to ResourcesIdx.
   unsigned Idx = 0;
-  OS << "unsigned " << TargetName << DFAName << "ResourceIndices[] = {";
+  OS << "constexpr unsigned " << TargetName << DFAName
+     << "ResourceIndices[] = {";
   for (const ScheduleClass &SC : ScheduleClasses) {
     if (Idx++ % 32 == 0)
       OS << "\n  ";
@@ -255,14 +256,14 @@ void DFAPacketizerEmitter::emitForItineraries(
   OS << "\n};\n\n";
 
   // And the mapping from Itinerary index into the previous table.
-  OS << "unsigned " << TargetName << DFAName
+  OS << "constexpr unsigned " << TargetName << DFAName
      << "ProcResourceIndexStart[] = {\n";
   OS << "  0, // NoSchedModel\n";
   for (const CodeGenProcModel *Model : ProcModels) {
     OS << "  " << ProcModelStartIdx[Model] << ", // " << Model->ModelName
        << "\n";
   }
-  OS << ScheduleClasses.size() << "\n};\n\n";
+  OS << "  " << ScheduleClasses.size() << "\n};\n\n";
 
   // The type of a state in the nondeterministic automaton we're defining.
   using NfaStateTy = uint64_t;
@@ -353,11 +354,5 @@ void DFAPacketizerEmitter::emitForItineraries(
      << "\n}\n\n";
 }
 
-namespace llvm {
-
-void EmitDFAPacketizer(RecordKeeper &RK, raw_ostream &OS) {
-  emitSourceFileHeader("Target DFA Packetizer Tables", OS);
-  DFAPacketizerEmitter(RK).run(OS);
-}
-
-} // end namespace llvm
+static TableGen::Emitter::OptClass<DFAPacketizerEmitter>
+    X("gen-dfa-packetizer", "Generate DFA Packetizer for VLIW targets");

@@ -6,14 +6,15 @@
 //
 //===----------------------------------------------------------------------===//
 
-// UNSUPPORTED: libcpp-has-no-threads
-// UNSUPPORTED: c++98, c++03
+// UNSUPPORTED: no-threads
+// UNSUPPORTED: c++03
 
 // <thread>
 
 // Test that <thread> provides all of the arithmetic, enum, and pointer
 // hash specializations.
 
+#include <functional>
 #include <thread>
 
 #include "poisoned_hash_helper.h"

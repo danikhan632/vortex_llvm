@@ -26,18 +26,19 @@ namespace {
 class ObjCSuperDeallocChecker
     : public Checker<check::PostObjCMessage, check::PreObjCMessage,
                      check::PreCall, check::Location> {
-
-  mutable IdentifierInfo *IIdealloc, *IINSObject;
+  mutable IdentifierInfo *IIdealloc = nullptr;
+  mutable IdentifierInfo *IINSObject = nullptr;
   mutable Selector SELdealloc;
 
-  std::unique_ptr<BugType> DoubleSuperDeallocBugType;
+  const BugType DoubleSuperDeallocBugType{
+      this, "[super dealloc] should not be called more than once",
+      categories::CoreFoundationObjectiveC};
 
   void initIdentifierInfoAndSelectors(ASTContext &Ctx) const;
 
   bool isSuperDeallocMessage(const ObjCMethodCall &M) const;
 
 public:
-  ObjCSuperDeallocChecker();
   void checkPostObjCMessage(const ObjCMethodCall &M, CheckerContext &C) const;
   void checkPreObjCMessage(const ObjCMethodCall &M, CheckerContext &C) const;
 
@@ -116,13 +117,14 @@ void ObjCSuperDeallocChecker::checkPostObjCMessage(const ObjCMethodCall &M,
     return;
 
   ProgramStateRef State = C.getState();
-  SymbolRef ReceiverSymbol = M.getSelfSVal().getAsSymbol();
-  assert(ReceiverSymbol && "No receiver symbol at call to [super dealloc]?");
+  const LocationContext *LC = C.getLocationContext();
+  SymbolRef SelfSymbol = State->getSelfSVal(LC).getAsSymbol();
+  assert(SelfSymbol && "No receiver symbol at call to [super dealloc]?");
 
   // We add this transition in checkPostObjCMessage to avoid warning when
   // we inline a call to [super dealloc] where the inlined call itself
   // calls [super dealloc].
-  State = State->add<CalledSuperDealloc>(ReceiverSymbol);
+  State = State->add<CalledSuperDealloc>(SelfSymbol);
   C.addTransition(State);
 }
 
@@ -187,7 +189,7 @@ void ObjCSuperDeallocChecker::reportUseAfterDealloc(SymbolRef Sym,
     Desc = "Use of 'self' after it has been deallocated";
 
   // Generate the report.
-  auto BR = std::make_unique<PathSensitiveBugReport>(*DoubleSuperDeallocBugType,
+  auto BR = std::make_unique<PathSensitiveBugReport>(DoubleSuperDeallocBugType,
                                                      Desc, ErrNode);
   BR->addRange(S->getSourceRange());
   BR->addVisitor(std::make_unique<SuperDeallocBRVisitor>(Sym));
@@ -210,14 +212,6 @@ void ObjCSuperDeallocChecker::diagnoseCallArguments(const CallEvent &CE,
       return;
     }
   }
-}
-
-ObjCSuperDeallocChecker::ObjCSuperDeallocChecker()
-    : IIdealloc(nullptr), IINSObject(nullptr) {
-
-  DoubleSuperDeallocBugType.reset(
-      new BugType(this, "[super dealloc] should not be called more than once",
-                  categories::CoreFoundationObjectiveC));
 }
 
 void
@@ -284,6 +278,6 @@ void ento::registerObjCSuperDeallocChecker(CheckerManager &Mgr) {
   Mgr.registerChecker<ObjCSuperDeallocChecker>();
 }
 
-bool ento::shouldRegisterObjCSuperDeallocChecker(const LangOptions &LO) {
+bool ento::shouldRegisterObjCSuperDeallocChecker(const CheckerManager &mgr) {
   return true;
 }

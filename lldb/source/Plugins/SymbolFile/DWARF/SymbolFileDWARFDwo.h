@@ -6,11 +6,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SymbolFileDWARFDwo_SymbolFileDWARFDwo_h_
-#define SymbolFileDWARFDwo_SymbolFileDWARFDwo_h_
+#ifndef LLDB_SOURCE_PLUGINS_SYMBOLFILE_DWARF_SYMBOLFILEDWARFDWO_H
+#define LLDB_SOURCE_PLUGINS_SYMBOLFILE_DWARF_SYMBOLFILEDWARFDWO_H
 
 #include "SymbolFileDWARF.h"
+#include <optional>
 
+namespace lldb_private::plugin {
+namespace dwarf {
 class SymbolFileDWARFDwo : public SymbolFileDWARF {
   /// LLVM RTTI support.
   static char ID;
@@ -24,57 +27,63 @@ public:
   static bool classof(const SymbolFile *obj) { return obj->isA(&ID); }
   /// \}
 
-  SymbolFileDWARFDwo(lldb::ObjectFileSP objfile, DWARFCompileUnit &dwarf_cu);
+  SymbolFileDWARFDwo(SymbolFileDWARF &m_base_symbol_file,
+                     lldb::ObjectFileSP objfile, uint32_t id);
 
   ~SymbolFileDWARFDwo() override = default;
 
-  lldb::CompUnitSP ParseCompileUnit(DWARFCompileUnit &dwarf_cu) override;
+  DWARFCompileUnit *GetDWOCompileUnitForHash(uint64_t hash);
 
-  DWARFCompileUnit *GetCompileUnit();
+  void GetObjCMethods(ConstString class_name,
+                      llvm::function_ref<bool(DWARFDIE die)> callback) override;
 
-  DWARFUnit *
-  GetDWARFCompileUnit(lldb_private::CompileUnit *comp_unit) override;
-
-  size_t GetObjCMethodDIEOffsets(lldb_private::ConstString class_name,
-                                 DIEArray &method_die_offsets) override;
-
-  llvm::Expected<lldb_private::TypeSystem &>
+  llvm::Expected<lldb::TypeSystemSP>
   GetTypeSystemForLanguage(lldb::LanguageType language) override;
 
   DWARFDIE
   GetDIE(const DIERef &die_ref) override;
 
-  DWARFCompileUnit *GetBaseCompileUnit() override { return &m_base_dwarf_cu; }
+  lldb::offset_t GetVendorDWARFOpcodeSize(const DataExtractor &data,
+                                          const lldb::offset_t data_offset,
+                                          const uint8_t op) const override;
 
-  llvm::Optional<uint32_t> GetDwoNum() override { return GetID() >> 32; }
+  bool ParseVendorDWARFOpcode(uint8_t op, const DataExtractor &opcodes,
+                              lldb::offset_t &offset,
+                              std::vector<Value> &stack) const override;
+
+  void FindGlobalVariables(ConstString name,
+                           const CompilerDeclContext &parent_decl_ctx,
+                           uint32_t max_matches,
+                           VariableList &variables) override;
 
 protected:
-  void LoadSectionData(lldb::SectionType sect_type,
-                       lldb_private::DWARFDataExtractor &data) override;
-
   DIEToTypePtr &GetDIEToType() override;
 
   DIEToVariableSP &GetDIEToVariable() override;
 
-  DIEToClangType &GetForwardDeclDieToClangType() override;
+  DIEToCompilerType &GetForwardDeclDIEToCompilerType() override;
 
-  ClangTypeToDIE &GetForwardDeclClangTypeToDie() override;
+  CompilerTypeToDIE &GetForwardDeclCompilerTypeToDIE() override;
 
   UniqueDWARFASTTypeMap &GetUniqueDWARFASTTypeMap() override;
 
-  lldb::TypeSP FindDefinitionTypeForDWARFDeclContext(
-      const DWARFDeclContext &die_decl_ctx) override;
+  lldb::TypeSP
+  FindDefinitionTypeForDWARFDeclContext(const DWARFDIE &die) override;
 
-  lldb::TypeSP FindCompleteObjCDefinitionTypeForDIE(
-      const DWARFDIE &die, lldb_private::ConstString type_name,
-      bool must_be_implementation) override;
+  lldb::TypeSP
+  FindCompleteObjCDefinitionTypeForDIE(const DWARFDIE &die,
+                                       ConstString type_name,
+                                       bool must_be_implementation) override;
 
-  SymbolFileDWARF &GetBaseSymbolFile();
+  SymbolFileDWARF &GetBaseSymbolFile() const { return m_base_symbol_file; }
 
-  DWARFCompileUnit *ComputeCompileUnit();
+  /// If this file contains exactly one compile unit, this function will return
+  /// it. Otherwise it returns nullptr.
+  DWARFCompileUnit *FindSingleCompileUnit();
 
-  DWARFCompileUnit &m_base_dwarf_cu;
-  DWARFCompileUnit *m_cu = nullptr;
+  SymbolFileDWARF &m_base_symbol_file;
 };
+} // namespace dwarf
+} // namespace lldb_private::plugin
 
-#endif // SymbolFileDWARFDwo_SymbolFileDWARFDwo_h_
+#endif // LLDB_SOURCE_PLUGINS_SYMBOLFILE_DWARF_SYMBOLFILEDWARFDWO_H

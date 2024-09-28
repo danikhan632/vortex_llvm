@@ -18,84 +18,48 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/CFGPrinter.h"
-#include "llvm/InitializePasses.h"
-#include "llvm/Pass.h"
+#include "llvm/ADT/PostOrderIterator.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/GraphWriter.h"
+
 using namespace llvm;
 
-static cl::opt<std::string> CFGFuncName(
-    "cfg-func-name", cl::Hidden,
-    cl::desc("The name of a function (or its substring)"
-             " whose CFG is viewed/printed."));
+static cl::opt<std::string>
+    CFGFuncName("cfg-func-name", cl::Hidden,
+                cl::desc("The name of a function (or its substring)"
+                         " whose CFG is viewed/printed."));
 
 static cl::opt<std::string> CFGDotFilenamePrefix(
     "cfg-dot-filename-prefix", cl::Hidden,
     cl::desc("The prefix used for the CFG dot file names."));
 
-namespace {
-  struct CFGViewerLegacyPass : public FunctionPass {
-    static char ID; // Pass identifcation, replacement for typeid
-    CFGViewerLegacyPass() : FunctionPass(ID) {
-      initializeCFGViewerLegacyPassPass(*PassRegistry::getPassRegistry());
-    }
+static cl::opt<bool> HideUnreachablePaths("cfg-hide-unreachable-paths",
+                                          cl::init(false));
 
-    bool runOnFunction(Function &F) override {
-      F.viewCFG();
-      return false;
-    }
+static cl::opt<bool> HideDeoptimizePaths("cfg-hide-deoptimize-paths",
+                                         cl::init(false));
 
-    void print(raw_ostream &OS, const Module* = nullptr) const override {}
+static cl::opt<double> HideColdPaths(
+    "cfg-hide-cold-paths", cl::init(0.0),
+    cl::desc("Hide blocks with relative frequency below the given value"));
 
-    void getAnalysisUsage(AnalysisUsage &AU) const override {
-      AU.setPreservesAll();
-    }
-  };
-}
+static cl::opt<bool> ShowHeatColors("cfg-heat-colors", cl::init(true),
+                                    cl::Hidden,
+                                    cl::desc("Show heat colors in CFG"));
 
-char CFGViewerLegacyPass::ID = 0;
-INITIALIZE_PASS(CFGViewerLegacyPass, "view-cfg", "View CFG of function", false, true)
+static cl::opt<bool> UseRawEdgeWeight("cfg-raw-weights", cl::init(false),
+                                      cl::Hidden,
+                                      cl::desc("Use raw weights for labels. "
+                                               "Use percentages as default."));
 
-PreservedAnalyses CFGViewerPass::run(Function &F,
-                                     FunctionAnalysisManager &AM) {
-  F.viewCFG();
-  return PreservedAnalyses::all();
-}
+static cl::opt<bool>
+    ShowEdgeWeight("cfg-weights", cl::init(false), cl::Hidden,
+                   cl::desc("Show edges labeled with weights"));
 
-
-namespace {
-  struct CFGOnlyViewerLegacyPass : public FunctionPass {
-    static char ID; // Pass identifcation, replacement for typeid
-    CFGOnlyViewerLegacyPass() : FunctionPass(ID) {
-      initializeCFGOnlyViewerLegacyPassPass(*PassRegistry::getPassRegistry());
-    }
-
-    bool runOnFunction(Function &F) override {
-      F.viewCFGOnly();
-      return false;
-    }
-
-    void print(raw_ostream &OS, const Module* = nullptr) const override {}
-
-    void getAnalysisUsage(AnalysisUsage &AU) const override {
-      AU.setPreservesAll();
-    }
-  };
-}
-
-char CFGOnlyViewerLegacyPass::ID = 0;
-INITIALIZE_PASS(CFGOnlyViewerLegacyPass, "view-cfg-only",
-                "View CFG of function (with no function bodies)", false, true)
-
-PreservedAnalyses CFGOnlyViewerPass::run(Function &F,
-                                         FunctionAnalysisManager &AM) {
-  F.viewCFGOnly();
-  return PreservedAnalyses::all();
-}
-
-static void writeCFGToDotFile(Function &F, bool CFGOnly = false) {
-  if (!CFGFuncName.empty() && !F.getName().contains(CFGFuncName))
-     return;
+static void writeCFGToDotFile(Function &F, BlockFrequencyInfo *BFI,
+                              BranchProbabilityInfo *BPI, uint64_t MaxFreq,
+                              bool CFGOnly = false) {
   std::string Filename =
       (CFGDotFilenamePrefix + "." + F.getName() + ".dot").str();
   errs() << "Writing '" << Filename << "'...";
@@ -103,70 +67,65 @@ static void writeCFGToDotFile(Function &F, bool CFGOnly = false) {
   std::error_code EC;
   raw_fd_ostream File(Filename, EC, sys::fs::OF_Text);
 
+  DOTFuncInfo CFGInfo(&F, BFI, BPI, MaxFreq);
+  CFGInfo.setHeatColors(ShowHeatColors);
+  CFGInfo.setEdgeWeights(ShowEdgeWeight);
+  CFGInfo.setRawEdgeWeights(UseRawEdgeWeight);
+
   if (!EC)
-    WriteGraph(File, (const Function*)&F, CFGOnly);
+    WriteGraph(File, &CFGInfo, CFGOnly);
   else
     errs() << "  error opening file for writing!";
   errs() << "\n";
 }
 
-namespace {
-  struct CFGPrinterLegacyPass : public FunctionPass {
-    static char ID; // Pass identification, replacement for typeid
-    CFGPrinterLegacyPass() : FunctionPass(ID) {
-      initializeCFGPrinterLegacyPassPass(*PassRegistry::getPassRegistry());
-    }
+static void viewCFG(Function &F, const BlockFrequencyInfo *BFI,
+                    const BranchProbabilityInfo *BPI, uint64_t MaxFreq,
+                    bool CFGOnly = false) {
+  DOTFuncInfo CFGInfo(&F, BFI, BPI, MaxFreq);
+  CFGInfo.setHeatColors(ShowHeatColors);
+  CFGInfo.setEdgeWeights(ShowEdgeWeight);
+  CFGInfo.setRawEdgeWeights(UseRawEdgeWeight);
 
-    bool runOnFunction(Function &F) override {
-      writeCFGToDotFile(F);
-      return false;
-    }
-
-    void print(raw_ostream &OS, const Module* = nullptr) const override {}
-
-    void getAnalysisUsage(AnalysisUsage &AU) const override {
-      AU.setPreservesAll();
-    }
-  };
+  ViewGraph(&CFGInfo, "cfg." + F.getName(), CFGOnly);
 }
 
-char CFGPrinterLegacyPass::ID = 0;
-INITIALIZE_PASS(CFGPrinterLegacyPass, "dot-cfg", "Print CFG of function to 'dot' file",
-                false, true)
-
-PreservedAnalyses CFGPrinterPass::run(Function &F,
-                                      FunctionAnalysisManager &AM) {
-  writeCFGToDotFile(F);
+PreservedAnalyses CFGViewerPass::run(Function &F, FunctionAnalysisManager &AM) {
+  if (!CFGFuncName.empty() && !F.getName().contains(CFGFuncName))
+    return PreservedAnalyses::all();
+  auto *BFI = &AM.getResult<BlockFrequencyAnalysis>(F);
+  auto *BPI = &AM.getResult<BranchProbabilityAnalysis>(F);
+  viewCFG(F, BFI, BPI, getMaxFreq(F, BFI));
   return PreservedAnalyses::all();
 }
 
-namespace {
-  struct CFGOnlyPrinterLegacyPass : public FunctionPass {
-    static char ID; // Pass identification, replacement for typeid
-    CFGOnlyPrinterLegacyPass() : FunctionPass(ID) {
-      initializeCFGOnlyPrinterLegacyPassPass(*PassRegistry::getPassRegistry());
-    }
-
-    bool runOnFunction(Function &F) override {
-      writeCFGToDotFile(F, /*CFGOnly=*/true);
-      return false;
-    }
-    void print(raw_ostream &OS, const Module* = nullptr) const override {}
-
-    void getAnalysisUsage(AnalysisUsage &AU) const override {
-      AU.setPreservesAll();
-    }
-  };
+PreservedAnalyses CFGOnlyViewerPass::run(Function &F,
+                                         FunctionAnalysisManager &AM) {
+  if (!CFGFuncName.empty() && !F.getName().contains(CFGFuncName))
+    return PreservedAnalyses::all();
+  auto *BFI = &AM.getResult<BlockFrequencyAnalysis>(F);
+  auto *BPI = &AM.getResult<BranchProbabilityAnalysis>(F);
+  viewCFG(F, BFI, BPI, getMaxFreq(F, BFI), /*CFGOnly=*/true);
+  return PreservedAnalyses::all();
 }
 
-char CFGOnlyPrinterLegacyPass::ID = 0;
-INITIALIZE_PASS(CFGOnlyPrinterLegacyPass, "dot-cfg-only",
-   "Print CFG of function to 'dot' file (with no function bodies)",
-   false, true)
+PreservedAnalyses CFGPrinterPass::run(Function &F,
+                                      FunctionAnalysisManager &AM) {
+  if (!CFGFuncName.empty() && !F.getName().contains(CFGFuncName))
+    return PreservedAnalyses::all();
+  auto *BFI = &AM.getResult<BlockFrequencyAnalysis>(F);
+  auto *BPI = &AM.getResult<BranchProbabilityAnalysis>(F);
+  writeCFGToDotFile(F, BFI, BPI, getMaxFreq(F, BFI));
+  return PreservedAnalyses::all();
+}
 
 PreservedAnalyses CFGOnlyPrinterPass::run(Function &F,
                                           FunctionAnalysisManager &AM) {
-  writeCFGToDotFile(F, /*CFGOnly=*/true);
+  if (!CFGFuncName.empty() && !F.getName().contains(CFGFuncName))
+    return PreservedAnalyses::all();
+  auto *BFI = &AM.getResult<BlockFrequencyAnalysis>(F);
+  auto *BPI = &AM.getResult<BranchProbabilityAnalysis>(F);
+  writeCFGToDotFile(F, BFI, BPI, getMaxFreq(F, BFI), /*CFGOnly=*/true);
   return PreservedAnalyses::all();
 }
 
@@ -175,10 +134,14 @@ PreservedAnalyses CFGOnlyPrinterPass::run(Function &F,
 /// program, displaying the CFG of the current function.  This depends on there
 /// being a 'dot' and 'gv' program in your path.
 ///
-void Function::viewCFG() const {
+void Function::viewCFG() const { viewCFG(false, nullptr, nullptr); }
+
+void Function::viewCFG(bool ViewCFGOnly, const BlockFrequencyInfo *BFI,
+                       const BranchProbabilityInfo *BPI) const {
   if (!CFGFuncName.empty() && !getName().contains(CFGFuncName))
-     return;
-  ViewGraph(this, "cfg" + getName());
+    return;
+  DOTFuncInfo CFGInfo(this, BFI, BPI, BFI ? getMaxFreq(*this, BFI) : 0);
+  ViewGraph(&CFGInfo, "cfg" + getName(), ViewCFGOnly);
 }
 
 /// viewCFGOnly - This function is meant for use from the debugger.  It works
@@ -186,17 +149,52 @@ void Function::viewCFG() const {
 /// into the nodes, just the label.  If you are only interested in the CFG
 /// this can make the graph smaller.
 ///
-void Function::viewCFGOnly() const {
-  if (!CFGFuncName.empty() && !getName().contains(CFGFuncName))
-     return;
-  ViewGraph(this, "cfg" + getName(), true);
+void Function::viewCFGOnly() const { viewCFGOnly(nullptr, nullptr); }
+
+void Function::viewCFGOnly(const BlockFrequencyInfo *BFI,
+                           const BranchProbabilityInfo *BPI) const {
+  viewCFG(true, BFI, BPI);
 }
 
-FunctionPass *llvm::createCFGPrinterLegacyPassPass () {
-  return new CFGPrinterLegacyPass();
+/// Find all blocks on the paths which terminate with a deoptimize or 
+/// unreachable (i.e. all blocks which are post-dominated by a deoptimize 
+/// or unreachable). These paths are hidden if the corresponding cl::opts
+/// are enabled.
+void DOTGraphTraits<DOTFuncInfo *>::computeDeoptOrUnreachablePaths(
+    const Function *F) {
+  auto evaluateBB = [&](const BasicBlock *Node) {
+    if (succ_empty(Node)) {
+      const Instruction *TI = Node->getTerminator();
+      isOnDeoptOrUnreachablePath[Node] =
+          (HideUnreachablePaths && isa<UnreachableInst>(TI)) ||
+          (HideDeoptimizePaths && Node->getTerminatingDeoptimizeCall());
+      return;
+    }
+    isOnDeoptOrUnreachablePath[Node] =
+        llvm::all_of(successors(Node), [this](const BasicBlock *BB) {
+          return isOnDeoptOrUnreachablePath[BB];
+        });
+  };
+  /// The post order traversal iteration is done to know the status of
+  /// isOnDeoptOrUnreachablePath for all the successors on the current BB.
+  llvm::for_each(post_order(&F->getEntryBlock()), evaluateBB);
 }
 
-FunctionPass *llvm::createCFGOnlyPrinterLegacyPassPass () {
-  return new CFGOnlyPrinterLegacyPass();
+bool DOTGraphTraits<DOTFuncInfo *>::isNodeHidden(const BasicBlock *Node,
+                                                 const DOTFuncInfo *CFGInfo) {
+  if (HideColdPaths.getNumOccurrences() > 0)
+    if (auto *BFI = CFGInfo->getBFI()) {
+      BlockFrequency NodeFreq = BFI->getBlockFreq(Node);
+      BlockFrequency EntryFreq = BFI->getEntryFreq();
+      // Hide blocks with relative frequency below HideColdPaths threshold.
+      if ((double)NodeFreq.getFrequency() / EntryFreq.getFrequency() <
+          HideColdPaths)
+        return true;
+    }
+  if (HideUnreachablePaths || HideDeoptimizePaths) {
+    if (!isOnDeoptOrUnreachablePath.contains(Node))
+      computeDeoptOrUnreachablePaths(Node->getParent());
+    return isOnDeoptOrUnreachablePath[Node];
+  }
+  return false;
 }
-

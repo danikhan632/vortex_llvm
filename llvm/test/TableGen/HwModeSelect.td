@@ -1,4 +1,4 @@
-// RUN: not llvm-tblgen -gen-dag-isel -I %p/../../include %s 2>&1 | FileCheck %s
+// RUN: not --crash llvm-tblgen -gen-dag-isel -I %p/../../include %s 2>&1 | FileCheck %s
 
 // The HwModeSelect class is intended to serve as a base class for other
 // classes that are then used to select a value based on the HW mode.
@@ -18,8 +18,11 @@ def TestTarget : Target {
 def TestReg : Register<"testreg">;
 def TestClass : RegisterClass<"TestTarget", [i32], 32, (add TestReg)>;
 
-def TestMode1 : HwMode<"+feat1">;
-def TestMode2 : HwMode<"+feat2">;
+def HasFeat1 : Predicate<"Subtarget->hasFeat1()">;
+def HasFeat2 : Predicate<"Subtarget->hasFeat2()">;
+
+def TestMode1 : HwMode<"+feat1", [HasFeat1]>;
+def TestMode2 : HwMode<"+feat2", [HasFeat2]>;
 
 def BadDef : ValueTypeByHwMode<[TestMode1, TestMode2, DefaultMode],
                                [i8, i16, i32, i64]>;

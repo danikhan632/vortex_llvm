@@ -6,11 +6,9 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// UNSUPPORTED: libcpp-has-no-threads
-// UNSUPPORTED: c++98, c++03, c++11
-// XFAIL: dylib-has-no-shared_mutex
-
-// FLAKY_TEST.
+// UNSUPPORTED: no-threads
+// UNSUPPORTED: c++03, c++11
+// ALLOW_RETRIES: 2
 
 // <shared_mutex>
 
@@ -18,12 +16,16 @@
 
 // void lock();
 
+#include <cassert>
+#include <chrono>
+#include <cstdlib>
+#include <mutex>
 #include <shared_mutex>
+#include <system_error>
 #include <thread>
 #include <vector>
-#include <cstdlib>
-#include <cassert>
 
+#include "make_test_thread.h"
 #include "test_macros.h"
 
 std::shared_timed_mutex m;
@@ -39,7 +41,7 @@ ms WaitTime = ms(250);
 // Thread sanitizer causes more overhead and will sometimes cause this test
 // to fail. To prevent this we give Thread sanitizer more time to complete the
 // test.
-#if !defined(TEST_HAS_SANITIZERS)
+#if !defined(TEST_IS_EXECUTED_IN_A_SLOW_ENVIRONMENT)
 ms Tolerance = ms(25);
 #else
 ms Tolerance = ms(25 * 5);
@@ -86,7 +88,7 @@ int main(int, char**)
     m.lock();
     std::vector<std::thread> v;
     for (int i = 0; i < 5; ++i)
-        v.push_back(std::thread(f));
+        v.push_back(support::make_test_thread(f));
     std::this_thread::sleep_for(WaitTime);
     m.unlock();
     for (auto& t : v)

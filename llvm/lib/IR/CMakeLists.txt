@@ -1,39 +1,44 @@
-set(LLVM_TARGET_DEFINITIONS AttributesCompatFunc.td)
-tablegen(LLVM AttributesCompatFunc.inc -gen-attrs)
-add_public_tablegen_target(AttributeCompatFuncTableGen)
-
 add_llvm_component_library(LLVMCore
   AbstractCallSite.cpp
   AsmWriter.cpp
+  Assumptions.cpp
   Attributes.cpp
   AutoUpgrade.cpp
   BasicBlock.cpp
+  BuiltinGCs.cpp
   Comdat.cpp
   ConstantFold.cpp
   ConstantRange.cpp
   Constants.cpp
+  ConvergenceVerifier.cpp
   Core.cpp
+  CycleInfo.cpp
   DIBuilder.cpp
   DataLayout.cpp
   DebugInfo.cpp
   DebugInfoMetadata.cpp
+  DebugProgramInstruction.cpp
   DebugLoc.cpp
   DiagnosticHandler.cpp
   DiagnosticInfo.cpp
   DiagnosticPrinter.cpp
   Dominators.cpp
+  EHPersonalities.cpp
   FPEnv.cpp
   Function.cpp
+  GCStrategy.cpp
   GVMaterializer.cpp
   Globals.cpp
   IRBuilder.cpp
   IRPrintingPasses.cpp
+  SSAContext.cpp
   InlineAsm.cpp
   Instruction.cpp
   Instructions.cpp
   IntrinsicInst.cpp
   LLVMContext.cpp
   LLVMContextImpl.cpp
+  LLVMRemarkStreamer.cpp
   LegacyPassManager.cpp
   MDBuilder.cpp
   Mangler.cpp
@@ -47,23 +52,38 @@ add_llvm_component_library(LLVMCore
   PassManager.cpp
   PassRegistry.cpp
   PassTimingInfo.cpp
-  RemarkStreamer.cpp
+  PrintPasses.cpp
+  ProfDataUtils.cpp
   SafepointIRVerifier.cpp
   ProfileSummary.cpp
+  PseudoProbe.cpp
+  ReplaceConstant.cpp
   Statepoint.cpp
+  StructuralHash.cpp
   Type.cpp
+  TypedPointerType.cpp
   TypeFinder.cpp
   Use.cpp
   User.cpp
   Value.cpp
   ValueSymbolTable.cpp
+  VectorBuilder.cpp
   Verifier.cpp
+  VFABIDemangler.cpp
 
   ADDITIONAL_HEADER_DIRS
   ${LLVM_MAIN_INCLUDE_DIR}/llvm/IR
 
-  LINK_LIBS ${LLVM_PTHREAD_LIB}
+  LINK_LIBS
+  ${LLVM_PTHREAD_LIB}
 
   DEPENDS
   intrinsics_gen
+
+  LINK_COMPONENTS
+  BinaryFormat
+  Demangle
+  Remarks
+  Support
+  TargetParser
   )

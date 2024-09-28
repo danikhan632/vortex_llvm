@@ -4,9 +4,9 @@
 ;
 ; GCN-LABEL: sub_zext_zext:
 ; GCN: ds_read_b32 [[VAL:v[0-9]+]],
-; GCN-DAG: v_cmp_lt_f32{{.*}} [[CC1:s\[[0-9]+:[0-9]+\]]], 0, [[VAL]]
-; GCN-DAG: v_cmp_gt_f32{{.*}} vcc, 0, [[VAL]]
-; GCN: v_cndmask_{{.*}} [[ZEXTCC1:v[0-9]+]], 0, 1, [[CC1]]
+; GCN: v_cmp_lt_f32{{.*}} vcc, 0, [[VAL]]
+; GCN: v_cndmask_{{.*}} [[ZEXTCC1:v[0-9]+]], 0, 1, vcc
+; GCN: v_cmp_gt_f32{{.*}} vcc, 0, [[VAL]]
 ; GCN: v_subbrev{{.*}} {{v[0-9]+}}, vcc, 0, [[ZEXTCC1]], vcc
 ;
 ; Before the reversion that this test is attached to, the compiler commuted
@@ -21,7 +21,7 @@
 define amdgpu_cs float @sub_zext_zext() {
 .entry:
 
-  %t519 = load float, float addrspace(3)* null
+  %t519 = load float, ptr addrspace(3) null
 
   %t524 = fcmp ogt float %t519, 0.000000e+00
   %t525 = fcmp olt float %t519, 0.000000e+00

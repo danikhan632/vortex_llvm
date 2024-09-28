@@ -15,8 +15,10 @@
 #ifndef LLVM_CODEGEN_MACHINEOPTIMIZATIONREMARKEMITTER_H
 #define LLVM_CODEGEN_MACHINEOPTIMIZATIONREMARKEMITTER_H
 
-#include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
+#include "llvm/IR/DiagnosticInfo.h"
+#include "llvm/IR/Function.h"
+#include <optional>
 
 namespace llvm {
 class MachineBasicBlock;
@@ -118,6 +120,12 @@ public:
       : DiagnosticInfoMIROptimization(DK_MachineOptimizationRemarkAnalysis,
                                       PassName, RemarkName, Loc, MBB) {}
 
+  MachineOptimizationRemarkAnalysis(const char *PassName, StringRef RemarkName,
+                                    const MachineInstr *MI)
+      : DiagnosticInfoMIROptimization(DK_MachineOptimizationRemarkAnalysis,
+                                      PassName, RemarkName, MI->getDebugLoc(),
+                                      MI->getParent()) {}
+
   static bool classof(const DiagnosticInfo *DI) {
     return DI->getKind() == DK_MachineOptimizationRemarkAnalysis;
   }
@@ -159,7 +167,7 @@ public:
   /// that non-trivial false positives can be quickly detected by the user.
   bool allowExtraAnalysis(StringRef PassName) const {
     return (
-        MF.getFunction().getContext().getRemarkStreamer() ||
+        MF.getFunction().getContext().getLLVMRemarkStreamer() ||
         MF.getFunction().getContext().getDiagHandlerPtr()->isAnyRemarkEnabled(
             PassName));
   }
@@ -172,7 +180,7 @@ public:
     // remarks enabled. We can't currently check whether remarks are requested
     // for the calling pass since that requires actually building the remark.
 
-    if (MF.getFunction().getContext().getRemarkStreamer() ||
+    if (MF.getFunction().getContext().getLLVMRemarkStreamer() ||
         MF.getFunction()
             .getContext()
             .getDiagHandlerPtr()
@@ -194,7 +202,7 @@ private:
 
   /// Compute hotness from IR value (currently assumed to be a block) if PGO is
   /// available.
-  Optional<uint64_t> computeHotness(const MachineBasicBlock &MBB);
+  std::optional<uint64_t> computeHotness(const MachineBasicBlock &MBB);
 
   /// Similar but use value from \p OptDiag and update hotness there.
   void computeHotness(DiagnosticInfoMIROptimization &Remark);

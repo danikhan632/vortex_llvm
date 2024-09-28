@@ -4,9 +4,10 @@
 ## Check how we dump symbols when they have only STV_* bits set for st_other.
 ## (This is the most common case).
 
-# RUN: yaml2obj --docnum=1 %s > %t1.o
+# RUN: yaml2obj --docnum=1 %s -o %t1.o
 # RUN: llvm-readobj --symbols %t1.o | FileCheck %s --check-prefix=LLVM
 # RUN: llvm-readelf --symbols %t1.o | FileCheck %s --strict-whitespace --check-prefix=GNU
+# RUN: llvm-readobj --symbols --pretty-print --elf-output-style=JSON %t1.o | FileCheck %s --check-prefix=JSON
 
 # LLVM:      Name: default
 # LLVM:      Other: 0
@@ -30,12 +31,50 @@
 # GNU-NEXT: HIDDEN    UND hidden
 # GNU-NEXT: PROTECTED UND protected
 
+# JSON:      "Name": "default",
+# JSON:      "Other": {
+# JSON-NEXT:   "Value": 0,
+# JSON-NEXT:   "Flags": []
+# JSON-NEXT: },
+
+# JSON:      "Name": "internal",
+# JSON:      "Other": {
+# JSON-NEXT:    "Value": 1,
+# JSON-NEXT:    "Flags": [
+# JSON-NEXT:      {
+# JSON-NEXT:        "Name": "STV_INTERNAL",
+# JSON-NEXT:        "Value": 1
+# JSON-NEXT:      }
+# JSON-NEXT:    ]
+# JSON-NEXT:  },
+
+# JSON:      "Name": "hidden",
+# JSON:      "Other": {
+# JSON-NEXT:    "Value": 2,
+# JSON-NEXT:    "Flags": [
+# JSON-NEXT:      {
+# JSON-NEXT:        "Name": "STV_HIDDEN",
+# JSON-NEXT:        "Value": 2
+# JSON-NEXT:      }
+# JSON-NEXT:    ]
+# JSON-NEXT:  },
+
+# JSON:      "Name": "protected",
+# JSON:      "Other": {
+# JSON-NEXT:    "Value": 3,
+# JSON-NEXT:    "Flags": [
+# JSON-NEXT:      {
+# JSON-NEXT:        "Name": "STV_PROTECTED",
+# JSON-NEXT:        "Value": 3
+# JSON-NEXT:      }
+# JSON-NEXT:    ]
+# JSON-NEXT:  },
+
 --- !ELF
 FileHeader:
-  Class:   ELFCLASS32
-  Data:    ELFDATA2LSB
-  Type:    ET_REL
-  Machine: EM_386
+  Class: ELFCLASS32
+  Data:  ELFDATA2LSB
+  Type:  ET_REL
 Symbols:
   - Name: default
     Other: [ STV_DEFAULT ]
@@ -52,7 +91,7 @@ Symbols:
 
 ## Check the output when we have non-visibility bits set for at least one of the symbols.
 
-# RUN: yaml2obj --docnum=2 %s > %t2.o
+# RUN: yaml2obj --docnum=2 %s -o %t2.o
 # RUN: llvm-readobj --symbols %t2.o | FileCheck %s --check-prefixes=LLVM,LLVM-OTHER
 # RUN: llvm-readelf --symbols %t2.o | FileCheck %s --strict-whitespace --check-prefix=GNU-OTHER
 
@@ -70,10 +109,9 @@ Symbols:
 
 --- !ELF
 FileHeader:
-  Class:   ELFCLASS32
-  Data:    ELFDATA2LSB
-  Type:    ET_REL
-  Machine: EM_386
+  Class: ELFCLASS32
+  Data:  ELFDATA2LSB
+  Type:  ET_REL
 Symbols:
   - Name: default
     Other: [ STV_DEFAULT ]

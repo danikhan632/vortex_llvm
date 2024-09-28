@@ -38,7 +38,18 @@ template <> struct ilist_alloc_traits<MCFragment> {
 /// current translation unit.  The MCContext class uniques and creates these.
 class MCSection {
 public:
-  enum SectionVariant { SV_COFF = 0, SV_ELF, SV_MachO, SV_Wasm, SV_XCOFF };
+  static constexpr unsigned NonUniqueID = ~0U;
+
+  enum SectionVariant {
+    SV_COFF = 0,
+    SV_ELF,
+    SV_GOFF,
+    SV_MachO,
+    SV_Wasm,
+    SV_XCOFF,
+    SV_SPIRV,
+    SV_DXContainer,
+  };
 
   /// Express the state of bundle locked groups while emitting code.
   enum BundleLockStateType {
@@ -63,7 +74,7 @@ private:
   /// The section index in the assemblers section list.
   unsigned Ordinal = 0;
   /// The index of this section in the layout order.
-  unsigned LayoutOrder;
+  unsigned LayoutOrder = 0;
 
   /// Keeping track of bundle-locked state.
   BundleLockStateType BundleLockState = NotBundleLocked;
@@ -98,16 +109,19 @@ private:
   SmallVector<PendingLabel, 2> PendingLabels;
 
 protected:
+  // TODO Make Name private when possible.
+  StringRef Name;
   SectionVariant Variant;
   SectionKind Kind;
 
-  MCSection(SectionVariant V, SectionKind K, MCSymbol *Begin);
+  MCSection(SectionVariant V, StringRef Name, SectionKind K, MCSymbol *Begin);
   ~MCSection();
 
 public:
   MCSection(const MCSection &) = delete;
   MCSection &operator=(const MCSection &) = delete;
 
+  StringRef getName() const { return Name; }
   SectionKind getKind() const { return Kind; }
 
   SectionVariant getVariant() const { return Variant; }
@@ -123,8 +137,14 @@ public:
   MCSymbol *getEndSymbol(MCContext &Ctx);
   bool hasEnded() const;
 
-  unsigned getAlignment() const { return Alignment.value(); }
+  Align getAlign() const { return Alignment; }
   void setAlignment(Align Value) { Alignment = Value; }
+
+  /// Makes sure that Alignment is at least MinAlignment.
+  void ensureMinAlignment(Align MinAlignment) {
+    if (Alignment < MinAlignment)
+      Alignment = MinAlignment;
+  }
 
   unsigned getOrdinal() const { return Ordinal; }
   void setOrdinal(unsigned Value) { Ordinal = Value; }
@@ -172,17 +192,19 @@ public:
 
   void dump() const;
 
-  virtual void PrintSwitchToSection(const MCAsmInfo &MAI, const Triple &T,
+  virtual void printSwitchToSection(const MCAsmInfo &MAI, const Triple &T,
                                     raw_ostream &OS,
                                     const MCExpr *Subsection) const = 0;
 
   /// Return true if a .align directive should use "optimized nops" to fill
   /// instead of 0s.
-  virtual bool UseCodeAlign() const = 0;
+  virtual bool useCodeAlign() const = 0;
 
   /// Check whether this section is "virtual", that is has no actual object
   /// file contents.
   virtual bool isVirtualSection() const = 0;
+
+  virtual StringRef getVirtualSectionKind() const;
 
   /// Add a pending label for the requested subsection. This label will be
   /// associated with a fragment in flushPendingLabels()

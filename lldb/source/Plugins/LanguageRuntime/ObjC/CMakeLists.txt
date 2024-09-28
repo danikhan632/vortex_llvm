@@ -1,4 +1,4 @@
-add_lldb_library(lldbPluginObjCRuntime PLUGIN
+add_lldb_library(lldbPluginObjCRuntime
   ObjCLanguageRuntime.cpp
 
   LINK_LIBS
@@ -7,4 +7,6 @@ add_lldb_library(lldbPluginObjCRuntime PLUGIN
     lldbTarget
     lldbUtility
 )
+
 add_subdirectory(AppleObjCRuntime)
+add_subdirectory(GNUstepObjCRuntime)

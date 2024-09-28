@@ -12,9 +12,7 @@
 
 using namespace clang::ast_matchers;
 
-namespace clang {
-namespace tidy {
-namespace objc {
+namespace clang::tidy::objc {
 
 namespace {
 
@@ -37,10 +35,6 @@ AST_MATCHER_P(ObjCContainerDecl, hasInstanceMethod,
 } // namespace
 
 void MissingHashCheck::registerMatchers(MatchFinder *Finder) {
-  // This check should only be applied to Objective-C sources.
-  if (!getLangOpts().ObjC)
-    return;
-
   Finder->addMatcher(
       objcMethodDecl(
           hasName("isEqual:"), isInstanceMethod(),
@@ -57,6 +51,4 @@ void MissingHashCheck::check(const MatchFinder::MatchResult &Result) {
       << ID;
 }
 
-} // namespace objc
-} // namespace tidy
-} // namespace clang
+} // namespace clang::tidy::objc

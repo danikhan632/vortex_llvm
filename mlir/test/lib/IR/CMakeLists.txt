@@ -1,15 +1,42 @@
-add_llvm_library(MLIRTestIR
+# Exclude tests from libMLIR.so
+add_mlir_library(MLIRTestIR
+  TestAffineWalk.cpp
+  TestBytecodeRoundtrip.cpp
+  TestBuiltinAttributeInterfaces.cpp
+  TestBuiltinDistinctAttributes.cpp
+  TestClone.cpp
+  TestDiagnostics.cpp
+  TestDominance.cpp
   TestFunc.cpp
+  TestInterfaces.cpp
   TestMatchers.cpp
+  TestLazyLoading.cpp
+  TestOpaqueLoc.cpp
+  TestOperationEquals.cpp
+  TestPrintDefUse.cpp
+  TestPrintInvalid.cpp
+  TestPrintNesting.cpp
+  TestSideEffects.cpp
+  TestSlicing.cpp
   TestSymbolUses.cpp
+  TestRegions.cpp
+  TestTypes.cpp
+  TestUseListOrders.cpp
+  TestVisitors.cpp
+  TestVisitorsGeneric.cpp
 
-  ADDITIONAL_HEADER_DIRS
-  )
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../TestDialect)
-include_directories(${CMAKE_CURRENT_BINARY_DIR}/../TestDialect)
-add_dependencies(MLIRTestIR
-  MLIRTestDialect
-)
-target_link_libraries(MLIRTestIR
+  EXCLUDE_FROM_LIBMLIR
+
+  LINK_LIBS PUBLIC
   MLIRPass
+  MLIRBytecodeReader
+  MLIRBytecodeWriter
+  MLIRFunctionInterfaces
+  MLIRTestDialect
+  )
+
+target_include_directories(MLIRTestIR
+  PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../Dialect/Test
+  ${CMAKE_CURRENT_BINARY_DIR}/../Dialect/Test
   )

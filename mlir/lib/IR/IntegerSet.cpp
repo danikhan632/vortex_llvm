@@ -1,6 +1,6 @@
 //===- IntegerSet.cpp - MLIR Integer Set class ----------------------------===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -8,7 +8,6 @@
 
 #include "mlir/IR/IntegerSet.h"
 #include "IntegerSetDetail.h"
-#include "mlir/IR/AffineExpr.h"
 
 using namespace mlir;
 using namespace mlir::detail;
@@ -36,9 +35,6 @@ unsigned IntegerSet::getNumInequalities() const {
 }
 
 bool IntegerSet::isEmptyIntegerSet() const {
-  // This will only work if uniquing is on.
-  static_assert(kUniquingThreshold >= 1,
-                "uniquing threshold should be at least one");
   return *this == getEmptySet(set->dimCount, set->symbolCount, getContext());
 }
 

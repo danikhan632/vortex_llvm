@@ -1,4 +1,4 @@
-//===-- PluginManager.cpp ---------------------------------------*- C++ -*-===//
+//===-- PluginManager.cpp -------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -12,51 +12,37 @@
 #include "lldb/Host/FileSystem.h"
 #include "lldb/Host/HostInfo.h"
 #include "lldb/Interpreter/OptionValueProperties.h"
-#include "lldb/Utility/ConstString.h"
+#include "lldb/Target/Process.h"
 #include "lldb/Utility/FileSpec.h"
 #include "lldb/Utility/Status.h"
 #include "lldb/Utility/StringList.h"
-
-#if defined(_WIN32)
-#include "lldb/Host/windows/PosixApi.h"
-#endif
-
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/DynamicLibrary.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/raw_ostream.h"
-
+#include <cassert>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
-
-#include <assert.h>
-
-namespace lldb_private {
-class CommandInterpreter;
-}
+#if defined(_WIN32)
+#include "lldb/Host/windows/PosixApi.h"
+#endif
 
 using namespace lldb;
 using namespace lldb_private;
-
-enum PluginAction {
-  ePluginRegisterInstance,
-  ePluginUnregisterInstance,
-  ePluginGetInstanceAtIndex
-};
 
 typedef bool (*PluginInitCallback)();
 typedef void (*PluginTermCallback)();
 
 struct PluginInfo {
-  PluginInfo() : plugin_init_callback(nullptr), plugin_term_callback(nullptr) {}
+  PluginInfo() = default;
 
   llvm::sys::DynamicLibrary library;
-  PluginInitCallback plugin_init_callback;
-  PluginTermCallback plugin_term_callback;
+  PluginInitCallback plugin_init_callback = nullptr;
+  PluginTermCallback plugin_term_callback = nullptr;
 };
 
 typedef std::map<FileSpec, PluginInfo> PluginTerminateMap;
@@ -92,7 +78,6 @@ template <typename FPtrTy> static FPtrTy CastToFPtr(void *VPtr) {
 static FileSystem::EnumerateDirectoryResult
 LoadPluginCallback(void *baton, llvm::sys::fs::file_type ft,
                    llvm::StringRef path) {
-  //    PluginManager *plugin_manager = (PluginManager *)baton;
   Status error;
 
   namespace fs = llvm::sys::fs;
@@ -156,7 +141,6 @@ LoadPluginCallback(void *baton, llvm::sys::fs::file_type ft,
 }
 
 void PluginManager::Initialize() {
-#if 1
   const bool find_directories = true;
   const bool find_files = true;
   const bool find_other = true;
@@ -178,7 +162,6 @@ void PluginManager::Initialize() {
                                                 LoadPluginCallback, nullptr);
     }
   }
-#endif
 }
 
 void PluginManager::Terminate() {
@@ -197,114 +180,141 @@ void PluginManager::Terminate() {
   plugin_map.clear();
 }
 
-#pragma mark ABI
+template <typename Callback> struct PluginInstance {
+  typedef Callback CallbackType;
 
-struct ABIInstance {
-  ABIInstance() : name(), description(), create_callback(nullptr) {}
+  PluginInstance() = default;
+  PluginInstance(llvm::StringRef name, llvm::StringRef description,
+                 Callback create_callback,
+                 DebuggerInitializeCallback debugger_init_callback = nullptr)
+      : name(name), description(description), create_callback(create_callback),
+        debugger_init_callback(debugger_init_callback) {}
 
-  ConstString name;
-  std::string description;
-  ABICreateInstance create_callback;
+  llvm::StringRef name;
+  llvm::StringRef description;
+  Callback create_callback;
+  DebuggerInitializeCallback debugger_init_callback;
 };
 
-typedef std::vector<ABIInstance> ABIInstances;
+template <typename Instance> class PluginInstances {
+public:
+  template <typename... Args>
+  bool RegisterPlugin(llvm::StringRef name, llvm::StringRef description,
+                      typename Instance::CallbackType callback,
+                      Args &&...args) {
+    if (!callback)
+      return false;
+    assert(!name.empty());
+    Instance instance =
+        Instance(name, description, callback, std::forward<Args>(args)...);
+    m_instances.push_back(instance);
+    return false;
+  }
 
-static std::recursive_mutex &GetABIInstancesMutex() {
-  static std::recursive_mutex g_instances_mutex;
-  return g_instances_mutex;
-}
+  bool UnregisterPlugin(typename Instance::CallbackType callback) {
+    if (!callback)
+      return false;
+    auto pos = m_instances.begin();
+    auto end = m_instances.end();
+    for (; pos != end; ++pos) {
+      if (pos->create_callback == callback) {
+        m_instances.erase(pos);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  typename Instance::CallbackType GetCallbackAtIndex(uint32_t idx) {
+    if (Instance *instance = GetInstanceAtIndex(idx))
+      return instance->create_callback;
+    return nullptr;
+  }
+
+  llvm::StringRef GetDescriptionAtIndex(uint32_t idx) {
+    if (Instance *instance = GetInstanceAtIndex(idx))
+      return instance->description;
+    return "";
+  }
+
+  llvm::StringRef GetNameAtIndex(uint32_t idx) {
+    if (Instance *instance = GetInstanceAtIndex(idx))
+      return instance->name;
+    return "";
+  }
+
+  typename Instance::CallbackType GetCallbackForName(llvm::StringRef name) {
+    if (name.empty())
+      return nullptr;
+    for (auto &instance : m_instances) {
+      if (name == instance.name)
+        return instance.create_callback;
+    }
+    return nullptr;
+  }
+
+  void PerformDebuggerCallback(Debugger &debugger) {
+    for (auto &instance : m_instances) {
+      if (instance.debugger_init_callback)
+        instance.debugger_init_callback(debugger);
+    }
+  }
+
+  const std::vector<Instance> &GetInstances() const { return m_instances; }
+  std::vector<Instance> &GetInstances() { return m_instances; }
+
+  Instance *GetInstanceAtIndex(uint32_t idx) {
+    if (idx < m_instances.size())
+      return &m_instances[idx];
+    return nullptr;
+  }
+
+private:
+  std::vector<Instance> m_instances;
+};
+
+#pragma mark ABI
+
+typedef PluginInstance<ABICreateInstance> ABIInstance;
+typedef PluginInstances<ABIInstance> ABIInstances;
 
 static ABIInstances &GetABIInstances() {
   static ABIInstances g_instances;
   return g_instances;
 }
 
-bool PluginManager::RegisterPlugin(ConstString name,
-                                   const char *description,
+bool PluginManager::RegisterPlugin(llvm::StringRef name,
+                                   llvm::StringRef description,
                                    ABICreateInstance create_callback) {
-  if (create_callback) {
-    ABIInstance instance;
-    assert((bool)name);
-    instance.name = name;
-    if (description && description[0])
-      instance.description = description;
-    instance.create_callback = create_callback;
-    std::lock_guard<std::recursive_mutex> guard(GetABIInstancesMutex());
-    GetABIInstances().push_back(instance);
-    return true;
-  }
-  return false;
+  return GetABIInstances().RegisterPlugin(name, description, create_callback);
 }
 
 bool PluginManager::UnregisterPlugin(ABICreateInstance create_callback) {
-  if (create_callback) {
-    std::lock_guard<std::recursive_mutex> guard(GetABIInstancesMutex());
-    ABIInstances &instances = GetABIInstances();
-
-    ABIInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (pos->create_callback == create_callback) {
-        instances.erase(pos);
-        return true;
-      }
-    }
-  }
-  return false;
+  return GetABIInstances().UnregisterPlugin(create_callback);
 }
 
 ABICreateInstance PluginManager::GetABICreateCallbackAtIndex(uint32_t idx) {
-  std::lock_guard<std::recursive_mutex> guard(GetABIInstancesMutex());
-  ABIInstances &instances = GetABIInstances();
-  if (idx < instances.size())
-    return instances[idx].create_callback;
-  return nullptr;
-}
-
-ABICreateInstance
-PluginManager::GetABICreateCallbackForPluginName(ConstString name) {
-  if (name) {
-    std::lock_guard<std::recursive_mutex> guard(GetABIInstancesMutex());
-    ABIInstances &instances = GetABIInstances();
-
-    ABIInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (name == pos->name)
-        return pos->create_callback;
-    }
-  }
-  return nullptr;
+  return GetABIInstances().GetCallbackAtIndex(idx);
 }
 
 #pragma mark Architecture
 
-struct ArchitectureInstance {
-  ConstString name;
-  std::string description;
-  PluginManager::ArchitectureCreateInstance create_callback;
-};
-
+typedef PluginInstance<ArchitectureCreateInstance> ArchitectureInstance;
 typedef std::vector<ArchitectureInstance> ArchitectureInstances;
-
-static std::mutex &GetArchitectureMutex() {
-    static std::mutex g_architecture_mutex;
-    return g_architecture_mutex;
-}
 
 static ArchitectureInstances &GetArchitectureInstances() {
   static ArchitectureInstances g_instances;
   return g_instances;
 }
 
-void PluginManager::RegisterPlugin(ConstString name,
+void PluginManager::RegisterPlugin(llvm::StringRef name,
                                    llvm::StringRef description,
                                    ArchitectureCreateInstance create_callback) {
-  std::lock_guard<std::mutex> guard(GetArchitectureMutex());
   GetArchitectureInstances().push_back({name, description, create_callback});
 }
 
 void PluginManager::UnregisterPlugin(
     ArchitectureCreateInstance create_callback) {
-  std::lock_guard<std::mutex> guard(GetArchitectureMutex());
   auto &instances = GetArchitectureInstances();
 
   for (auto pos = instances.begin(), end = instances.end(); pos != end; ++pos) {
@@ -318,7 +328,6 @@ void PluginManager::UnregisterPlugin(
 
 std::unique_ptr<Architecture>
 PluginManager::CreateArchitectureInstance(const ArchSpec &arch) {
-  std::lock_guard<std::mutex> guard(GetArchitectureMutex());
   for (const auto &instances : GetArchitectureInstances()) {
     if (auto plugin_up = instances.create_callback(arch))
       return plugin_up;
@@ -328,104 +337,41 @@ PluginManager::CreateArchitectureInstance(const ArchSpec &arch) {
 
 #pragma mark Disassembler
 
-struct DisassemblerInstance {
-  DisassemblerInstance() : name(), description(), create_callback(nullptr) {}
-
-  ConstString name;
-  std::string description;
-  DisassemblerCreateInstance create_callback;
-};
-
-typedef std::vector<DisassemblerInstance> DisassemblerInstances;
-
-static std::recursive_mutex &GetDisassemblerMutex() {
-  static std::recursive_mutex g_instances_mutex;
-  return g_instances_mutex;
-}
+typedef PluginInstance<DisassemblerCreateInstance> DisassemblerInstance;
+typedef PluginInstances<DisassemblerInstance> DisassemblerInstances;
 
 static DisassemblerInstances &GetDisassemblerInstances() {
   static DisassemblerInstances g_instances;
   return g_instances;
 }
 
-bool PluginManager::RegisterPlugin(ConstString name,
-                                   const char *description,
+bool PluginManager::RegisterPlugin(llvm::StringRef name,
+                                   llvm::StringRef description,
                                    DisassemblerCreateInstance create_callback) {
-  if (create_callback) {
-    DisassemblerInstance instance;
-    assert((bool)name);
-    instance.name = name;
-    if (description && description[0])
-      instance.description = description;
-    instance.create_callback = create_callback;
-    std::lock_guard<std::recursive_mutex> guard(GetDisassemblerMutex());
-    GetDisassemblerInstances().push_back(instance);
-    return true;
-  }
-  return false;
+  return GetDisassemblerInstances().RegisterPlugin(name, description,
+                                                   create_callback);
 }
 
 bool PluginManager::UnregisterPlugin(
     DisassemblerCreateInstance create_callback) {
-  if (create_callback) {
-    std::lock_guard<std::recursive_mutex> guard(GetDisassemblerMutex());
-    DisassemblerInstances &instances = GetDisassemblerInstances();
-
-    DisassemblerInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (pos->create_callback == create_callback) {
-        instances.erase(pos);
-        return true;
-      }
-    }
-  }
-  return false;
+  return GetDisassemblerInstances().UnregisterPlugin(create_callback);
 }
 
 DisassemblerCreateInstance
 PluginManager::GetDisassemblerCreateCallbackAtIndex(uint32_t idx) {
-  std::lock_guard<std::recursive_mutex> guard(GetDisassemblerMutex());
-  DisassemblerInstances &instances = GetDisassemblerInstances();
-  if (idx < instances.size())
-    return instances[idx].create_callback;
-  return nullptr;
+  return GetDisassemblerInstances().GetCallbackAtIndex(idx);
 }
 
 DisassemblerCreateInstance
 PluginManager::GetDisassemblerCreateCallbackForPluginName(
-    ConstString name) {
-  if (name) {
-    std::lock_guard<std::recursive_mutex> guard(GetDisassemblerMutex());
-    DisassemblerInstances &instances = GetDisassemblerInstances();
-
-    DisassemblerInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (name == pos->name)
-        return pos->create_callback;
-    }
-  }
-  return nullptr;
+    llvm::StringRef name) {
+  return GetDisassemblerInstances().GetCallbackForName(name);
 }
 
 #pragma mark DynamicLoader
 
-struct DynamicLoaderInstance {
-  DynamicLoaderInstance()
-      : name(), description(), create_callback(nullptr),
-        debugger_init_callback(nullptr) {}
-
-  ConstString name;
-  std::string description;
-  DynamicLoaderCreateInstance create_callback;
-  DebuggerInitializeCallback debugger_init_callback;
-};
-
-typedef std::vector<DynamicLoaderInstance> DynamicLoaderInstances;
-
-static std::recursive_mutex &GetDynamicLoaderMutex() {
-  static std::recursive_mutex g_instances_mutex;
-  return g_instances_mutex;
-}
+typedef PluginInstance<DynamicLoaderCreateInstance> DynamicLoaderInstance;
+typedef PluginInstances<DynamicLoaderInstance> DynamicLoaderInstances;
 
 static DynamicLoaderInstances &GetDynamicLoaderInstances() {
   static DynamicLoaderInstances g_instances;
@@ -433,84 +379,33 @@ static DynamicLoaderInstances &GetDynamicLoaderInstances() {
 }
 
 bool PluginManager::RegisterPlugin(
-    ConstString name, const char *description,
+    llvm::StringRef name, llvm::StringRef description,
     DynamicLoaderCreateInstance create_callback,
     DebuggerInitializeCallback debugger_init_callback) {
-  if (create_callback) {
-    DynamicLoaderInstance instance;
-    assert((bool)name);
-    instance.name = name;
-    if (description && description[0])
-      instance.description = description;
-    instance.create_callback = create_callback;
-    instance.debugger_init_callback = debugger_init_callback;
-    std::lock_guard<std::recursive_mutex> guard(GetDynamicLoaderMutex());
-    GetDynamicLoaderInstances().push_back(instance);
-  }
-  return false;
+  return GetDynamicLoaderInstances().RegisterPlugin(
+      name, description, create_callback, debugger_init_callback);
 }
 
 bool PluginManager::UnregisterPlugin(
     DynamicLoaderCreateInstance create_callback) {
-  if (create_callback) {
-    std::lock_guard<std::recursive_mutex> guard(GetDynamicLoaderMutex());
-    DynamicLoaderInstances &instances = GetDynamicLoaderInstances();
-
-    DynamicLoaderInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (pos->create_callback == create_callback) {
-        instances.erase(pos);
-        return true;
-      }
-    }
-  }
-  return false;
+  return GetDynamicLoaderInstances().UnregisterPlugin(create_callback);
 }
 
 DynamicLoaderCreateInstance
 PluginManager::GetDynamicLoaderCreateCallbackAtIndex(uint32_t idx) {
-  std::lock_guard<std::recursive_mutex> guard(GetDynamicLoaderMutex());
-  DynamicLoaderInstances &instances = GetDynamicLoaderInstances();
-  if (idx < instances.size())
-    return instances[idx].create_callback;
-  return nullptr;
+  return GetDynamicLoaderInstances().GetCallbackAtIndex(idx);
 }
 
 DynamicLoaderCreateInstance
 PluginManager::GetDynamicLoaderCreateCallbackForPluginName(
-    ConstString name) {
-  if (name) {
-    std::lock_guard<std::recursive_mutex> guard(GetDynamicLoaderMutex());
-    DynamicLoaderInstances &instances = GetDynamicLoaderInstances();
-
-    DynamicLoaderInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (name == pos->name)
-        return pos->create_callback;
-    }
-  }
-  return nullptr;
+    llvm::StringRef name) {
+  return GetDynamicLoaderInstances().GetCallbackForName(name);
 }
 
 #pragma mark JITLoader
 
-struct JITLoaderInstance {
-  JITLoaderInstance()
-      : name(), description(), create_callback(nullptr),
-        debugger_init_callback(nullptr) {}
-
-  ConstString name;
-  std::string description;
-  JITLoaderCreateInstance create_callback;
-  DebuggerInitializeCallback debugger_init_callback;
-};
-
-typedef std::vector<JITLoaderInstance> JITLoaderInstances;
-
-static std::recursive_mutex &GetJITLoaderMutex() {
-  static std::recursive_mutex g_instances_mutex;
-  return g_instances_mutex;
-}
+typedef PluginInstance<JITLoaderCreateInstance> JITLoaderInstance;
+typedef PluginInstances<JITLoaderInstance> JITLoaderInstances;
 
 static JITLoaderInstances &GetJITLoaderInstances() {
   static JITLoaderInstances g_instances;
@@ -518,80 +413,27 @@ static JITLoaderInstances &GetJITLoaderInstances() {
 }
 
 bool PluginManager::RegisterPlugin(
-    ConstString name, const char *description,
+    llvm::StringRef name, llvm::StringRef description,
     JITLoaderCreateInstance create_callback,
     DebuggerInitializeCallback debugger_init_callback) {
-  if (create_callback) {
-    JITLoaderInstance instance;
-    assert((bool)name);
-    instance.name = name;
-    if (description && description[0])
-      instance.description = description;
-    instance.create_callback = create_callback;
-    instance.debugger_init_callback = debugger_init_callback;
-    std::lock_guard<std::recursive_mutex> guard(GetJITLoaderMutex());
-    GetJITLoaderInstances().push_back(instance);
-  }
-  return false;
+  return GetJITLoaderInstances().RegisterPlugin(
+      name, description, create_callback, debugger_init_callback);
 }
 
 bool PluginManager::UnregisterPlugin(JITLoaderCreateInstance create_callback) {
-  if (create_callback) {
-    std::lock_guard<std::recursive_mutex> guard(GetJITLoaderMutex());
-    JITLoaderInstances &instances = GetJITLoaderInstances();
-
-    JITLoaderInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (pos->create_callback == create_callback) {
-        instances.erase(pos);
-        return true;
-      }
-    }
-  }
-  return false;
+  return GetJITLoaderInstances().UnregisterPlugin(create_callback);
 }
 
 JITLoaderCreateInstance
 PluginManager::GetJITLoaderCreateCallbackAtIndex(uint32_t idx) {
-  std::lock_guard<std::recursive_mutex> guard(GetJITLoaderMutex());
-  JITLoaderInstances &instances = GetJITLoaderInstances();
-  if (idx < instances.size())
-    return instances[idx].create_callback;
-  return nullptr;
-}
-
-JITLoaderCreateInstance PluginManager::GetJITLoaderCreateCallbackForPluginName(
-    ConstString name) {
-  if (name) {
-    std::lock_guard<std::recursive_mutex> guard(GetJITLoaderMutex());
-    JITLoaderInstances &instances = GetJITLoaderInstances();
-
-    JITLoaderInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (name == pos->name)
-        return pos->create_callback;
-    }
-  }
-  return nullptr;
+  return GetJITLoaderInstances().GetCallbackAtIndex(idx);
 }
 
 #pragma mark EmulateInstruction
 
-struct EmulateInstructionInstance {
-  EmulateInstructionInstance()
-      : name(), description(), create_callback(nullptr) {}
-
-  ConstString name;
-  std::string description;
-  EmulateInstructionCreateInstance create_callback;
-};
-
-typedef std::vector<EmulateInstructionInstance> EmulateInstructionInstances;
-
-static std::recursive_mutex &GetEmulateInstructionMutex() {
-  static std::recursive_mutex g_instances_mutex;
-  return g_instances_mutex;
-}
+typedef PluginInstance<EmulateInstructionCreateInstance>
+    EmulateInstructionInstance;
+typedef PluginInstances<EmulateInstructionInstance> EmulateInstructionInstances;
 
 static EmulateInstructionInstances &GetEmulateInstructionInstances() {
   static EmulateInstructionInstances g_instances;
@@ -599,82 +441,32 @@ static EmulateInstructionInstances &GetEmulateInstructionInstances() {
 }
 
 bool PluginManager::RegisterPlugin(
-    ConstString name, const char *description,
+    llvm::StringRef name, llvm::StringRef description,
     EmulateInstructionCreateInstance create_callback) {
-  if (create_callback) {
-    EmulateInstructionInstance instance;
-    assert((bool)name);
-    instance.name = name;
-    if (description && description[0])
-      instance.description = description;
-    instance.create_callback = create_callback;
-    std::lock_guard<std::recursive_mutex> guard(GetEmulateInstructionMutex());
-    GetEmulateInstructionInstances().push_back(instance);
-  }
-  return false;
+  return GetEmulateInstructionInstances().RegisterPlugin(name, description,
+                                                         create_callback);
 }
 
 bool PluginManager::UnregisterPlugin(
     EmulateInstructionCreateInstance create_callback) {
-  if (create_callback) {
-    std::lock_guard<std::recursive_mutex> guard(GetEmulateInstructionMutex());
-    EmulateInstructionInstances &instances = GetEmulateInstructionInstances();
-
-    EmulateInstructionInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (pos->create_callback == create_callback) {
-        instances.erase(pos);
-        return true;
-      }
-    }
-  }
-  return false;
+  return GetEmulateInstructionInstances().UnregisterPlugin(create_callback);
 }
 
 EmulateInstructionCreateInstance
 PluginManager::GetEmulateInstructionCreateCallbackAtIndex(uint32_t idx) {
-  std::lock_guard<std::recursive_mutex> guard(GetEmulateInstructionMutex());
-  EmulateInstructionInstances &instances = GetEmulateInstructionInstances();
-  if (idx < instances.size())
-    return instances[idx].create_callback;
-  return nullptr;
+  return GetEmulateInstructionInstances().GetCallbackAtIndex(idx);
 }
 
 EmulateInstructionCreateInstance
 PluginManager::GetEmulateInstructionCreateCallbackForPluginName(
-    ConstString name) {
-  if (name) {
-    std::lock_guard<std::recursive_mutex> guard(GetEmulateInstructionMutex());
-    EmulateInstructionInstances &instances = GetEmulateInstructionInstances();
-
-    EmulateInstructionInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (name == pos->name)
-        return pos->create_callback;
-    }
-  }
-  return nullptr;
+    llvm::StringRef name) {
+  return GetEmulateInstructionInstances().GetCallbackForName(name);
 }
 
 #pragma mark OperatingSystem
 
-struct OperatingSystemInstance {
-  OperatingSystemInstance()
-      : name(), description(), create_callback(nullptr),
-        debugger_init_callback(nullptr) {}
-
-  ConstString name;
-  std::string description;
-  OperatingSystemCreateInstance create_callback;
-  DebuggerInitializeCallback debugger_init_callback;
-};
-
-typedef std::vector<OperatingSystemInstance> OperatingSystemInstances;
-
-static std::recursive_mutex &GetOperatingSystemMutex() {
-  static std::recursive_mutex g_instances_mutex;
-  return g_instances_mutex;
-}
+typedef PluginInstance<OperatingSystemCreateInstance> OperatingSystemInstance;
+typedef PluginInstances<OperatingSystemInstance> OperatingSystemInstances;
 
 static OperatingSystemInstances &GetOperatingSystemInstances() {
   static OperatingSystemInstances g_instances;
@@ -682,161 +474,75 @@ static OperatingSystemInstances &GetOperatingSystemInstances() {
 }
 
 bool PluginManager::RegisterPlugin(
-    ConstString name, const char *description,
+    llvm::StringRef name, llvm::StringRef description,
     OperatingSystemCreateInstance create_callback,
     DebuggerInitializeCallback debugger_init_callback) {
-  if (create_callback) {
-    OperatingSystemInstance instance;
-    assert((bool)name);
-    instance.name = name;
-    if (description && description[0])
-      instance.description = description;
-    instance.create_callback = create_callback;
-    instance.debugger_init_callback = debugger_init_callback;
-    std::lock_guard<std::recursive_mutex> guard(GetOperatingSystemMutex());
-    GetOperatingSystemInstances().push_back(instance);
-  }
-  return false;
+  return GetOperatingSystemInstances().RegisterPlugin(
+      name, description, create_callback, debugger_init_callback);
 }
 
 bool PluginManager::UnregisterPlugin(
     OperatingSystemCreateInstance create_callback) {
-  if (create_callback) {
-    std::lock_guard<std::recursive_mutex> guard(GetOperatingSystemMutex());
-    OperatingSystemInstances &instances = GetOperatingSystemInstances();
-
-    OperatingSystemInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (pos->create_callback == create_callback) {
-        instances.erase(pos);
-        return true;
-      }
-    }
-  }
-  return false;
+  return GetOperatingSystemInstances().UnregisterPlugin(create_callback);
 }
 
 OperatingSystemCreateInstance
 PluginManager::GetOperatingSystemCreateCallbackAtIndex(uint32_t idx) {
-  std::lock_guard<std::recursive_mutex> guard(GetOperatingSystemMutex());
-  OperatingSystemInstances &instances = GetOperatingSystemInstances();
-  if (idx < instances.size())
-    return instances[idx].create_callback;
-  return nullptr;
+  return GetOperatingSystemInstances().GetCallbackAtIndex(idx);
 }
 
 OperatingSystemCreateInstance
 PluginManager::GetOperatingSystemCreateCallbackForPluginName(
-    ConstString name) {
-  if (name) {
-    std::lock_guard<std::recursive_mutex> guard(GetOperatingSystemMutex());
-    OperatingSystemInstances &instances = GetOperatingSystemInstances();
-
-    OperatingSystemInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (name == pos->name)
-        return pos->create_callback;
-    }
-  }
-  return nullptr;
+    llvm::StringRef name) {
+  return GetOperatingSystemInstances().GetCallbackForName(name);
 }
 
 #pragma mark Language
 
-struct LanguageInstance {
-  LanguageInstance() : name(), description(), create_callback(nullptr) {}
-
-  ConstString name;
-  std::string description;
-  LanguageCreateInstance create_callback;
-};
-
-typedef std::vector<LanguageInstance> LanguageInstances;
-
-static std::recursive_mutex &GetLanguageMutex() {
-  static std::recursive_mutex g_instances_mutex;
-  return g_instances_mutex;
-}
+typedef PluginInstance<LanguageCreateInstance> LanguageInstance;
+typedef PluginInstances<LanguageInstance> LanguageInstances;
 
 static LanguageInstances &GetLanguageInstances() {
   static LanguageInstances g_instances;
   return g_instances;
 }
 
-bool PluginManager::RegisterPlugin(ConstString name,
-                                   const char *description,
+bool PluginManager::RegisterPlugin(llvm::StringRef name,
+                                   llvm::StringRef description,
                                    LanguageCreateInstance create_callback) {
-  if (create_callback) {
-    LanguageInstance instance;
-    assert((bool)name);
-    instance.name = name;
-    if (description && description[0])
-      instance.description = description;
-    instance.create_callback = create_callback;
-    std::lock_guard<std::recursive_mutex> guard(GetLanguageMutex());
-    GetLanguageInstances().push_back(instance);
-  }
-  return false;
+  return GetLanguageInstances().RegisterPlugin(name, description,
+                                               create_callback);
 }
 
 bool PluginManager::UnregisterPlugin(LanguageCreateInstance create_callback) {
-  if (create_callback) {
-    std::lock_guard<std::recursive_mutex> guard(GetLanguageMutex());
-    LanguageInstances &instances = GetLanguageInstances();
-
-    LanguageInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (pos->create_callback == create_callback) {
-        instances.erase(pos);
-        return true;
-      }
-    }
-  }
-  return false;
+  return GetLanguageInstances().UnregisterPlugin(create_callback);
 }
 
 LanguageCreateInstance
 PluginManager::GetLanguageCreateCallbackAtIndex(uint32_t idx) {
-  std::lock_guard<std::recursive_mutex> guard(GetLanguageMutex());
-  LanguageInstances &instances = GetLanguageInstances();
-  if (idx < instances.size())
-    return instances[idx].create_callback;
-  return nullptr;
-}
-
-LanguageCreateInstance
-PluginManager::GetLanguageCreateCallbackForPluginName(ConstString name) {
-  if (name) {
-    std::lock_guard<std::recursive_mutex> guard(GetLanguageMutex());
-    LanguageInstances &instances = GetLanguageInstances();
-
-    LanguageInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (name == pos->name)
-        return pos->create_callback;
-    }
-  }
-  return nullptr;
+  return GetLanguageInstances().GetCallbackAtIndex(idx);
 }
 
 #pragma mark LanguageRuntime
 
-struct LanguageRuntimeInstance {
-  LanguageRuntimeInstance() : name(), description(), create_callback(nullptr) {}
+struct LanguageRuntimeInstance
+    : public PluginInstance<LanguageRuntimeCreateInstance> {
+  LanguageRuntimeInstance(
+      llvm::StringRef name, llvm::StringRef description,
+      CallbackType create_callback,
+      DebuggerInitializeCallback debugger_init_callback,
+      LanguageRuntimeGetCommandObject command_callback,
+      LanguageRuntimeGetExceptionPrecondition precondition_callback)
+      : PluginInstance<LanguageRuntimeCreateInstance>(
+            name, description, create_callback, debugger_init_callback),
+        command_callback(command_callback),
+        precondition_callback(precondition_callback) {}
 
-  ConstString name;
-  std::string description;
-  LanguageRuntimeCreateInstance create_callback;
   LanguageRuntimeGetCommandObject command_callback;
   LanguageRuntimeGetExceptionPrecondition precondition_callback;
 };
 
-typedef std::vector<LanguageRuntimeInstance> LanguageRuntimeInstances;
-
-static std::recursive_mutex &GetLanguageRuntimeMutex() {
-  static std::recursive_mutex g_instances_mutex;
-  return g_instances_mutex;
-}
+typedef PluginInstances<LanguageRuntimeInstance> LanguageRuntimeInstances;
 
 static LanguageRuntimeInstances &GetLanguageRuntimeInstances() {
   static LanguageRuntimeInstances g_instances;
@@ -844,55 +550,28 @@ static LanguageRuntimeInstances &GetLanguageRuntimeInstances() {
 }
 
 bool PluginManager::RegisterPlugin(
-    ConstString name, const char *description,
+    llvm::StringRef name, llvm::StringRef description,
     LanguageRuntimeCreateInstance create_callback,
     LanguageRuntimeGetCommandObject command_callback,
     LanguageRuntimeGetExceptionPrecondition precondition_callback) {
-  if (create_callback) {
-    LanguageRuntimeInstance instance;
-    assert((bool)name);
-    instance.name = name;
-    if (description && description[0])
-      instance.description = description;
-    instance.create_callback = create_callback;
-    instance.command_callback = command_callback;
-    instance.precondition_callback = precondition_callback;
-    std::lock_guard<std::recursive_mutex> guard(GetLanguageRuntimeMutex());
-    GetLanguageRuntimeInstances().push_back(instance);
-  }
-  return false;
+  return GetLanguageRuntimeInstances().RegisterPlugin(
+      name, description, create_callback, nullptr, command_callback,
+      precondition_callback);
 }
 
 bool PluginManager::UnregisterPlugin(
     LanguageRuntimeCreateInstance create_callback) {
-  if (create_callback) {
-    std::lock_guard<std::recursive_mutex> guard(GetLanguageRuntimeMutex());
-    LanguageRuntimeInstances &instances = GetLanguageRuntimeInstances();
-
-    LanguageRuntimeInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (pos->create_callback == create_callback) {
-        instances.erase(pos);
-        return true;
-      }
-    }
-  }
-  return false;
+  return GetLanguageRuntimeInstances().UnregisterPlugin(create_callback);
 }
 
 LanguageRuntimeCreateInstance
 PluginManager::GetLanguageRuntimeCreateCallbackAtIndex(uint32_t idx) {
-  std::lock_guard<std::recursive_mutex> guard(GetLanguageRuntimeMutex());
-  LanguageRuntimeInstances &instances = GetLanguageRuntimeInstances();
-  if (idx < instances.size())
-    return instances[idx].create_callback;
-  return nullptr;
+  return GetLanguageRuntimeInstances().GetCallbackAtIndex(idx);
 }
 
 LanguageRuntimeGetCommandObject
 PluginManager::GetLanguageRuntimeGetCommandObjectAtIndex(uint32_t idx) {
-  std::lock_guard<std::recursive_mutex> guard(GetLanguageRuntimeMutex());
-  LanguageRuntimeInstances &instances = GetLanguageRuntimeInstances();
+  const auto &instances = GetLanguageRuntimeInstances().GetInstances();
   if (idx < instances.size())
     return instances[idx].command_callback;
   return nullptr;
@@ -900,45 +579,16 @@ PluginManager::GetLanguageRuntimeGetCommandObjectAtIndex(uint32_t idx) {
 
 LanguageRuntimeGetExceptionPrecondition
 PluginManager::GetLanguageRuntimeGetExceptionPreconditionAtIndex(uint32_t idx) {
-  std::lock_guard<std::recursive_mutex> guard(GetLanguageRuntimeMutex());
-  LanguageRuntimeInstances &instances = GetLanguageRuntimeInstances();
+  const auto &instances = GetLanguageRuntimeInstances().GetInstances();
   if (idx < instances.size())
     return instances[idx].precondition_callback;
   return nullptr;
 }
 
-LanguageRuntimeCreateInstance
-PluginManager::GetLanguageRuntimeCreateCallbackForPluginName(
-    ConstString name) {
-  if (name) {
-    std::lock_guard<std::recursive_mutex> guard(GetLanguageRuntimeMutex());
-    LanguageRuntimeInstances &instances = GetLanguageRuntimeInstances();
-
-    LanguageRuntimeInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (name == pos->name)
-        return pos->create_callback;
-    }
-  }
-  return nullptr;
-}
-
 #pragma mark SystemRuntime
 
-struct SystemRuntimeInstance {
-  SystemRuntimeInstance() : name(), description(), create_callback(nullptr) {}
-
-  ConstString name;
-  std::string description;
-  SystemRuntimeCreateInstance create_callback;
-};
-
-typedef std::vector<SystemRuntimeInstance> SystemRuntimeInstances;
-
-static std::recursive_mutex &GetSystemRuntimeMutex() {
-  static std::recursive_mutex g_instances_mutex;
-  return g_instances_mutex;
-}
+typedef PluginInstance<SystemRuntimeCreateInstance> SystemRuntimeInstance;
+typedef PluginInstances<SystemRuntimeInstance> SystemRuntimeInstances;
 
 static SystemRuntimeInstances &GetSystemRuntimeInstances() {
   static SystemRuntimeInstances g_instances;
@@ -946,85 +596,43 @@ static SystemRuntimeInstances &GetSystemRuntimeInstances() {
 }
 
 bool PluginManager::RegisterPlugin(
-    ConstString name, const char *description,
+    llvm::StringRef name, llvm::StringRef description,
     SystemRuntimeCreateInstance create_callback) {
-  if (create_callback) {
-    SystemRuntimeInstance instance;
-    assert((bool)name);
-    instance.name = name;
-    if (description && description[0])
-      instance.description = description;
-    instance.create_callback = create_callback;
-    std::lock_guard<std::recursive_mutex> guard(GetSystemRuntimeMutex());
-    GetSystemRuntimeInstances().push_back(instance);
-  }
-  return false;
+  return GetSystemRuntimeInstances().RegisterPlugin(name, description,
+                                                    create_callback);
 }
 
 bool PluginManager::UnregisterPlugin(
     SystemRuntimeCreateInstance create_callback) {
-  if (create_callback) {
-    std::lock_guard<std::recursive_mutex> guard(GetSystemRuntimeMutex());
-    SystemRuntimeInstances &instances = GetSystemRuntimeInstances();
-
-    SystemRuntimeInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (pos->create_callback == create_callback) {
-        instances.erase(pos);
-        return true;
-      }
-    }
-  }
-  return false;
+  return GetSystemRuntimeInstances().UnregisterPlugin(create_callback);
 }
 
 SystemRuntimeCreateInstance
 PluginManager::GetSystemRuntimeCreateCallbackAtIndex(uint32_t idx) {
-  std::lock_guard<std::recursive_mutex> guard(GetSystemRuntimeMutex());
-  SystemRuntimeInstances &instances = GetSystemRuntimeInstances();
-  if (idx < instances.size())
-    return instances[idx].create_callback;
-  return nullptr;
-}
-
-SystemRuntimeCreateInstance
-PluginManager::GetSystemRuntimeCreateCallbackForPluginName(
-    ConstString name) {
-  if (name) {
-    std::lock_guard<std::recursive_mutex> guard(GetSystemRuntimeMutex());
-    SystemRuntimeInstances &instances = GetSystemRuntimeInstances();
-
-    SystemRuntimeInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (name == pos->name)
-        return pos->create_callback;
-    }
-  }
-  return nullptr;
+  return GetSystemRuntimeInstances().GetCallbackAtIndex(idx);
 }
 
 #pragma mark ObjectFile
 
-struct ObjectFileInstance {
-  ObjectFileInstance()
-      : name(), description(), create_callback(nullptr),
-        create_memory_callback(nullptr), get_module_specifications(nullptr),
-        save_core(nullptr) {}
+struct ObjectFileInstance : public PluginInstance<ObjectFileCreateInstance> {
+  ObjectFileInstance(
+      llvm::StringRef name, llvm::StringRef description,
+      CallbackType create_callback,
+      ObjectFileCreateMemoryInstance create_memory_callback,
+      ObjectFileGetModuleSpecifications get_module_specifications,
+      ObjectFileSaveCore save_core,
+      DebuggerInitializeCallback debugger_init_callback)
+      : PluginInstance<ObjectFileCreateInstance>(
+            name, description, create_callback, debugger_init_callback),
+        create_memory_callback(create_memory_callback),
+        get_module_specifications(get_module_specifications),
+        save_core(save_core) {}
 
-  ConstString name;
-  std::string description;
-  ObjectFileCreateInstance create_callback;
   ObjectFileCreateMemoryInstance create_memory_callback;
   ObjectFileGetModuleSpecifications get_module_specifications;
   ObjectFileSaveCore save_core;
 };
-
-typedef std::vector<ObjectFileInstance> ObjectFileInstances;
-
-static std::recursive_mutex &GetObjectFileMutex() {
-  static std::recursive_mutex g_instances_mutex;
-  return g_instances_mutex;
-}
+typedef PluginInstances<ObjectFileInstance> ObjectFileInstances;
 
 static ObjectFileInstances &GetObjectFileInstances() {
   static ObjectFileInstances g_instances;
@@ -1032,56 +640,29 @@ static ObjectFileInstances &GetObjectFileInstances() {
 }
 
 bool PluginManager::RegisterPlugin(
-    ConstString name, const char *description,
+    llvm::StringRef name, llvm::StringRef description,
     ObjectFileCreateInstance create_callback,
     ObjectFileCreateMemoryInstance create_memory_callback,
     ObjectFileGetModuleSpecifications get_module_specifications,
-    ObjectFileSaveCore save_core) {
-  if (create_callback) {
-    ObjectFileInstance instance;
-    assert((bool)name);
-    instance.name = name;
-    if (description && description[0])
-      instance.description = description;
-    instance.create_callback = create_callback;
-    instance.create_memory_callback = create_memory_callback;
-    instance.save_core = save_core;
-    instance.get_module_specifications = get_module_specifications;
-    std::lock_guard<std::recursive_mutex> guard(GetObjectFileMutex());
-    GetObjectFileInstances().push_back(instance);
-  }
-  return false;
+    ObjectFileSaveCore save_core,
+    DebuggerInitializeCallback debugger_init_callback) {
+  return GetObjectFileInstances().RegisterPlugin(
+      name, description, create_callback, create_memory_callback,
+      get_module_specifications, save_core, debugger_init_callback);
 }
 
 bool PluginManager::UnregisterPlugin(ObjectFileCreateInstance create_callback) {
-  if (create_callback) {
-    std::lock_guard<std::recursive_mutex> guard(GetObjectFileMutex());
-    ObjectFileInstances &instances = GetObjectFileInstances();
-
-    ObjectFileInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (pos->create_callback == create_callback) {
-        instances.erase(pos);
-        return true;
-      }
-    }
-  }
-  return false;
+  return GetObjectFileInstances().UnregisterPlugin(create_callback);
 }
 
 ObjectFileCreateInstance
 PluginManager::GetObjectFileCreateCallbackAtIndex(uint32_t idx) {
-  std::lock_guard<std::recursive_mutex> guard(GetObjectFileMutex());
-  ObjectFileInstances &instances = GetObjectFileInstances();
-  if (idx < instances.size())
-    return instances[idx].create_callback;
-  return nullptr;
+  return GetObjectFileInstances().GetCallbackAtIndex(idx);
 }
 
 ObjectFileCreateMemoryInstance
 PluginManager::GetObjectFileCreateMemoryCallbackAtIndex(uint32_t idx) {
-  std::lock_guard<std::recursive_mutex> guard(GetObjectFileMutex());
-  ObjectFileInstances &instances = GetObjectFileInstances();
+  const auto &instances = GetObjectFileInstances().GetInstances();
   if (idx < instances.size())
     return instances[idx].create_memory_callback;
   return nullptr;
@@ -1090,55 +671,45 @@ PluginManager::GetObjectFileCreateMemoryCallbackAtIndex(uint32_t idx) {
 ObjectFileGetModuleSpecifications
 PluginManager::GetObjectFileGetModuleSpecificationsCallbackAtIndex(
     uint32_t idx) {
-  std::lock_guard<std::recursive_mutex> guard(GetObjectFileMutex());
-  ObjectFileInstances &instances = GetObjectFileInstances();
+  const auto &instances = GetObjectFileInstances().GetInstances();
   if (idx < instances.size())
     return instances[idx].get_module_specifications;
   return nullptr;
 }
 
-ObjectFileCreateInstance
-PluginManager::GetObjectFileCreateCallbackForPluginName(
-    ConstString name) {
-  if (name) {
-    std::lock_guard<std::recursive_mutex> guard(GetObjectFileMutex());
-    ObjectFileInstances &instances = GetObjectFileInstances();
-
-    ObjectFileInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (name == pos->name)
-        return pos->create_callback;
-    }
-  }
-  return nullptr;
-}
-
 ObjectFileCreateMemoryInstance
 PluginManager::GetObjectFileCreateMemoryCallbackForPluginName(
-    ConstString name) {
-  if (name) {
-    std::lock_guard<std::recursive_mutex> guard(GetObjectFileMutex());
-    ObjectFileInstances &instances = GetObjectFileInstances();
-
-    ObjectFileInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (name == pos->name)
-        return pos->create_memory_callback;
-    }
+    llvm::StringRef name) {
+  const auto &instances = GetObjectFileInstances().GetInstances();
+  for (auto &instance : instances) {
+    if (instance.name == name)
+      return instance.create_memory_callback;
   }
   return nullptr;
 }
 
 Status PluginManager::SaveCore(const lldb::ProcessSP &process_sp,
-                               const FileSpec &outfile) {
-  Status error;
-  std::lock_guard<std::recursive_mutex> guard(GetObjectFileMutex());
-  ObjectFileInstances &instances = GetObjectFileInstances();
+                               const FileSpec &outfile,
+                               lldb::SaveCoreStyle &core_style,
+                               llvm::StringRef plugin_name) {
+  if (plugin_name.empty()) {
+    // Try saving core directly from the process plugin first.
+    llvm::Expected<bool> ret = process_sp->SaveCore(outfile.GetPath());
+    if (!ret)
+      return Status(ret.takeError());
+    if (ret.get())
+      return Status();
+  }
 
-  ObjectFileInstances::iterator pos, end = instances.end();
-  for (pos = instances.begin(); pos != end; ++pos) {
-    if (pos->save_core && pos->save_core(process_sp, outfile, error))
-      return error;
+  // Fall back to object plugins.
+  Status error;
+  auto &instances = GetObjectFileInstances().GetInstances();
+  for (auto &instance : instances) {
+    if (plugin_name.empty() || instance.name == plugin_name) {
+      if (instance.save_core &&
+          instance.save_core(process_sp, outfile, core_style, error))
+        return error;
+    }
   }
   error.SetErrorString(
       "no ObjectFile plugins were able to save a core for this process");
@@ -1147,23 +718,22 @@ Status PluginManager::SaveCore(const lldb::ProcessSP &process_sp,
 
 #pragma mark ObjectContainer
 
-struct ObjectContainerInstance {
-  ObjectContainerInstance()
-      : name(), description(), create_callback(nullptr),
-        get_module_specifications(nullptr) {}
+struct ObjectContainerInstance
+    : public PluginInstance<ObjectContainerCreateInstance> {
+  ObjectContainerInstance(
+      llvm::StringRef name, llvm::StringRef description,
+      CallbackType create_callback,
+      ObjectContainerCreateMemoryInstance create_memory_callback,
+      ObjectFileGetModuleSpecifications get_module_specifications)
+      : PluginInstance<ObjectContainerCreateInstance>(name, description,
+                                                      create_callback),
+        create_memory_callback(create_memory_callback),
+        get_module_specifications(get_module_specifications) {}
 
-  ConstString name;
-  std::string description;
-  ObjectContainerCreateInstance create_callback;
+  ObjectContainerCreateMemoryInstance create_memory_callback;
   ObjectFileGetModuleSpecifications get_module_specifications;
 };
-
-typedef std::vector<ObjectContainerInstance> ObjectContainerInstances;
-
-static std::recursive_mutex &GetObjectContainerMutex() {
-  static std::recursive_mutex g_instances_mutex;
-  return g_instances_mutex;
-}
+typedef PluginInstances<ObjectContainerInstance> ObjectContainerInstances;
 
 static ObjectContainerInstances &GetObjectContainerInstances() {
   static ObjectContainerInstances g_instances;
@@ -1171,70 +741,37 @@ static ObjectContainerInstances &GetObjectContainerInstances() {
 }
 
 bool PluginManager::RegisterPlugin(
-    ConstString name, const char *description,
+    llvm::StringRef name, llvm::StringRef description,
     ObjectContainerCreateInstance create_callback,
-    ObjectFileGetModuleSpecifications get_module_specifications) {
-  if (create_callback) {
-    ObjectContainerInstance instance;
-    assert((bool)name);
-    instance.name = name;
-    if (description && description[0])
-      instance.description = description;
-    instance.create_callback = create_callback;
-    instance.get_module_specifications = get_module_specifications;
-    std::lock_guard<std::recursive_mutex> guard(GetObjectContainerMutex());
-    GetObjectContainerInstances().push_back(instance);
-  }
-  return false;
+    ObjectFileGetModuleSpecifications get_module_specifications,
+    ObjectContainerCreateMemoryInstance create_memory_callback) {
+  return GetObjectContainerInstances().RegisterPlugin(
+      name, description, create_callback, create_memory_callback,
+      get_module_specifications);
 }
 
 bool PluginManager::UnregisterPlugin(
     ObjectContainerCreateInstance create_callback) {
-  if (create_callback) {
-    std::lock_guard<std::recursive_mutex> guard(GetObjectContainerMutex());
-    ObjectContainerInstances &instances = GetObjectContainerInstances();
-
-    ObjectContainerInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (pos->create_callback == create_callback) {
-        instances.erase(pos);
-        return true;
-      }
-    }
-  }
-  return false;
+  return GetObjectContainerInstances().UnregisterPlugin(create_callback);
 }
 
 ObjectContainerCreateInstance
 PluginManager::GetObjectContainerCreateCallbackAtIndex(uint32_t idx) {
-  std::lock_guard<std::recursive_mutex> guard(GetObjectContainerMutex());
-  ObjectContainerInstances &instances = GetObjectContainerInstances();
-  if (idx < instances.size())
-    return instances[idx].create_callback;
-  return nullptr;
+  return GetObjectContainerInstances().GetCallbackAtIndex(idx);
 }
 
-ObjectContainerCreateInstance
-PluginManager::GetObjectContainerCreateCallbackForPluginName(
-    ConstString name) {
-  if (name) {
-    std::lock_guard<std::recursive_mutex> guard(GetObjectContainerMutex());
-    ObjectContainerInstances &instances = GetObjectContainerInstances();
-
-    ObjectContainerInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (name == pos->name)
-        return pos->create_callback;
-    }
-  }
+ObjectContainerCreateMemoryInstance
+PluginManager::GetObjectContainerCreateMemoryCallbackAtIndex(uint32_t idx) {
+  const auto &instances = GetObjectContainerInstances().GetInstances();
+  if (idx < instances.size())
+    return instances[idx].create_memory_callback;
   return nullptr;
 }
 
 ObjectFileGetModuleSpecifications
 PluginManager::GetObjectContainerGetModuleSpecificationsCallbackAtIndex(
     uint32_t idx) {
-  std::lock_guard<std::recursive_mutex> guard(GetObjectContainerMutex());
-  ObjectContainerInstances &instances = GetObjectContainerInstances();
+  const auto &instances = GetObjectContainerInstances().GetInstances();
   if (idx < instances.size())
     return instances[idx].get_module_specifications;
   return nullptr;
@@ -1242,23 +779,8 @@ PluginManager::GetObjectContainerGetModuleSpecificationsCallbackAtIndex(
 
 #pragma mark Platform
 
-struct PlatformInstance {
-  PlatformInstance()
-      : name(), description(), create_callback(nullptr),
-        debugger_init_callback(nullptr) {}
-
-  ConstString name;
-  std::string description;
-  PlatformCreateInstance create_callback;
-  DebuggerInitializeCallback debugger_init_callback;
-};
-
-typedef std::vector<PlatformInstance> PlatformInstances;
-
-static std::recursive_mutex &GetPlatformInstancesMutex() {
-  static std::recursive_mutex g_platform_instances_mutex;
-  return g_platform_instances_mutex;
-}
+typedef PluginInstance<PlatformCreateInstance> PlatformInstance;
+typedef PluginInstances<PlatformInstance> PlatformInstances;
 
 static PlatformInstances &GetPlatformInstances() {
   static PlatformInstances g_platform_instances;
@@ -1266,117 +788,48 @@ static PlatformInstances &GetPlatformInstances() {
 }
 
 bool PluginManager::RegisterPlugin(
-    ConstString name, const char *description,
+    llvm::StringRef name, llvm::StringRef description,
     PlatformCreateInstance create_callback,
     DebuggerInitializeCallback debugger_init_callback) {
-  if (create_callback) {
-    std::lock_guard<std::recursive_mutex> guard(GetPlatformInstancesMutex());
-
-    PlatformInstance instance;
-    assert((bool)name);
-    instance.name = name;
-    if (description && description[0])
-      instance.description = description;
-    instance.create_callback = create_callback;
-    instance.debugger_init_callback = debugger_init_callback;
-    GetPlatformInstances().push_back(instance);
-    return true;
-  }
-  return false;
-}
-
-const char *PluginManager::GetPlatformPluginNameAtIndex(uint32_t idx) {
-  std::lock_guard<std::recursive_mutex> guard(GetPlatformInstancesMutex());
-  PlatformInstances &instances = GetPlatformInstances();
-  if (idx < instances.size())
-    return instances[idx].name.GetCString();
-  return nullptr;
-}
-
-const char *PluginManager::GetPlatformPluginDescriptionAtIndex(uint32_t idx) {
-  std::lock_guard<std::recursive_mutex> guard(GetPlatformInstancesMutex());
-  PlatformInstances &instances = GetPlatformInstances();
-  if (idx < instances.size())
-    return instances[idx].description.c_str();
-  return nullptr;
+  return GetPlatformInstances().RegisterPlugin(
+      name, description, create_callback, debugger_init_callback);
 }
 
 bool PluginManager::UnregisterPlugin(PlatformCreateInstance create_callback) {
-  if (create_callback) {
-    std::lock_guard<std::recursive_mutex> guard(GetPlatformInstancesMutex());
-    PlatformInstances &instances = GetPlatformInstances();
+  return GetPlatformInstances().UnregisterPlugin(create_callback);
+}
 
-    PlatformInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (pos->create_callback == create_callback) {
-        instances.erase(pos);
-        return true;
-      }
-    }
-  }
-  return false;
+llvm::StringRef PluginManager::GetPlatformPluginNameAtIndex(uint32_t idx) {
+  return GetPlatformInstances().GetNameAtIndex(idx);
+}
+
+llvm::StringRef
+PluginManager::GetPlatformPluginDescriptionAtIndex(uint32_t idx) {
+  return GetPlatformInstances().GetDescriptionAtIndex(idx);
 }
 
 PlatformCreateInstance
 PluginManager::GetPlatformCreateCallbackAtIndex(uint32_t idx) {
-  std::lock_guard<std::recursive_mutex> guard(GetPlatformInstancesMutex());
-  PlatformInstances &instances = GetPlatformInstances();
-  if (idx < instances.size())
-    return instances[idx].create_callback;
-  return nullptr;
+  return GetPlatformInstances().GetCallbackAtIndex(idx);
 }
 
 PlatformCreateInstance
-PluginManager::GetPlatformCreateCallbackForPluginName(ConstString name) {
-  if (name) {
-    std::lock_guard<std::recursive_mutex> guard(GetPlatformInstancesMutex());
-    PlatformInstances &instances = GetPlatformInstances();
-
-    PlatformInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (name == pos->name)
-        return pos->create_callback;
-    }
-  }
-  return nullptr;
+PluginManager::GetPlatformCreateCallbackForPluginName(llvm::StringRef name) {
+  return GetPlatformInstances().GetCallbackForName(name);
 }
 
 void PluginManager::AutoCompletePlatformName(llvm::StringRef name,
                                              CompletionRequest &request) {
-  if (name.empty())
-    return;
-
-  std::lock_guard<std::recursive_mutex> guard(GetPlatformInstancesMutex());
-  PlatformInstances &instances = GetPlatformInstances();
-  llvm::StringRef name_sref(name);
-
-  PlatformInstances::iterator pos, end = instances.end();
-  for (pos = instances.begin(); pos != end; ++pos) {
-    llvm::StringRef plugin_name(pos->name.GetCString());
-    if (plugin_name.startswith(name_sref))
-      request.AddCompletion(plugin_name.data());
+  for (const auto &instance : GetPlatformInstances().GetInstances()) {
+    if (instance.name.starts_with(name))
+      request.AddCompletion(instance.name);
   }
 }
 
 #pragma mark Process
 
-struct ProcessInstance {
-  ProcessInstance()
-      : name(), description(), create_callback(nullptr),
-        debugger_init_callback(nullptr) {}
-
-  ConstString name;
-  std::string description;
-  ProcessCreateInstance create_callback;
-  DebuggerInitializeCallback debugger_init_callback;
-};
-
-typedef std::vector<ProcessInstance> ProcessInstances;
-
-static std::recursive_mutex &GetProcessMutex() {
-  static std::recursive_mutex g_instances_mutex;
-  return g_instances_mutex;
-}
+typedef PluginInstance<ProcessCreateInstance> ProcessInstance;
+typedef PluginInstances<ProcessInstance> ProcessInstances;
 
 static ProcessInstances &GetProcessInstances() {
   static ProcessInstances g_instances;
@@ -1384,98 +837,97 @@ static ProcessInstances &GetProcessInstances() {
 }
 
 bool PluginManager::RegisterPlugin(
-    ConstString name, const char *description,
+    llvm::StringRef name, llvm::StringRef description,
     ProcessCreateInstance create_callback,
     DebuggerInitializeCallback debugger_init_callback) {
-  if (create_callback) {
-    ProcessInstance instance;
-    assert((bool)name);
-    instance.name = name;
-    if (description && description[0])
-      instance.description = description;
-    instance.create_callback = create_callback;
-    instance.debugger_init_callback = debugger_init_callback;
-    std::lock_guard<std::recursive_mutex> guard(GetProcessMutex());
-    GetProcessInstances().push_back(instance);
-  }
-  return false;
-}
-
-const char *PluginManager::GetProcessPluginNameAtIndex(uint32_t idx) {
-  std::lock_guard<std::recursive_mutex> guard(GetProcessMutex());
-  ProcessInstances &instances = GetProcessInstances();
-  if (idx < instances.size())
-    return instances[idx].name.GetCString();
-  return nullptr;
-}
-
-const char *PluginManager::GetProcessPluginDescriptionAtIndex(uint32_t idx) {
-  std::lock_guard<std::recursive_mutex> guard(GetProcessMutex());
-  ProcessInstances &instances = GetProcessInstances();
-  if (idx < instances.size())
-    return instances[idx].description.c_str();
-  return nullptr;
+  return GetProcessInstances().RegisterPlugin(
+      name, description, create_callback, debugger_init_callback);
 }
 
 bool PluginManager::UnregisterPlugin(ProcessCreateInstance create_callback) {
-  if (create_callback) {
-    std::lock_guard<std::recursive_mutex> guard(GetProcessMutex());
-    ProcessInstances &instances = GetProcessInstances();
+  return GetProcessInstances().UnregisterPlugin(create_callback);
+}
 
-    ProcessInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (pos->create_callback == create_callback) {
-        instances.erase(pos);
-        return true;
-      }
-    }
-  }
-  return false;
+llvm::StringRef PluginManager::GetProcessPluginNameAtIndex(uint32_t idx) {
+  return GetProcessInstances().GetNameAtIndex(idx);
+}
+
+llvm::StringRef PluginManager::GetProcessPluginDescriptionAtIndex(uint32_t idx) {
+  return GetProcessInstances().GetDescriptionAtIndex(idx);
 }
 
 ProcessCreateInstance
 PluginManager::GetProcessCreateCallbackAtIndex(uint32_t idx) {
-  std::lock_guard<std::recursive_mutex> guard(GetProcessMutex());
-  ProcessInstances &instances = GetProcessInstances();
-  if (idx < instances.size())
-    return instances[idx].create_callback;
-  return nullptr;
+  return GetProcessInstances().GetCallbackAtIndex(idx);
 }
 
 ProcessCreateInstance
-PluginManager::GetProcessCreateCallbackForPluginName(ConstString name) {
-  if (name) {
-    std::lock_guard<std::recursive_mutex> guard(GetProcessMutex());
-    ProcessInstances &instances = GetProcessInstances();
+PluginManager::GetProcessCreateCallbackForPluginName(llvm::StringRef name) {
+  return GetProcessInstances().GetCallbackForName(name);
+}
 
-    ProcessInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (name == pos->name)
-        return pos->create_callback;
-    }
+void PluginManager::AutoCompleteProcessName(llvm::StringRef name,
+                                            CompletionRequest &request) {
+  for (const auto &instance : GetProcessInstances().GetInstances()) {
+    if (instance.name.starts_with(name))
+      request.AddCompletion(instance.name, instance.description);
   }
-  return nullptr;
+}
+
+#pragma mark RegisterTypeBuilder
+
+struct RegisterTypeBuilderInstance
+    : public PluginInstance<RegisterTypeBuilderCreateInstance> {
+  RegisterTypeBuilderInstance(llvm::StringRef name, llvm::StringRef description,
+                              CallbackType create_callback)
+      : PluginInstance<RegisterTypeBuilderCreateInstance>(name, description,
+                                                          create_callback) {}
+};
+
+typedef PluginInstances<RegisterTypeBuilderInstance>
+    RegisterTypeBuilderInstances;
+
+static RegisterTypeBuilderInstances &GetRegisterTypeBuilderInstances() {
+  static RegisterTypeBuilderInstances g_instances;
+  return g_instances;
+}
+
+bool PluginManager::RegisterPlugin(
+    llvm::StringRef name, llvm::StringRef description,
+    RegisterTypeBuilderCreateInstance create_callback) {
+  return GetRegisterTypeBuilderInstances().RegisterPlugin(name, description,
+                                                          create_callback);
+}
+
+bool PluginManager::UnregisterPlugin(
+    RegisterTypeBuilderCreateInstance create_callback) {
+  return GetRegisterTypeBuilderInstances().UnregisterPlugin(create_callback);
+}
+
+lldb::RegisterTypeBuilderSP
+PluginManager::GetRegisterTypeBuilder(Target &target) {
+  const auto &instances = GetRegisterTypeBuilderInstances().GetInstances();
+  // We assume that RegisterTypeBuilderClang is the only instance of this plugin
+  // type and is always present.
+  assert(instances.size());
+  return instances[0].create_callback(target);
 }
 
 #pragma mark ScriptInterpreter
 
-struct ScriptInterpreterInstance {
-  ScriptInterpreterInstance()
-      : name(), language(lldb::eScriptLanguageNone), description(),
-        create_callback(nullptr) {}
+struct ScriptInterpreterInstance
+    : public PluginInstance<ScriptInterpreterCreateInstance> {
+  ScriptInterpreterInstance(llvm::StringRef name, llvm::StringRef description,
+                            CallbackType create_callback,
+                            lldb::ScriptLanguage language)
+      : PluginInstance<ScriptInterpreterCreateInstance>(name, description,
+                                                        create_callback),
+        language(language) {}
 
-  ConstString name;
-  lldb::ScriptLanguage language;
-  std::string description;
-  ScriptInterpreterCreateInstance create_callback;
+  lldb::ScriptLanguage language = lldb::eScriptLanguageNone;
 };
 
-typedef std::vector<ScriptInterpreterInstance> ScriptInterpreterInstances;
-
-static std::recursive_mutex &GetScriptInterpreterMutex() {
-  static std::recursive_mutex g_instances_mutex;
-  return g_instances_mutex;
-}
+typedef PluginInstances<ScriptInterpreterInstance> ScriptInterpreterInstances;
 
 static ScriptInterpreterInstances &GetScriptInterpreterInstances() {
   static ScriptInterpreterInstances g_instances;
@@ -1483,64 +935,34 @@ static ScriptInterpreterInstances &GetScriptInterpreterInstances() {
 }
 
 bool PluginManager::RegisterPlugin(
-    ConstString name, const char *description,
+    llvm::StringRef name, llvm::StringRef description,
     lldb::ScriptLanguage script_language,
     ScriptInterpreterCreateInstance create_callback) {
-  if (!create_callback)
-    return false;
-  ScriptInterpreterInstance instance;
-  assert((bool)name);
-  instance.name = name;
-  if (description && description[0])
-    instance.description = description;
-  instance.create_callback = create_callback;
-  instance.language = script_language;
-  std::lock_guard<std::recursive_mutex> guard(GetScriptInterpreterMutex());
-  GetScriptInterpreterInstances().push_back(instance);
-  return false;
+  return GetScriptInterpreterInstances().RegisterPlugin(
+      name, description, create_callback, script_language);
 }
 
 bool PluginManager::UnregisterPlugin(
     ScriptInterpreterCreateInstance create_callback) {
-  if (!create_callback)
-    return false;
-  std::lock_guard<std::recursive_mutex> guard(GetScriptInterpreterMutex());
-  ScriptInterpreterInstances &instances = GetScriptInterpreterInstances();
-
-  ScriptInterpreterInstances::iterator pos, end = instances.end();
-  for (pos = instances.begin(); pos != end; ++pos) {
-    if (pos->create_callback != create_callback)
-      continue;
-
-    instances.erase(pos);
-    return true;
-  }
-  return false;
+  return GetScriptInterpreterInstances().UnregisterPlugin(create_callback);
 }
 
 ScriptInterpreterCreateInstance
 PluginManager::GetScriptInterpreterCreateCallbackAtIndex(uint32_t idx) {
-  std::lock_guard<std::recursive_mutex> guard(GetScriptInterpreterMutex());
-  ScriptInterpreterInstances &instances = GetScriptInterpreterInstances();
-  if (idx < instances.size())
-    return instances[idx].create_callback;
-  return nullptr;
+  return GetScriptInterpreterInstances().GetCallbackAtIndex(idx);
 }
 
 lldb::ScriptInterpreterSP
 PluginManager::GetScriptInterpreterForLanguage(lldb::ScriptLanguage script_lang,
                                                Debugger &debugger) {
-  std::lock_guard<std::recursive_mutex> guard(GetScriptInterpreterMutex());
-  ScriptInterpreterInstances &instances = GetScriptInterpreterInstances();
-
-  ScriptInterpreterInstances::iterator pos, end = instances.end();
+  const auto &instances = GetScriptInterpreterInstances().GetInstances();
   ScriptInterpreterCreateInstance none_instance = nullptr;
-  for (pos = instances.begin(); pos != end; ++pos) {
-    if (pos->language == lldb::eScriptLanguageNone)
-      none_instance = pos->create_callback;
+  for (const auto &instance : instances) {
+    if (instance.language == lldb::eScriptLanguageNone)
+      none_instance = instance.create_callback;
 
-    if (script_lang == pos->language)
-      return pos->create_callback(debugger);
+    if (script_lang == instance.language)
+      return instance.create_callback(debugger);
   }
 
   // If we didn't find one, return the ScriptInterpreter for the null language.
@@ -1548,29 +970,24 @@ PluginManager::GetScriptInterpreterForLanguage(lldb::ScriptLanguage script_lang,
   return none_instance(debugger);
 }
 
-#pragma mark -
 #pragma mark StructuredDataPlugin
 
-// StructuredDataPlugin
+struct StructuredDataPluginInstance
+    : public PluginInstance<StructuredDataPluginCreateInstance> {
+  StructuredDataPluginInstance(
+      llvm::StringRef name, llvm::StringRef description,
+      CallbackType create_callback,
+      DebuggerInitializeCallback debugger_init_callback,
+      StructuredDataFilterLaunchInfo filter_callback)
+      : PluginInstance<StructuredDataPluginCreateInstance>(
+            name, description, create_callback, debugger_init_callback),
+        filter_callback(filter_callback) {}
 
-struct StructuredDataPluginInstance {
-  StructuredDataPluginInstance()
-      : name(), description(), create_callback(nullptr),
-        debugger_init_callback(nullptr), filter_callback(nullptr) {}
-
-  ConstString name;
-  std::string description;
-  StructuredDataPluginCreateInstance create_callback;
-  DebuggerInitializeCallback debugger_init_callback;
-  StructuredDataFilterLaunchInfo filter_callback;
+  StructuredDataFilterLaunchInfo filter_callback = nullptr;
 };
 
-typedef std::vector<StructuredDataPluginInstance> StructuredDataPluginInstances;
-
-static std::recursive_mutex &GetStructuredDataPluginMutex() {
-  static std::recursive_mutex g_instances_mutex;
-  return g_instances_mutex;
-}
+typedef PluginInstances<StructuredDataPluginInstance>
+    StructuredDataPluginInstances;
 
 static StructuredDataPluginInstances &GetStructuredDataPluginInstances() {
   static StructuredDataPluginInstances g_instances;
@@ -1578,74 +995,29 @@ static StructuredDataPluginInstances &GetStructuredDataPluginInstances() {
 }
 
 bool PluginManager::RegisterPlugin(
-    ConstString name, const char *description,
+    llvm::StringRef name, llvm::StringRef description,
     StructuredDataPluginCreateInstance create_callback,
     DebuggerInitializeCallback debugger_init_callback,
     StructuredDataFilterLaunchInfo filter_callback) {
-  if (create_callback) {
-    StructuredDataPluginInstance instance;
-    assert((bool)name);
-    instance.name = name;
-    if (description && description[0])
-      instance.description = description;
-    instance.create_callback = create_callback;
-    instance.debugger_init_callback = debugger_init_callback;
-    instance.filter_callback = filter_callback;
-    std::lock_guard<std::recursive_mutex> guard(GetStructuredDataPluginMutex());
-    GetStructuredDataPluginInstances().push_back(instance);
-  }
-  return false;
+  return GetStructuredDataPluginInstances().RegisterPlugin(
+      name, description, create_callback, debugger_init_callback,
+      filter_callback);
 }
 
 bool PluginManager::UnregisterPlugin(
     StructuredDataPluginCreateInstance create_callback) {
-  if (create_callback) {
-    std::lock_guard<std::recursive_mutex> guard(GetStructuredDataPluginMutex());
-    StructuredDataPluginInstances &instances =
-        GetStructuredDataPluginInstances();
-
-    StructuredDataPluginInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (pos->create_callback == create_callback) {
-        instances.erase(pos);
-        return true;
-      }
-    }
-  }
-  return false;
+  return GetStructuredDataPluginInstances().UnregisterPlugin(create_callback);
 }
 
 StructuredDataPluginCreateInstance
 PluginManager::GetStructuredDataPluginCreateCallbackAtIndex(uint32_t idx) {
-  std::lock_guard<std::recursive_mutex> guard(GetStructuredDataPluginMutex());
-  StructuredDataPluginInstances &instances = GetStructuredDataPluginInstances();
-  if (idx < instances.size())
-    return instances[idx].create_callback;
-  return nullptr;
-}
-
-StructuredDataPluginCreateInstance
-PluginManager::GetStructuredDataPluginCreateCallbackForPluginName(
-    ConstString name) {
-  if (name) {
-    std::lock_guard<std::recursive_mutex> guard(GetStructuredDataPluginMutex());
-    StructuredDataPluginInstances &instances =
-        GetStructuredDataPluginInstances();
-
-    StructuredDataPluginInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (name == pos->name)
-        return pos->create_callback;
-    }
-  }
-  return nullptr;
+  return GetStructuredDataPluginInstances().GetCallbackAtIndex(idx);
 }
 
 StructuredDataFilterLaunchInfo
 PluginManager::GetStructuredDataFilterCallbackAtIndex(
     uint32_t idx, bool &iteration_complete) {
-  std::lock_guard<std::recursive_mutex> guard(GetStructuredDataPluginMutex());
-  StructuredDataPluginInstances &instances = GetStructuredDataPluginInstances();
+  const auto &instances = GetStructuredDataPluginInstances().GetInstances();
   if (idx < instances.size()) {
     iteration_complete = false;
     return instances[idx].filter_callback;
@@ -1657,23 +1029,8 @@ PluginManager::GetStructuredDataFilterCallbackAtIndex(
 
 #pragma mark SymbolFile
 
-struct SymbolFileInstance {
-  SymbolFileInstance()
-      : name(), description(), create_callback(nullptr),
-        debugger_init_callback(nullptr) {}
-
-  ConstString name;
-  std::string description;
-  SymbolFileCreateInstance create_callback;
-  DebuggerInitializeCallback debugger_init_callback;
-};
-
-typedef std::vector<SymbolFileInstance> SymbolFileInstances;
-
-static std::recursive_mutex &GetSymbolFileMutex() {
-  static std::recursive_mutex g_instances_mutex;
-  return g_instances_mutex;
-}
+typedef PluginInstance<SymbolFileCreateInstance> SymbolFileInstance;
+typedef PluginInstances<SymbolFileInstance> SymbolFileInstances;
 
 static SymbolFileInstances &GetSymbolFileInstances() {
   static SymbolFileInstances g_instances;
@@ -1681,160 +1038,289 @@ static SymbolFileInstances &GetSymbolFileInstances() {
 }
 
 bool PluginManager::RegisterPlugin(
-    ConstString name, const char *description,
+    llvm::StringRef name, llvm::StringRef description,
     SymbolFileCreateInstance create_callback,
     DebuggerInitializeCallback debugger_init_callback) {
-  if (create_callback) {
-    SymbolFileInstance instance;
-    assert((bool)name);
-    instance.name = name;
-    if (description && description[0])
-      instance.description = description;
-    instance.create_callback = create_callback;
-    instance.debugger_init_callback = debugger_init_callback;
-    std::lock_guard<std::recursive_mutex> guard(GetSymbolFileMutex());
-    GetSymbolFileInstances().push_back(instance);
-  }
-  return false;
+  return GetSymbolFileInstances().RegisterPlugin(
+      name, description, create_callback, debugger_init_callback);
 }
 
 bool PluginManager::UnregisterPlugin(SymbolFileCreateInstance create_callback) {
-  if (create_callback) {
-    std::lock_guard<std::recursive_mutex> guard(GetSymbolFileMutex());
-    SymbolFileInstances &instances = GetSymbolFileInstances();
-
-    SymbolFileInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (pos->create_callback == create_callback) {
-        instances.erase(pos);
-        return true;
-      }
-    }
-  }
-  return false;
+  return GetSymbolFileInstances().UnregisterPlugin(create_callback);
 }
 
 SymbolFileCreateInstance
 PluginManager::GetSymbolFileCreateCallbackAtIndex(uint32_t idx) {
-  std::lock_guard<std::recursive_mutex> guard(GetSymbolFileMutex());
-  SymbolFileInstances &instances = GetSymbolFileInstances();
-  if (idx < instances.size())
-    return instances[idx].create_callback;
-  return nullptr;
-}
-
-SymbolFileCreateInstance
-PluginManager::GetSymbolFileCreateCallbackForPluginName(
-    ConstString name) {
-  if (name) {
-    std::lock_guard<std::recursive_mutex> guard(GetSymbolFileMutex());
-    SymbolFileInstances &instances = GetSymbolFileInstances();
-
-    SymbolFileInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (name == pos->name)
-        return pos->create_callback;
-    }
-  }
-  return nullptr;
+  return GetSymbolFileInstances().GetCallbackAtIndex(idx);
 }
 
 #pragma mark SymbolVendor
 
-struct SymbolVendorInstance {
-  SymbolVendorInstance() : name(), description(), create_callback(nullptr) {}
-
-  ConstString name;
-  std::string description;
-  SymbolVendorCreateInstance create_callback;
-};
-
-typedef std::vector<SymbolVendorInstance> SymbolVendorInstances;
-
-static std::recursive_mutex &GetSymbolVendorMutex() {
-  static std::recursive_mutex g_instances_mutex;
-  return g_instances_mutex;
-}
+typedef PluginInstance<SymbolVendorCreateInstance> SymbolVendorInstance;
+typedef PluginInstances<SymbolVendorInstance> SymbolVendorInstances;
 
 static SymbolVendorInstances &GetSymbolVendorInstances() {
   static SymbolVendorInstances g_instances;
   return g_instances;
 }
 
-bool PluginManager::RegisterPlugin(ConstString name,
-                                   const char *description,
+bool PluginManager::RegisterPlugin(llvm::StringRef name,
+                                   llvm::StringRef description,
                                    SymbolVendorCreateInstance create_callback) {
-  if (create_callback) {
-    SymbolVendorInstance instance;
-    assert((bool)name);
-    instance.name = name;
-    if (description && description[0])
-      instance.description = description;
-    instance.create_callback = create_callback;
-    std::lock_guard<std::recursive_mutex> guard(GetSymbolVendorMutex());
-    GetSymbolVendorInstances().push_back(instance);
-  }
-  return false;
+  return GetSymbolVendorInstances().RegisterPlugin(name, description,
+                                                   create_callback);
 }
 
 bool PluginManager::UnregisterPlugin(
     SymbolVendorCreateInstance create_callback) {
-  if (create_callback) {
-    std::lock_guard<std::recursive_mutex> guard(GetSymbolVendorMutex());
-    SymbolVendorInstances &instances = GetSymbolVendorInstances();
+  return GetSymbolVendorInstances().UnregisterPlugin(create_callback);
+}
 
-    SymbolVendorInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (pos->create_callback == create_callback) {
-        instances.erase(pos);
+SymbolVendorCreateInstance
+PluginManager::GetSymbolVendorCreateCallbackAtIndex(uint32_t idx) {
+  return GetSymbolVendorInstances().GetCallbackAtIndex(idx);
+}
+
+#pragma mark SymbolLocator
+
+struct SymbolLocatorInstance
+    : public PluginInstance<SymbolLocatorCreateInstance> {
+  SymbolLocatorInstance(
+      llvm::StringRef name, llvm::StringRef description,
+      CallbackType create_callback,
+      SymbolLocatorLocateExecutableObjectFile locate_executable_object_file,
+      SymbolLocatorLocateExecutableSymbolFile locate_executable_symbol_file,
+      SymbolLocatorDownloadObjectAndSymbolFile download_object_symbol_file,
+      SymbolLocatorFindSymbolFileInBundle find_symbol_file_in_bundle,
+      DebuggerInitializeCallback debugger_init_callback)
+      : PluginInstance<SymbolLocatorCreateInstance>(
+            name, description, create_callback, debugger_init_callback),
+        locate_executable_object_file(locate_executable_object_file),
+        locate_executable_symbol_file(locate_executable_symbol_file),
+        download_object_symbol_file(download_object_symbol_file),
+        find_symbol_file_in_bundle(find_symbol_file_in_bundle) {}
+
+  SymbolLocatorLocateExecutableObjectFile locate_executable_object_file;
+  SymbolLocatorLocateExecutableSymbolFile locate_executable_symbol_file;
+  SymbolLocatorDownloadObjectAndSymbolFile download_object_symbol_file;
+  SymbolLocatorFindSymbolFileInBundle find_symbol_file_in_bundle;
+};
+typedef PluginInstances<SymbolLocatorInstance> SymbolLocatorInstances;
+
+static SymbolLocatorInstances &GetSymbolLocatorInstances() {
+  static SymbolLocatorInstances g_instances;
+  return g_instances;
+}
+
+bool PluginManager::RegisterPlugin(
+    llvm::StringRef name, llvm::StringRef description,
+    SymbolLocatorCreateInstance create_callback,
+    SymbolLocatorLocateExecutableObjectFile locate_executable_object_file,
+    SymbolLocatorLocateExecutableSymbolFile locate_executable_symbol_file,
+    SymbolLocatorDownloadObjectAndSymbolFile download_object_symbol_file,
+    SymbolLocatorFindSymbolFileInBundle find_symbol_file_in_bundle,
+    DebuggerInitializeCallback debugger_init_callback) {
+  return GetSymbolLocatorInstances().RegisterPlugin(
+      name, description, create_callback, locate_executable_object_file,
+      locate_executable_symbol_file, download_object_symbol_file,
+      find_symbol_file_in_bundle, debugger_init_callback);
+}
+
+bool PluginManager::UnregisterPlugin(
+    SymbolLocatorCreateInstance create_callback) {
+  return GetSymbolLocatorInstances().UnregisterPlugin(create_callback);
+}
+
+SymbolLocatorCreateInstance
+PluginManager::GetSymbolLocatorCreateCallbackAtIndex(uint32_t idx) {
+  return GetSymbolLocatorInstances().GetCallbackAtIndex(idx);
+}
+
+ModuleSpec
+PluginManager::LocateExecutableObjectFile(const ModuleSpec &module_spec) {
+  auto &instances = GetSymbolLocatorInstances().GetInstances();
+  for (auto &instance : instances) {
+    if (instance.locate_executable_object_file) {
+      std::optional<ModuleSpec> result =
+          instance.locate_executable_object_file(module_spec);
+      if (result)
+        return *result;
+    }
+  }
+  return {};
+}
+
+FileSpec PluginManager::LocateExecutableSymbolFile(
+    const ModuleSpec &module_spec, const FileSpecList &default_search_paths) {
+  auto &instances = GetSymbolLocatorInstances().GetInstances();
+  for (auto &instance : instances) {
+    if (instance.locate_executable_symbol_file) {
+      std::optional<FileSpec> result = instance.locate_executable_symbol_file(
+          module_spec, default_search_paths);
+      if (result)
+        return *result;
+    }
+  }
+  return {};
+}
+
+bool PluginManager::DownloadObjectAndSymbolFile(ModuleSpec &module_spec,
+                                                Status &error,
+                                                bool force_lookup,
+                                                bool copy_executable) {
+  auto &instances = GetSymbolLocatorInstances().GetInstances();
+  for (auto &instance : instances) {
+    if (instance.download_object_symbol_file) {
+      if (instance.download_object_symbol_file(module_spec, error, force_lookup,
+                                               copy_executable))
         return true;
-      }
     }
   }
   return false;
 }
 
-SymbolVendorCreateInstance
-PluginManager::GetSymbolVendorCreateCallbackAtIndex(uint32_t idx) {
-  std::lock_guard<std::recursive_mutex> guard(GetSymbolVendorMutex());
-  SymbolVendorInstances &instances = GetSymbolVendorInstances();
-  if (idx < instances.size())
-    return instances[idx].create_callback;
+FileSpec PluginManager::FindSymbolFileInBundle(const FileSpec &symfile_bundle,
+                                               const UUID *uuid,
+                                               const ArchSpec *arch) {
+  auto &instances = GetSymbolLocatorInstances().GetInstances();
+  for (auto &instance : instances) {
+    if (instance.find_symbol_file_in_bundle) {
+      std::optional<FileSpec> result =
+          instance.find_symbol_file_in_bundle(symfile_bundle, uuid, arch);
+      if (result)
+        return *result;
+    }
+  }
+  return {};
+}
+
+#pragma mark Trace
+
+struct TraceInstance
+    : public PluginInstance<TraceCreateInstanceFromBundle> {
+  TraceInstance(
+      llvm::StringRef name, llvm::StringRef description,
+      CallbackType create_callback_from_bundle,
+      TraceCreateInstanceForLiveProcess create_callback_for_live_process,
+      llvm::StringRef schema, DebuggerInitializeCallback debugger_init_callback)
+      : PluginInstance<TraceCreateInstanceFromBundle>(
+            name, description, create_callback_from_bundle,
+            debugger_init_callback),
+        schema(schema),
+        create_callback_for_live_process(create_callback_for_live_process) {}
+
+  llvm::StringRef schema;
+  TraceCreateInstanceForLiveProcess create_callback_for_live_process;
+};
+
+typedef PluginInstances<TraceInstance> TraceInstances;
+
+static TraceInstances &GetTracePluginInstances() {
+  static TraceInstances g_instances;
+  return g_instances;
+}
+
+bool PluginManager::RegisterPlugin(
+    llvm::StringRef name, llvm::StringRef description,
+    TraceCreateInstanceFromBundle create_callback_from_bundle,
+    TraceCreateInstanceForLiveProcess create_callback_for_live_process,
+    llvm::StringRef schema, DebuggerInitializeCallback debugger_init_callback) {
+  return GetTracePluginInstances().RegisterPlugin(
+      name, description, create_callback_from_bundle,
+      create_callback_for_live_process, schema, debugger_init_callback);
+}
+
+bool PluginManager::UnregisterPlugin(
+    TraceCreateInstanceFromBundle create_callback_from_bundle) {
+  return GetTracePluginInstances().UnregisterPlugin(
+      create_callback_from_bundle);
+}
+
+TraceCreateInstanceFromBundle
+PluginManager::GetTraceCreateCallback(llvm::StringRef plugin_name) {
+  return GetTracePluginInstances().GetCallbackForName(plugin_name);
+}
+
+TraceCreateInstanceForLiveProcess
+PluginManager::GetTraceCreateCallbackForLiveProcess(llvm::StringRef plugin_name) {
+  for (const TraceInstance &instance : GetTracePluginInstances().GetInstances())
+    if (instance.name == plugin_name)
+      return instance.create_callback_for_live_process;
   return nullptr;
 }
 
-SymbolVendorCreateInstance
-PluginManager::GetSymbolVendorCreateCallbackForPluginName(
-    ConstString name) {
-  if (name) {
-    std::lock_guard<std::recursive_mutex> guard(GetSymbolVendorMutex());
-    SymbolVendorInstances &instances = GetSymbolVendorInstances();
+llvm::StringRef PluginManager::GetTraceSchema(llvm::StringRef plugin_name) {
+  for (const TraceInstance &instance : GetTracePluginInstances().GetInstances())
+    if (instance.name == plugin_name)
+      return instance.schema;
+  return llvm::StringRef();
+}
 
-    SymbolVendorInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (name == pos->name)
-        return pos->create_callback;
-    }
+llvm::StringRef PluginManager::GetTraceSchema(size_t index) {
+  if (TraceInstance *instance =
+          GetTracePluginInstances().GetInstanceAtIndex(index))
+    return instance->schema;
+  return llvm::StringRef();
+}
+
+#pragma mark TraceExporter
+
+struct TraceExporterInstance
+    : public PluginInstance<TraceExporterCreateInstance> {
+  TraceExporterInstance(
+      llvm::StringRef name, llvm::StringRef description,
+      TraceExporterCreateInstance create_instance,
+      ThreadTraceExportCommandCreator create_thread_trace_export_command)
+      : PluginInstance<TraceExporterCreateInstance>(name, description,
+                                                    create_instance),
+        create_thread_trace_export_command(create_thread_trace_export_command) {
   }
+
+  ThreadTraceExportCommandCreator create_thread_trace_export_command;
+};
+
+typedef PluginInstances<TraceExporterInstance> TraceExporterInstances;
+
+static TraceExporterInstances &GetTraceExporterInstances() {
+  static TraceExporterInstances g_instances;
+  return g_instances;
+}
+
+bool PluginManager::RegisterPlugin(
+    llvm::StringRef name, llvm::StringRef description,
+    TraceExporterCreateInstance create_callback,
+    ThreadTraceExportCommandCreator create_thread_trace_export_command) {
+  return GetTraceExporterInstances().RegisterPlugin(
+      name, description, create_callback, create_thread_trace_export_command);
+}
+
+TraceExporterCreateInstance
+PluginManager::GetTraceExporterCreateCallback(llvm::StringRef plugin_name) {
+  return GetTraceExporterInstances().GetCallbackForName(plugin_name);
+}
+
+bool PluginManager::UnregisterPlugin(
+    TraceExporterCreateInstance create_callback) {
+  return GetTraceExporterInstances().UnregisterPlugin(create_callback);
+}
+
+ThreadTraceExportCommandCreator
+PluginManager::GetThreadTraceExportCommandCreatorAtIndex(uint32_t index) {
+  if (TraceExporterInstance *instance =
+          GetTraceExporterInstances().GetInstanceAtIndex(index))
+    return instance->create_thread_trace_export_command;
   return nullptr;
+}
+
+llvm::StringRef
+PluginManager::GetTraceExporterPluginNameAtIndex(uint32_t index) {
+  return GetTraceExporterInstances().GetNameAtIndex(index);
 }
 
 #pragma mark UnwindAssembly
 
-struct UnwindAssemblyInstance {
-  UnwindAssemblyInstance() : name(), description(), create_callback(nullptr) {}
-
-  ConstString name;
-  std::string description;
-  UnwindAssemblyCreateInstance create_callback;
-};
-
-typedef std::vector<UnwindAssemblyInstance> UnwindAssemblyInstances;
-
-static std::recursive_mutex &GetUnwindAssemblyMutex() {
-  static std::recursive_mutex g_instances_mutex;
-  return g_instances_mutex;
-}
+typedef PluginInstance<UnwindAssemblyCreateInstance> UnwindAssemblyInstance;
+typedef PluginInstances<UnwindAssemblyInstance> UnwindAssemblyInstances;
 
 static UnwindAssemblyInstances &GetUnwindAssemblyInstances() {
   static UnwindAssemblyInstances g_instances;
@@ -1842,79 +1328,26 @@ static UnwindAssemblyInstances &GetUnwindAssemblyInstances() {
 }
 
 bool PluginManager::RegisterPlugin(
-    ConstString name, const char *description,
+    llvm::StringRef name, llvm::StringRef description,
     UnwindAssemblyCreateInstance create_callback) {
-  if (create_callback) {
-    UnwindAssemblyInstance instance;
-    assert((bool)name);
-    instance.name = name;
-    if (description && description[0])
-      instance.description = description;
-    instance.create_callback = create_callback;
-    std::lock_guard<std::recursive_mutex> guard(GetUnwindAssemblyMutex());
-    GetUnwindAssemblyInstances().push_back(instance);
-  }
-  return false;
+  return GetUnwindAssemblyInstances().RegisterPlugin(name, description,
+                                                     create_callback);
 }
 
 bool PluginManager::UnregisterPlugin(
     UnwindAssemblyCreateInstance create_callback) {
-  if (create_callback) {
-    std::lock_guard<std::recursive_mutex> guard(GetUnwindAssemblyMutex());
-    UnwindAssemblyInstances &instances = GetUnwindAssemblyInstances();
-
-    UnwindAssemblyInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (pos->create_callback == create_callback) {
-        instances.erase(pos);
-        return true;
-      }
-    }
-  }
-  return false;
+  return GetUnwindAssemblyInstances().UnregisterPlugin(create_callback);
 }
 
 UnwindAssemblyCreateInstance
 PluginManager::GetUnwindAssemblyCreateCallbackAtIndex(uint32_t idx) {
-  std::lock_guard<std::recursive_mutex> guard(GetUnwindAssemblyMutex());
-  UnwindAssemblyInstances &instances = GetUnwindAssemblyInstances();
-  if (idx < instances.size())
-    return instances[idx].create_callback;
-  return nullptr;
-}
-
-UnwindAssemblyCreateInstance
-PluginManager::GetUnwindAssemblyCreateCallbackForPluginName(
-    ConstString name) {
-  if (name) {
-    std::lock_guard<std::recursive_mutex> guard(GetUnwindAssemblyMutex());
-    UnwindAssemblyInstances &instances = GetUnwindAssemblyInstances();
-
-    UnwindAssemblyInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (name == pos->name)
-        return pos->create_callback;
-    }
-  }
-  return nullptr;
+  return GetUnwindAssemblyInstances().GetCallbackAtIndex(idx);
 }
 
 #pragma mark MemoryHistory
 
-struct MemoryHistoryInstance {
-  MemoryHistoryInstance() : name(), description(), create_callback(nullptr) {}
-
-  ConstString name;
-  std::string description;
-  MemoryHistoryCreateInstance create_callback;
-};
-
-typedef std::vector<MemoryHistoryInstance> MemoryHistoryInstances;
-
-static std::recursive_mutex &GetMemoryHistoryMutex() {
-  static std::recursive_mutex g_instances_mutex;
-  return g_instances_mutex;
-}
+typedef PluginInstance<MemoryHistoryCreateInstance> MemoryHistoryInstance;
+typedef PluginInstances<MemoryHistoryInstance> MemoryHistoryInstances;
 
 static MemoryHistoryInstances &GetMemoryHistoryInstances() {
   static MemoryHistoryInstances g_instances;
@@ -1922,82 +1355,39 @@ static MemoryHistoryInstances &GetMemoryHistoryInstances() {
 }
 
 bool PluginManager::RegisterPlugin(
-    ConstString name, const char *description,
+    llvm::StringRef name, llvm::StringRef description,
     MemoryHistoryCreateInstance create_callback) {
-  if (create_callback) {
-    MemoryHistoryInstance instance;
-    assert((bool)name);
-    instance.name = name;
-    if (description && description[0])
-      instance.description = description;
-    instance.create_callback = create_callback;
-    std::lock_guard<std::recursive_mutex> guard(GetMemoryHistoryMutex());
-    GetMemoryHistoryInstances().push_back(instance);
-  }
-  return false;
+  return GetMemoryHistoryInstances().RegisterPlugin(name, description,
+                                                    create_callback);
 }
 
 bool PluginManager::UnregisterPlugin(
     MemoryHistoryCreateInstance create_callback) {
-  if (create_callback) {
-    std::lock_guard<std::recursive_mutex> guard(GetMemoryHistoryMutex());
-    MemoryHistoryInstances &instances = GetMemoryHistoryInstances();
-
-    MemoryHistoryInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (pos->create_callback == create_callback) {
-        instances.erase(pos);
-        return true;
-      }
-    }
-  }
-  return false;
+  return GetMemoryHistoryInstances().UnregisterPlugin(create_callback);
 }
 
 MemoryHistoryCreateInstance
 PluginManager::GetMemoryHistoryCreateCallbackAtIndex(uint32_t idx) {
-  std::lock_guard<std::recursive_mutex> guard(GetMemoryHistoryMutex());
-  MemoryHistoryInstances &instances = GetMemoryHistoryInstances();
-  if (idx < instances.size())
-    return instances[idx].create_callback;
-  return nullptr;
-}
-
-MemoryHistoryCreateInstance
-PluginManager::GetMemoryHistoryCreateCallbackForPluginName(
-    ConstString name) {
-  if (name) {
-    std::lock_guard<std::recursive_mutex> guard(GetMemoryHistoryMutex());
-    MemoryHistoryInstances &instances = GetMemoryHistoryInstances();
-
-    MemoryHistoryInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (name == pos->name)
-        return pos->create_callback;
-    }
-  }
-  return nullptr;
+  return GetMemoryHistoryInstances().GetCallbackAtIndex(idx);
 }
 
 #pragma mark InstrumentationRuntime
 
-struct InstrumentationRuntimeInstance {
-  InstrumentationRuntimeInstance()
-      : name(), description(), create_callback(nullptr) {}
+struct InstrumentationRuntimeInstance
+    : public PluginInstance<InstrumentationRuntimeCreateInstance> {
+  InstrumentationRuntimeInstance(
+      llvm::StringRef name, llvm::StringRef description,
+      CallbackType create_callback,
+      InstrumentationRuntimeGetType get_type_callback)
+      : PluginInstance<InstrumentationRuntimeCreateInstance>(name, description,
+                                                             create_callback),
+        get_type_callback(get_type_callback) {}
 
-  ConstString name;
-  std::string description;
-  InstrumentationRuntimeCreateInstance create_callback;
-  InstrumentationRuntimeGetType get_type_callback;
+  InstrumentationRuntimeGetType get_type_callback = nullptr;
 };
 
-typedef std::vector<InstrumentationRuntimeInstance>
+typedef PluginInstances<InstrumentationRuntimeInstance>
     InstrumentationRuntimeInstances;
-
-static std::recursive_mutex &GetInstrumentationRuntimeMutex() {
-  static std::recursive_mutex g_instances_mutex;
-  return g_instances_mutex;
-}
 
 static InstrumentationRuntimeInstances &GetInstrumentationRuntimeInstances() {
   static InstrumentationRuntimeInstances g_instances;
@@ -2005,48 +1395,21 @@ static InstrumentationRuntimeInstances &GetInstrumentationRuntimeInstances() {
 }
 
 bool PluginManager::RegisterPlugin(
-    ConstString name, const char *description,
+    llvm::StringRef name, llvm::StringRef description,
     InstrumentationRuntimeCreateInstance create_callback,
     InstrumentationRuntimeGetType get_type_callback) {
-  if (create_callback) {
-    InstrumentationRuntimeInstance instance;
-    assert((bool)name);
-    instance.name = name;
-    if (description && description[0])
-      instance.description = description;
-    instance.create_callback = create_callback;
-    instance.get_type_callback = get_type_callback;
-    std::lock_guard<std::recursive_mutex> guard(
-        GetInstrumentationRuntimeMutex());
-    GetInstrumentationRuntimeInstances().push_back(instance);
-  }
-  return false;
+  return GetInstrumentationRuntimeInstances().RegisterPlugin(
+      name, description, create_callback, get_type_callback);
 }
 
 bool PluginManager::UnregisterPlugin(
     InstrumentationRuntimeCreateInstance create_callback) {
-  if (create_callback) {
-    std::lock_guard<std::recursive_mutex> guard(
-        GetInstrumentationRuntimeMutex());
-    InstrumentationRuntimeInstances &instances =
-        GetInstrumentationRuntimeInstances();
-
-    InstrumentationRuntimeInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (pos->create_callback == create_callback) {
-        instances.erase(pos);
-        return true;
-      }
-    }
-  }
-  return false;
+  return GetInstrumentationRuntimeInstances().UnregisterPlugin(create_callback);
 }
 
 InstrumentationRuntimeGetType
 PluginManager::GetInstrumentationRuntimeGetTypeCallbackAtIndex(uint32_t idx) {
-  std::lock_guard<std::recursive_mutex> guard(GetInstrumentationRuntimeMutex());
-  InstrumentationRuntimeInstances &instances =
-      GetInstrumentationRuntimeInstances();
+  const auto &instances = GetInstrumentationRuntimeInstances().GetInstances();
   if (idx < instances.size())
     return instances[idx].get_type_callback;
   return nullptr;
@@ -2054,48 +1417,27 @@ PluginManager::GetInstrumentationRuntimeGetTypeCallbackAtIndex(uint32_t idx) {
 
 InstrumentationRuntimeCreateInstance
 PluginManager::GetInstrumentationRuntimeCreateCallbackAtIndex(uint32_t idx) {
-  std::lock_guard<std::recursive_mutex> guard(GetInstrumentationRuntimeMutex());
-  InstrumentationRuntimeInstances &instances =
-      GetInstrumentationRuntimeInstances();
-  if (idx < instances.size())
-    return instances[idx].create_callback;
-  return nullptr;
-}
-
-InstrumentationRuntimeCreateInstance
-PluginManager::GetInstrumentationRuntimeCreateCallbackForPluginName(
-    ConstString name) {
-  if (name) {
-    std::lock_guard<std::recursive_mutex> guard(
-        GetInstrumentationRuntimeMutex());
-    InstrumentationRuntimeInstances &instances =
-        GetInstrumentationRuntimeInstances();
-
-    InstrumentationRuntimeInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (name == pos->name)
-        return pos->create_callback;
-    }
-  }
-  return nullptr;
+  return GetInstrumentationRuntimeInstances().GetCallbackAtIndex(idx);
 }
 
 #pragma mark TypeSystem
 
-struct TypeSystemInstance {
-  ConstString name;
-  std::string description;
-  TypeSystemCreateInstance create_callback;
+struct TypeSystemInstance : public PluginInstance<TypeSystemCreateInstance> {
+  TypeSystemInstance(llvm::StringRef name, llvm::StringRef description,
+                     CallbackType create_callback,
+                     LanguageSet supported_languages_for_types,
+                     LanguageSet supported_languages_for_expressions)
+      : PluginInstance<TypeSystemCreateInstance>(name, description,
+                                                 create_callback),
+        supported_languages_for_types(supported_languages_for_types),
+        supported_languages_for_expressions(
+            supported_languages_for_expressions) {}
+
   LanguageSet supported_languages_for_types;
   LanguageSet supported_languages_for_expressions;
 };
 
-typedef std::vector<TypeSystemInstance> TypeSystemInstances;
-
-static std::recursive_mutex &GetTypeSystemMutex() {
-  static std::recursive_mutex g_instances_mutex;
-  return g_instances_mutex;
-}
+typedef PluginInstances<TypeSystemInstance> TypeSystemInstances;
 
 static TypeSystemInstances &GetTypeSystemInstances() {
   static TypeSystemInstances g_instances;
@@ -2103,79 +1445,35 @@ static TypeSystemInstances &GetTypeSystemInstances() {
 }
 
 bool PluginManager::RegisterPlugin(
-    ConstString name, const char *description,
+    llvm::StringRef name, llvm::StringRef description,
     TypeSystemCreateInstance create_callback,
     LanguageSet supported_languages_for_types,
     LanguageSet supported_languages_for_expressions) {
-  if (create_callback) {
-    TypeSystemInstance instance;
-    assert((bool)name);
-    instance.name = name;
-    if (description && description[0])
-      instance.description = description;
-    instance.create_callback = create_callback;
-    instance.supported_languages_for_types = supported_languages_for_types;
-    instance.supported_languages_for_expressions = supported_languages_for_expressions;
-    std::lock_guard<std::recursive_mutex> guard(GetTypeSystemMutex());
-    GetTypeSystemInstances().push_back(instance);
-  }
-  return false;
+  return GetTypeSystemInstances().RegisterPlugin(
+      name, description, create_callback, supported_languages_for_types,
+      supported_languages_for_expressions);
 }
 
 bool PluginManager::UnregisterPlugin(TypeSystemCreateInstance create_callback) {
-  if (create_callback) {
-    std::lock_guard<std::recursive_mutex> guard(GetTypeSystemMutex());
-    TypeSystemInstances &instances = GetTypeSystemInstances();
-
-    TypeSystemInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (pos->create_callback == create_callback) {
-        instances.erase(pos);
-        return true;
-      }
-    }
-  }
-  return false;
+  return GetTypeSystemInstances().UnregisterPlugin(create_callback);
 }
 
 TypeSystemCreateInstance
 PluginManager::GetTypeSystemCreateCallbackAtIndex(uint32_t idx) {
-  std::lock_guard<std::recursive_mutex> guard(GetTypeSystemMutex());
-  TypeSystemInstances &instances = GetTypeSystemInstances();
-  if (idx < instances.size())
-    return instances[idx].create_callback;
-  return nullptr;
-}
-
-TypeSystemCreateInstance
-PluginManager::GetTypeSystemCreateCallbackForPluginName(
-    ConstString name) {
-  if (name) {
-    std::lock_guard<std::recursive_mutex> guard(GetTypeSystemMutex());
-    TypeSystemInstances &instances = GetTypeSystemInstances();
-
-    TypeSystemInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (name == pos->name)
-        return pos->create_callback;
-    }
-  }
-  return nullptr;
+  return GetTypeSystemInstances().GetCallbackAtIndex(idx);
 }
 
 LanguageSet PluginManager::GetAllTypeSystemSupportedLanguagesForTypes() {
-  std::lock_guard<std::recursive_mutex> guard(GetTypeSystemMutex());
+  const auto &instances = GetTypeSystemInstances().GetInstances();
   LanguageSet all;
-  TypeSystemInstances &instances = GetTypeSystemInstances();
   for (unsigned i = 0; i < instances.size(); ++i)
     all.bitvector |= instances[i].supported_languages_for_types.bitvector;
   return all;
 }
 
 LanguageSet PluginManager::GetAllTypeSystemSupportedLanguagesForExpressions() {
-  std::lock_guard<std::recursive_mutex> guard(GetTypeSystemMutex());
+  const auto &instances = GetTypeSystemInstances().GetInstances();
   LanguageSet all;
-  TypeSystemInstances &instances = GetTypeSystemInstances();
   for (unsigned i = 0; i < instances.size(); ++i)
     all.bitvector |= instances[i].supported_languages_for_expressions.bitvector;
   return all;
@@ -2183,87 +1481,46 @@ LanguageSet PluginManager::GetAllTypeSystemSupportedLanguagesForExpressions() {
 
 #pragma mark REPL
 
-struct REPLInstance {
-  REPLInstance() : name(), description(), create_callback(nullptr) {}
+struct REPLInstance : public PluginInstance<REPLCreateInstance> {
+  REPLInstance(llvm::StringRef name, llvm::StringRef description,
+               CallbackType create_callback, LanguageSet supported_languages)
+      : PluginInstance<REPLCreateInstance>(name, description, create_callback),
+        supported_languages(supported_languages) {}
 
-  ConstString name;
-  std::string description;
-  REPLCreateInstance create_callback;
   LanguageSet supported_languages;
 };
 
-typedef std::vector<REPLInstance> REPLInstances;
-
-static std::recursive_mutex &GetREPLMutex() {
-  static std::recursive_mutex g_instances_mutex;
-  return g_instances_mutex;
-}
+typedef PluginInstances<REPLInstance> REPLInstances;
 
 static REPLInstances &GetREPLInstances() {
   static REPLInstances g_instances;
   return g_instances;
 }
 
-bool PluginManager::RegisterPlugin(ConstString name, const char *description,
+bool PluginManager::RegisterPlugin(llvm::StringRef name, llvm::StringRef description,
                                    REPLCreateInstance create_callback,
                                    LanguageSet supported_languages) {
-  if (create_callback) {
-    REPLInstance instance;
-    assert((bool)name);
-    instance.name = name;
-    if (description && description[0])
-      instance.description = description;
-    instance.create_callback = create_callback;
-    instance.supported_languages = supported_languages;
-    std::lock_guard<std::recursive_mutex> guard(GetREPLMutex());
-    GetREPLInstances().push_back(instance);
-  }
-  return false;
+  return GetREPLInstances().RegisterPlugin(name, description, create_callback,
+                                           supported_languages);
 }
 
 bool PluginManager::UnregisterPlugin(REPLCreateInstance create_callback) {
-  if (create_callback) {
-    std::lock_guard<std::recursive_mutex> guard(GetREPLMutex());
-    REPLInstances &instances = GetREPLInstances();
-
-    REPLInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (pos->create_callback == create_callback) {
-        instances.erase(pos);
-        return true;
-      }
-    }
-  }
-  return false;
+  return GetREPLInstances().UnregisterPlugin(create_callback);
 }
 
 REPLCreateInstance PluginManager::GetREPLCreateCallbackAtIndex(uint32_t idx) {
-  std::lock_guard<std::recursive_mutex> guard(GetREPLMutex());
-  REPLInstances &instances = GetREPLInstances();
-  if (idx < instances.size())
-    return instances[idx].create_callback;
-  return nullptr;
+  return GetREPLInstances().GetCallbackAtIndex(idx);
 }
 
-REPLCreateInstance
-PluginManager::GetREPLCreateCallbackForPluginName(ConstString name) {
-  if (name) {
-    std::lock_guard<std::recursive_mutex> guard(GetREPLMutex());
-    REPLInstances &instances = GetREPLInstances();
-
-    REPLInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (name == pos->name)
-        return pos->create_callback;
-    }
-  }
-  return nullptr;
+LanguageSet PluginManager::GetREPLSupportedLanguagesAtIndex(uint32_t idx) {
+  const auto &instances = GetREPLInstances().GetInstances();
+  return idx < instances.size() ? instances[idx].supported_languages
+                                : LanguageSet();
 }
 
 LanguageSet PluginManager::GetREPLAllTypeSystemSupportedLanguages() {
-  std::lock_guard<std::recursive_mutex> guard(GetREPLMutex());
+  const auto &instances = GetREPLInstances().GetInstances();
   LanguageSet all;
-  REPLInstances &instances = GetREPLInstances();
   for (unsigned i = 0; i < instances.size(); ++i)
     all.bitvector |= instances[i].supported_languages.bitvector;
   return all;
@@ -2272,101 +1529,38 @@ LanguageSet PluginManager::GetREPLAllTypeSystemSupportedLanguages() {
 #pragma mark PluginManager
 
 void PluginManager::DebuggerInitialize(Debugger &debugger) {
-  // Initialize the DynamicLoader plugins
-  {
-    std::lock_guard<std::recursive_mutex> guard(GetDynamicLoaderMutex());
-    DynamicLoaderInstances &instances = GetDynamicLoaderInstances();
-
-    DynamicLoaderInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (pos->debugger_init_callback)
-        pos->debugger_init_callback(debugger);
-    }
-  }
-
-  // Initialize the JITLoader plugins
-  {
-    std::lock_guard<std::recursive_mutex> guard(GetJITLoaderMutex());
-    JITLoaderInstances &instances = GetJITLoaderInstances();
-
-    JITLoaderInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (pos->debugger_init_callback)
-        pos->debugger_init_callback(debugger);
-    }
-  }
-
-  // Initialize the Platform plugins
-  {
-    std::lock_guard<std::recursive_mutex> guard(GetPlatformInstancesMutex());
-    PlatformInstances &instances = GetPlatformInstances();
-
-    PlatformInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (pos->debugger_init_callback)
-        pos->debugger_init_callback(debugger);
-    }
-  }
-
-  // Initialize the Process plugins
-  {
-    std::lock_guard<std::recursive_mutex> guard(GetProcessMutex());
-    ProcessInstances &instances = GetProcessInstances();
-
-    ProcessInstances::iterator pos, end = instances.end();
-    for (pos = instances.begin(); pos != end; ++pos) {
-      if (pos->debugger_init_callback)
-        pos->debugger_init_callback(debugger);
-    }
-  }
-
-  // Initialize the SymbolFile plugins
-  {
-    std::lock_guard<std::recursive_mutex> guard(GetSymbolFileMutex());
-    for (auto &sym_file : GetSymbolFileInstances()) {
-      if (sym_file.debugger_init_callback)
-        sym_file.debugger_init_callback(debugger);
-    }
-  }
-
-  // Initialize the OperatingSystem plugins
-  {
-    std::lock_guard<std::recursive_mutex> guard(GetOperatingSystemMutex());
-    for (auto &os : GetOperatingSystemInstances()) {
-      if (os.debugger_init_callback)
-        os.debugger_init_callback(debugger);
-    }
-  }
-
-  // Initialize the StructuredDataPlugin plugins
-  {
-    std::lock_guard<std::recursive_mutex> guard(GetStructuredDataPluginMutex());
-    for (auto &plugin : GetStructuredDataPluginInstances()) {
-      if (plugin.debugger_init_callback)
-        plugin.debugger_init_callback(debugger);
-    }
-  }
+  GetDynamicLoaderInstances().PerformDebuggerCallback(debugger);
+  GetJITLoaderInstances().PerformDebuggerCallback(debugger);
+  GetObjectFileInstances().PerformDebuggerCallback(debugger);
+  GetPlatformInstances().PerformDebuggerCallback(debugger);
+  GetProcessInstances().PerformDebuggerCallback(debugger);
+  GetSymbolFileInstances().PerformDebuggerCallback(debugger);
+  GetSymbolLocatorInstances().PerformDebuggerCallback(debugger);
+  GetOperatingSystemInstances().PerformDebuggerCallback(debugger);
+  GetStructuredDataPluginInstances().PerformDebuggerCallback(debugger);
+  GetTracePluginInstances().PerformDebuggerCallback(debugger);
 }
 
 // This is the preferred new way to register plugin specific settings.  e.g.
 // This will put a plugin's settings under e.g.
 // "plugin.<plugin_type_name>.<plugin_type_desc>.SETTINGNAME".
-static lldb::OptionValuePropertiesSP GetDebuggerPropertyForPlugins(
-    Debugger &debugger, ConstString plugin_type_name,
-    ConstString plugin_type_desc, bool can_create) {
+static lldb::OptionValuePropertiesSP
+GetDebuggerPropertyForPlugins(Debugger &debugger, llvm::StringRef plugin_type_name,
+                              llvm::StringRef plugin_type_desc,
+                              bool can_create) {
   lldb::OptionValuePropertiesSP parent_properties_sp(
       debugger.GetValueProperties());
   if (parent_properties_sp) {
-    static ConstString g_property_name("plugin");
+    static constexpr llvm::StringLiteral g_property_name("plugin");
 
     OptionValuePropertiesSP plugin_properties_sp =
         parent_properties_sp->GetSubProperty(nullptr, g_property_name);
     if (!plugin_properties_sp && can_create) {
       plugin_properties_sp =
           std::make_shared<OptionValueProperties>(g_property_name);
-      parent_properties_sp->AppendProperty(
-          g_property_name, ConstString("Settings specify to plugins."), true,
-          plugin_properties_sp);
+      parent_properties_sp->AppendProperty(g_property_name,
+                                           "Settings specify to plugins.", true,
+                                           plugin_properties_sp);
     }
 
     if (plugin_properties_sp) {
@@ -2388,9 +1582,9 @@ static lldb::OptionValuePropertiesSP GetDebuggerPropertyForPlugins(
 // "<plugin_type_name>.plugin.<plugin_type_desc>.SETTINGNAME" and Platform
 // generic settings would be under "platform.SETTINGNAME".
 static lldb::OptionValuePropertiesSP GetDebuggerPropertyForPluginsOldStyle(
-    Debugger &debugger, ConstString plugin_type_name,
-    ConstString plugin_type_desc, bool can_create) {
-  static ConstString g_property_name("plugin");
+    Debugger &debugger, llvm::StringRef plugin_type_name,
+    llvm::StringRef plugin_type_desc, bool can_create) {
+  static constexpr llvm::StringLiteral g_property_name("plugin");
   lldb::OptionValuePropertiesSP parent_properties_sp(
       debugger.GetValueProperties());
   if (parent_properties_sp) {
@@ -2409,9 +1603,9 @@ static lldb::OptionValuePropertiesSP GetDebuggerPropertyForPluginsOldStyle(
       if (!plugin_type_properties_sp && can_create) {
         plugin_type_properties_sp =
             std::make_shared<OptionValueProperties>(g_property_name);
-        plugin_properties_sp->AppendProperty(
-            g_property_name, ConstString("Settings specific to plugins"), true,
-            plugin_type_properties_sp);
+        plugin_properties_sp->AppendProperty(g_property_name,
+                                             "Settings specific to plugins",
+                                             true, plugin_type_properties_sp);
       }
       return plugin_type_properties_sp;
     }
@@ -2422,18 +1616,19 @@ static lldb::OptionValuePropertiesSP GetDebuggerPropertyForPluginsOldStyle(
 namespace {
 
 typedef lldb::OptionValuePropertiesSP
-GetDebuggerPropertyForPluginsPtr(Debugger &, ConstString ,
-                                 ConstString , bool can_create);
+GetDebuggerPropertyForPluginsPtr(Debugger &, llvm::StringRef, llvm::StringRef,
+                                 bool can_create);
+}
 
-lldb::OptionValuePropertiesSP
-GetSettingForPlugin(Debugger &debugger, ConstString setting_name,
-                    ConstString plugin_type_name,
+static lldb::OptionValuePropertiesSP
+GetSettingForPlugin(Debugger &debugger, llvm::StringRef setting_name,
+                    llvm::StringRef plugin_type_name,
                     GetDebuggerPropertyForPluginsPtr get_debugger_property =
                         GetDebuggerPropertyForPlugins) {
   lldb::OptionValuePropertiesSP properties_sp;
   lldb::OptionValuePropertiesSP plugin_type_properties_sp(get_debugger_property(
       debugger, plugin_type_name,
-      ConstString(), // not creating to so we don't need the description
+      "", // not creating to so we don't need the description
       false));
   if (plugin_type_properties_sp)
     properties_sp =
@@ -2441,13 +1636,13 @@ GetSettingForPlugin(Debugger &debugger, ConstString setting_name,
   return properties_sp;
 }
 
-bool CreateSettingForPlugin(
-    Debugger &debugger, ConstString plugin_type_name,
-    ConstString plugin_type_desc,
-    const lldb::OptionValuePropertiesSP &properties_sp,
-    ConstString description, bool is_global_property,
-    GetDebuggerPropertyForPluginsPtr get_debugger_property =
-        GetDebuggerPropertyForPlugins) {
+static bool
+CreateSettingForPlugin(Debugger &debugger, llvm::StringRef plugin_type_name,
+                       llvm::StringRef plugin_type_desc,
+                       const lldb::OptionValuePropertiesSP &properties_sp,
+                       llvm::StringRef description, bool is_global_property,
+                       GetDebuggerPropertyForPluginsPtr get_debugger_property =
+                           GetDebuggerPropertyForPlugins) {
   if (properties_sp) {
     lldb::OptionValuePropertiesSP plugin_type_properties_sp(
         get_debugger_property(debugger, plugin_type_name, plugin_type_desc,
@@ -2462,102 +1657,135 @@ bool CreateSettingForPlugin(
   return false;
 }
 
-const char *kDynamicLoaderPluginName("dynamic-loader");
-const char *kPlatformPluginName("platform");
-const char *kProcessPluginName("process");
-const char *kSymbolFilePluginName("symbol-file");
-const char *kJITLoaderPluginName("jit-loader");
-const char *kStructuredDataPluginName("structured-data");
+static constexpr llvm::StringLiteral kDynamicLoaderPluginName("dynamic-loader");
+static constexpr llvm::StringLiteral kPlatformPluginName("platform");
+static constexpr llvm::StringLiteral kProcessPluginName("process");
+static constexpr llvm::StringLiteral kTracePluginName("trace");
+static constexpr llvm::StringLiteral kObjectFilePluginName("object-file");
+static constexpr llvm::StringLiteral kSymbolFilePluginName("symbol-file");
+static constexpr llvm::StringLiteral kSymbolLocatorPluginName("symbol-locator");
+static constexpr llvm::StringLiteral kJITLoaderPluginName("jit-loader");
+static constexpr llvm::StringLiteral
+    kStructuredDataPluginName("structured-data");
 
-} // anonymous namespace
-
-lldb::OptionValuePropertiesSP PluginManager::GetSettingForDynamicLoaderPlugin(
-    Debugger &debugger, ConstString setting_name) {
-  return GetSettingForPlugin(debugger, setting_name,
-                             ConstString(kDynamicLoaderPluginName));
+lldb::OptionValuePropertiesSP
+PluginManager::GetSettingForDynamicLoaderPlugin(Debugger &debugger,
+                                                llvm::StringRef setting_name) {
+  return GetSettingForPlugin(debugger, setting_name, kDynamicLoaderPluginName);
 }
 
 bool PluginManager::CreateSettingForDynamicLoaderPlugin(
     Debugger &debugger, const lldb::OptionValuePropertiesSP &properties_sp,
-    ConstString description, bool is_global_property) {
-  return CreateSettingForPlugin(
-      debugger, ConstString(kDynamicLoaderPluginName),
-      ConstString("Settings for dynamic loader plug-ins"), properties_sp,
-      description, is_global_property);
+    llvm::StringRef description, bool is_global_property) {
+  return CreateSettingForPlugin(debugger, kDynamicLoaderPluginName,
+                                "Settings for dynamic loader plug-ins",
+                                properties_sp, description, is_global_property);
 }
 
 lldb::OptionValuePropertiesSP
 PluginManager::GetSettingForPlatformPlugin(Debugger &debugger,
-                                           ConstString setting_name) {
-  return GetSettingForPlugin(debugger, setting_name,
-                             ConstString(kPlatformPluginName),
+                                           llvm::StringRef setting_name) {
+  return GetSettingForPlugin(debugger, setting_name, kPlatformPluginName,
                              GetDebuggerPropertyForPluginsOldStyle);
 }
 
 bool PluginManager::CreateSettingForPlatformPlugin(
     Debugger &debugger, const lldb::OptionValuePropertiesSP &properties_sp,
-    ConstString description, bool is_global_property) {
-  return CreateSettingForPlugin(debugger, ConstString(kPlatformPluginName),
-                                ConstString("Settings for platform plug-ins"),
-                                properties_sp, description, is_global_property,
+    llvm::StringRef description, bool is_global_property) {
+  return CreateSettingForPlugin(debugger, kPlatformPluginName,
+                                "Settings for platform plug-ins", properties_sp,
+                                description, is_global_property,
                                 GetDebuggerPropertyForPluginsOldStyle);
 }
 
 lldb::OptionValuePropertiesSP
 PluginManager::GetSettingForProcessPlugin(Debugger &debugger,
-                                          ConstString setting_name) {
-  return GetSettingForPlugin(debugger, setting_name,
-                             ConstString(kProcessPluginName));
+                                          llvm::StringRef setting_name) {
+  return GetSettingForPlugin(debugger, setting_name, kProcessPluginName);
 }
 
 bool PluginManager::CreateSettingForProcessPlugin(
     Debugger &debugger, const lldb::OptionValuePropertiesSP &properties_sp,
-    ConstString description, bool is_global_property) {
-  return CreateSettingForPlugin(debugger, ConstString(kProcessPluginName),
-                                ConstString("Settings for process plug-ins"),
+    llvm::StringRef description, bool is_global_property) {
+  return CreateSettingForPlugin(debugger, kProcessPluginName,
+                                "Settings for process plug-ins", properties_sp,
+                                description, is_global_property);
+}
+
+lldb::OptionValuePropertiesSP
+PluginManager::GetSettingForSymbolLocatorPlugin(Debugger &debugger,
+                                                llvm::StringRef setting_name) {
+  return GetSettingForPlugin(debugger, setting_name, kSymbolLocatorPluginName);
+}
+
+bool PluginManager::CreateSettingForSymbolLocatorPlugin(
+    Debugger &debugger, const lldb::OptionValuePropertiesSP &properties_sp,
+    llvm::StringRef description, bool is_global_property) {
+  return CreateSettingForPlugin(debugger, kSymbolLocatorPluginName,
+                                "Settings for symbol locator plug-ins",
+                                properties_sp, description, is_global_property);
+}
+
+bool PluginManager::CreateSettingForTracePlugin(
+    Debugger &debugger, const lldb::OptionValuePropertiesSP &properties_sp,
+    llvm::StringRef description, bool is_global_property) {
+  return CreateSettingForPlugin(debugger, kTracePluginName,
+                                "Settings for trace plug-ins", properties_sp,
+                                description, is_global_property);
+}
+
+lldb::OptionValuePropertiesSP
+PluginManager::GetSettingForObjectFilePlugin(Debugger &debugger,
+                                             llvm::StringRef setting_name) {
+  return GetSettingForPlugin(debugger, setting_name, kObjectFilePluginName);
+}
+
+bool PluginManager::CreateSettingForObjectFilePlugin(
+    Debugger &debugger, const lldb::OptionValuePropertiesSP &properties_sp,
+    llvm::StringRef description, bool is_global_property) {
+  return CreateSettingForPlugin(debugger, kObjectFilePluginName,
+                                "Settings for object file plug-ins",
                                 properties_sp, description, is_global_property);
 }
 
 lldb::OptionValuePropertiesSP
 PluginManager::GetSettingForSymbolFilePlugin(Debugger &debugger,
-                                             ConstString setting_name) {
-  return GetSettingForPlugin(debugger, setting_name,
-                             ConstString(kSymbolFilePluginName));
+                                             llvm::StringRef setting_name) {
+  return GetSettingForPlugin(debugger, setting_name, kSymbolFilePluginName);
 }
 
 bool PluginManager::CreateSettingForSymbolFilePlugin(
     Debugger &debugger, const lldb::OptionValuePropertiesSP &properties_sp,
-    ConstString description, bool is_global_property) {
-  return CreateSettingForPlugin(
-      debugger, ConstString(kSymbolFilePluginName),
-      ConstString("Settings for symbol file plug-ins"), properties_sp,
-      description, is_global_property);
+    llvm::StringRef description, bool is_global_property) {
+  return CreateSettingForPlugin(debugger, kSymbolFilePluginName,
+                                "Settings for symbol file plug-ins",
+                                properties_sp, description, is_global_property);
 }
 
 lldb::OptionValuePropertiesSP
 PluginManager::GetSettingForJITLoaderPlugin(Debugger &debugger,
-                                            ConstString setting_name) {
-  return GetSettingForPlugin(debugger, setting_name,
-                             ConstString(kJITLoaderPluginName));
+                                            llvm::StringRef setting_name) {
+  return GetSettingForPlugin(debugger, setting_name, kJITLoaderPluginName);
 }
 
 bool PluginManager::CreateSettingForJITLoaderPlugin(
     Debugger &debugger, const lldb::OptionValuePropertiesSP &properties_sp,
-    ConstString description, bool is_global_property) {
-  return CreateSettingForPlugin(debugger, ConstString(kJITLoaderPluginName),
-                                ConstString("Settings for JIT loader plug-ins"),
+    llvm::StringRef description, bool is_global_property) {
+  return CreateSettingForPlugin(debugger, kJITLoaderPluginName,
+                                "Settings for JIT loader plug-ins",
                                 properties_sp, description, is_global_property);
 }
 
 static const char *kOperatingSystemPluginName("os");
 
-lldb::OptionValuePropertiesSP PluginManager::GetSettingForOperatingSystemPlugin(
-    Debugger &debugger, ConstString setting_name) {
+lldb::OptionValuePropertiesSP
+PluginManager::GetSettingForOperatingSystemPlugin(Debugger &debugger,
+                                                  llvm::StringRef setting_name) {
   lldb::OptionValuePropertiesSP properties_sp;
   lldb::OptionValuePropertiesSP plugin_type_properties_sp(
       GetDebuggerPropertyForPlugins(
-          debugger, ConstString(kOperatingSystemPluginName),
-          ConstString(), // not creating to so we don't need the description
+          debugger, kOperatingSystemPluginName,
+          "", // not creating to so we don't need the description
           false));
   if (plugin_type_properties_sp)
     properties_sp =
@@ -2567,12 +1795,12 @@ lldb::OptionValuePropertiesSP PluginManager::GetSettingForOperatingSystemPlugin(
 
 bool PluginManager::CreateSettingForOperatingSystemPlugin(
     Debugger &debugger, const lldb::OptionValuePropertiesSP &properties_sp,
-    ConstString description, bool is_global_property) {
+    llvm::StringRef description, bool is_global_property) {
   if (properties_sp) {
     lldb::OptionValuePropertiesSP plugin_type_properties_sp(
-        GetDebuggerPropertyForPlugins(
-            debugger, ConstString(kOperatingSystemPluginName),
-            ConstString("Settings for operating system plug-ins"), true));
+        GetDebuggerPropertyForPlugins(debugger, kOperatingSystemPluginName,
+                                      "Settings for operating system plug-ins",
+                                      true));
     if (plugin_type_properties_sp) {
       plugin_type_properties_sp->AppendProperty(properties_sp->GetName(),
                                                 description, is_global_property,
@@ -2583,17 +1811,16 @@ bool PluginManager::CreateSettingForOperatingSystemPlugin(
   return false;
 }
 
-lldb::OptionValuePropertiesSP PluginManager::GetSettingForStructuredDataPlugin(
-    Debugger &debugger, ConstString setting_name) {
-  return GetSettingForPlugin(debugger, setting_name,
-                             ConstString(kStructuredDataPluginName));
+lldb::OptionValuePropertiesSP
+PluginManager::GetSettingForStructuredDataPlugin(Debugger &debugger,
+                                                 llvm::StringRef setting_name) {
+  return GetSettingForPlugin(debugger, setting_name, kStructuredDataPluginName);
 }
 
 bool PluginManager::CreateSettingForStructuredDataPlugin(
     Debugger &debugger, const lldb::OptionValuePropertiesSP &properties_sp,
-    ConstString description, bool is_global_property) {
-  return CreateSettingForPlugin(
-      debugger, ConstString(kStructuredDataPluginName),
-      ConstString("Settings for structured data plug-ins"), properties_sp,
-      description, is_global_property);
+    llvm::StringRef description, bool is_global_property) {
+  return CreateSettingForPlugin(debugger, kStructuredDataPluginName,
+                                "Settings for structured data plug-ins",
+                                properties_sp, description, is_global_property);
 }

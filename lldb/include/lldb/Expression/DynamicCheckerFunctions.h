@@ -6,10 +6,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_DynamicCheckerFunctions_h_
-#define liblldb_DynamicCheckerFunctions_h_
+#ifndef LLDB_EXPRESSION_DYNAMICCHECKERFUNCTIONS_H
+#define LLDB_EXPRESSION_DYNAMICCHECKERFUNCTIONS_H
 
 #include "lldb/lldb-types.h"
+
+#include "llvm/Support/Error.h"
 
 namespace lldb_private {
 
@@ -46,10 +48,10 @@ public:
   ///     The execution context to install the functions into.
   ///
   /// \return
-  ///     True on success; false on failure, or if the functions have
-  ///     already been installed.
-  virtual bool Install(DiagnosticManager &diagnostic_manager,
-                       ExecutionContext &exe_ctx) = 0;
+  ///     Either llvm::ErrorSuccess or Error with llvm::ErrorInfo
+  ///
+  virtual llvm::Error Install(DiagnosticManager &diagnostic_manager,
+                              ExecutionContext &exe_ctx) = 0;
   virtual bool DoCheckersExplainStop(lldb::addr_t addr, Stream &message) = 0;
 
   DynamicCheckerFunctionsKind GetKind() const { return m_kind; }
@@ -59,4 +61,4 @@ private:
 };
 } // namespace lldb_private
 
-#endif // liblldb_DynamicCheckerFunctions_h_
+#endif // LLDB_EXPRESSION_DYNAMICCHECKERFUNCTIONS_H

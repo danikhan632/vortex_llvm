@@ -13,6 +13,8 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/raw_ostream.h"
+#include <cctype>
+
 using namespace llvm;
 
 /// StrInStrNoCase - Portable version of strcasestr.  Locates the first
@@ -23,7 +25,7 @@ StringRef::size_type llvm::StrInStrNoCase(StringRef s1, StringRef s2) {
   if (N > M)
     return StringRef::npos;
   for (size_t i = 0, e = M - N + 1; i != e; ++i)
-    if (s1.substr(i, N).equals_lower(s2))
+    if (s1.substr(i, N).equals_insensitive(s2))
       return i;
   return StringRef::npos;
 }
@@ -58,8 +60,7 @@ void llvm::SplitString(StringRef Source,
 }
 
 void llvm::printEscapedString(StringRef Name, raw_ostream &Out) {
-  for (unsigned i = 0, e = Name.size(); i != e; ++i) {
-    unsigned char C = Name[i];
+  for (unsigned char C : Name) {
     if (C == '\\')
       Out << '\\' << C;
     else if (isPrint(C) && C != '"')
@@ -89,4 +90,48 @@ void llvm::printHTMLEscaped(StringRef String, raw_ostream &Out) {
 void llvm::printLowerCase(StringRef String, raw_ostream &Out) {
   for (const char C : String)
     Out << toLower(C);
+}
+
+std::string llvm::convertToSnakeFromCamelCase(StringRef input) {
+  if (input.empty())
+    return "";
+
+  std::string snakeCase;
+  snakeCase.reserve(input.size());
+  auto check = [&input](size_t j, function_ref<bool(int)> predicate) {
+    return j < input.size() && predicate(input[j]);
+  };
+  for (size_t i = 0; i < input.size(); ++i) {
+    snakeCase.push_back(tolower(input[i]));
+    // Handles "runs" of capitals, such as in OPName -> op_name.
+    if (check(i, isupper) && check(i + 1, isupper) && check(i + 2, islower))
+      snakeCase.push_back('_');
+    if ((check(i, islower) || check(i, isdigit)) && check(i + 1, isupper))
+      snakeCase.push_back('_');
+  }
+  return snakeCase;
+}
+
+std::string llvm::convertToCamelFromSnakeCase(StringRef input,
+                                              bool capitalizeFirst) {
+  if (input.empty())
+    return "";
+
+  std::string output;
+  output.reserve(input.size());
+
+  // Push the first character, capatilizing if necessary.
+  if (capitalizeFirst && std::islower(input.front()))
+    output.push_back(llvm::toUpper(input.front()));
+  else
+    output.push_back(input.front());
+
+  // Walk the input converting any `*_[a-z]` snake case into `*[A-Z]` camelCase.
+  for (size_t pos = 1, e = input.size(); pos < e; ++pos) {
+    if (input[pos] == '_' && pos != (e - 1) && std::islower(input[pos + 1]))
+      output.push_back(llvm::toUpper(input[++pos]));
+    else
+      output.push_back(input[pos]);
+  }
+  return output;
 }

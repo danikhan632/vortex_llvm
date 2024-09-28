@@ -3,7 +3,7 @@ include "clang/Basic/ASTNode.td"
 class TypeNode<TypeNode base, bit abstract = 0> : ASTNode {
 	TypeNode Base = base;
   bit Abstract = abstract;
-} 
+}
 
 /// A type node that is only used to represent dependent types in C++.  For
 /// example, DependentTemplateSpecializationType is used to represent types
@@ -69,9 +69,13 @@ def DependentAddressSpaceType : TypeNode<Type>, AlwaysDependent;
 def VectorType : TypeNode<Type>;
 def DependentVectorType : TypeNode<Type>, AlwaysDependent;
 def ExtVectorType : TypeNode<VectorType>;
+def MatrixType : TypeNode<Type, 1>;
+def ConstantMatrixType : TypeNode<MatrixType>;
+def DependentSizedMatrixType : TypeNode<MatrixType>, AlwaysDependent;
 def FunctionType : TypeNode<Type, 1>;
 def FunctionProtoType : TypeNode<FunctionType>;
 def FunctionNoProtoType : TypeNode<FunctionType>;
+def UsingType : TypeNode<Type>, NeverCanonical;
 def UnresolvedUsingType : TypeNode<Type>, AlwaysDependent;
 def ParenType : TypeNode<Type>, NeverCanonical;
 def TypedefType : TypeNode<Type>, NeverCanonical;
@@ -87,6 +91,7 @@ def RecordType : TypeNode<TagType>, LeafType;
 def EnumType : TypeNode<TagType>, LeafType;
 def ElaboratedType : TypeNode<Type>, NeverCanonical;
 def AttributedType : TypeNode<Type>, NeverCanonical;
+def BTFTagAttributedType : TypeNode<Type>, NeverCanonical;
 def TemplateTypeParmType : TypeNode<Type>, AlwaysDependent, LeafType;
 def SubstTemplateTypeParmType : TypeNode<Type>, NeverCanonical;
 def SubstTemplateTypeParmPackType : TypeNode<Type>, AlwaysDependent;
@@ -97,10 +102,12 @@ def DeducedTemplateSpecializationType : TypeNode<DeducedType>;
 def InjectedClassNameType : TypeNode<Type>, AlwaysDependent, LeafType;
 def DependentNameType : TypeNode<Type>, AlwaysDependent;
 def DependentTemplateSpecializationType : TypeNode<Type>, AlwaysDependent;
-def PackExpansionType : TypeNode<Type>, NeverCanonicalUnlessDependent;
+def PackExpansionType : TypeNode<Type>, AlwaysDependent;
 def ObjCTypeParamType : TypeNode<Type>, NeverCanonical;
 def ObjCObjectType : TypeNode<Type>;
 def ObjCInterfaceType : TypeNode<ObjCObjectType>, LeafType;
 def ObjCObjectPointerType : TypeNode<Type>;
 def PipeType : TypeNode<Type>;
 def AtomicType : TypeNode<Type>;
+def BitIntType : TypeNode<Type>;
+def DependentBitIntType : TypeNode<Type>, AlwaysDependent;

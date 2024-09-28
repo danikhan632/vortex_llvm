@@ -8,56 +8,72 @@
 
 // <array>
 
-//  These are all constexpr in C++20
-// bool operator==(array<T, N> const&, array<T, N> const&);
-// bool operator!=(array<T, N> const&, array<T, N> const&);
-// bool operator<(array<T, N> const&, array<T, N> const&);
-// bool operator<=(array<T, N> const&, array<T, N> const&);
-// bool operator>(array<T, N> const&, array<T, N> const&);
-// bool operator>=(array<T, N> const&, array<T, N> const&);
-
+// template <class T, size_t N>
+//   bool operator==(const array<T,N>& x, const array<T,N>& y);    // constexpr in C++20
+// template <class T, size_t N>
+//   bool operator!=(const array<T,N>& x, const array<T,N>& y);    // removed in C++20
+// template <class T, size_t N>
+//   bool operator<(const array<T,N>& x, const array<T,N>& y);     // removed in C++20
+// template <class T, size_t N>
+//   bool operator>(const array<T,N>& x, const array<T,N>& y);     // removed in C++20
+// template <class T, size_t N>
+//   bool operator<=(const array<T,N>& x, const array<T,N>& y);    // removed in C++20
+// template <class T, size_t N>
+//   bool operator>=(const array<T,N>& x, const array<T,N>& y);    // removed in C++20
 
 #include <array>
-#include <vector>
 #include <cassert>
 
 #include "test_macros.h"
 #include "test_comparisons.h"
 
-// std::array is explicitly allowed to be initialized with A a = { init-list };.
-// Disable the missing braces warning for this reason.
-#include "disable_missing_braces_warning.h"
+TEST_CONSTEXPR_CXX20 bool tests() {
+  // Arrays where the elements support all comparison operators
+  AssertComparisonsReturnBool<std::array<int, 3> >();
+  {
+    typedef std::array<int, 3> C;
+    const C c1 = {1, 2, 3};
+    const C c2 = {1, 2, 3};
+    const C c3 = {3, 2, 1};
+    const C c4 = {1, 2, 1};
+    assert(testComparisons(c1, c2, true, false));
+    assert(testComparisons(c1, c3, false, true));
+    assert(testComparisons(c1, c4, false, false));
+  }
+  // Empty array
+  {
+    typedef std::array<int, 0> C;
+    const C c1 = {};
+    const C c2 = {};
+    assert(testComparisons(c1, c2, true, false));
+  }
+  // Arrays where the elements support only less and equality comparisons
+  AssertComparisonsReturnBool<std::array<LessAndEqComp, 3> >();
+  {
+    typedef std::array<LessAndEqComp, 3> C;
+    const C c1 = {LessAndEqComp(1), LessAndEqComp(2), LessAndEqComp(3)};
+    const C c2 = {LessAndEqComp(1), LessAndEqComp(2), LessAndEqComp(3)};
+    const C c3 = {LessAndEqComp(3), LessAndEqComp(2), LessAndEqComp(1)};
+    const C c4 = {LessAndEqComp(1), LessAndEqComp(2), LessAndEqComp(1)};
+    assert(testComparisons(c1, c2, true, false));
+    assert(testComparisons(c1, c3, false, true));
+    assert(testComparisons(c1, c4, false, false));
+  }
+  // Empty array where the elements support only less and equality comparisons
+  {
+    typedef std::array<LessAndEqComp, 0> C;
+    const C c1 = {};
+    const C c2 = {};
+    assert(testComparisons(c1, c2, true, false));
+  }
 
-int main(int, char**)
-{
-  {
-    typedef int T;
-    typedef std::array<T, 3> C;
-    C c1 = {1, 2, 3};
-    C c2 = {1, 2, 3};
-    C c3 = {3, 2, 1};
-    C c4 = {1, 2, 1};
-    assert(testComparisons6(c1, c2, true, false));
-    assert(testComparisons6(c1, c3, false, true));
-    assert(testComparisons6(c1, c4, false, false));
-  }
-  {
-    typedef int T;
-    typedef std::array<T, 0> C;
-    C c1 = {};
-    C c2 = {};
-    assert(testComparisons6(c1, c2, true, false));
-  }
+  return true;
+}
 
-#if TEST_STD_VER > 17
-  {
-  constexpr std::array<int, 3> a1 = {1, 2, 3};
-  constexpr std::array<int, 3> a2 = {2, 3, 4};
-  static_assert(testComparisons6(a1, a1, true, false), "");
-  static_assert(testComparisons6(a1, a2, false, true), "");
-  static_assert(testComparisons6(a2, a1, false, false), "");
-  }
+int main(int, char**) {
+  tests();
+#if TEST_STD_VER >= 20
+  static_assert(tests());
 #endif
-
   return 0;
 }

@@ -15,6 +15,7 @@
 #include <condition_variable>
 #include <future>
 #include <mutex>
+#include <optional>
 #include <thread>
 
 using namespace llvm;
@@ -34,6 +35,17 @@ namespace {
 
 typedef DirectoryWatcher::Event::EventKind EventKind;
 
+// We've observed this test being significantly flaky when running on a heavily
+// loaded machine (e.g. when it's being run as part of the full check-clang
+// suite). Set a high timeout value to avoid this flakiness. The 60s timeout
+// value was determined empirically. It's a timeout value, not a sleep value,
+// and the test should require much less time in practice the vast majority of
+// instances. The cases where we do come close to (or still end up hitting) the
+// longer timeout are most likely to occur when other tests are also running at
+// the same time (e.g. as part of the full check-clang suite), in which case the
+// latency of the timeout will be masked by the latency of the other tests.
+constexpr std::chrono::seconds EventualResultTimeout(60);
+
 struct DirectoryWatcherTestFixture {
   std::string TestRootDir;
   std::string TestWatchedDir;
@@ -45,9 +57,9 @@ struct DirectoryWatcherTestFixture {
 #endif
     createUniqueDirectory("dirwatcher", pathBuf);
     assert(!UniqDirRes);
-    TestRootDir = pathBuf.str();
+    TestRootDir = std::string(pathBuf.str());
     path::append(pathBuf, "watch");
-    TestWatchedDir = pathBuf.str();
+    TestWatchedDir = std::string(pathBuf.str());
 #ifndef NDEBUG
     std::error_code CreateDirRes =
 #endif
@@ -166,13 +178,13 @@ struct VerifyingConsumer {
   }
 
   // Not locking - caller has to lock Mtx.
-  llvm::Optional<bool> result() const {
+  std::optional<bool> result() const {
     if (ExpectedInitial.empty() && ExpectedNonInitial.empty() &&
         UnexpectedInitial.empty() && UnexpectedNonInitial.empty())
       return true;
     if (!UnexpectedInitial.empty() || !UnexpectedNonInitial.empty())
       return false;
-    return llvm::None;
+    return std::nullopt;
   }
 
   // This method is used by tests.
@@ -183,7 +195,7 @@ struct VerifyingConsumer {
       if (result())
         return *result();
 
-      ResultIsReady.wait(L, [this]() { return result().hasValue(); });
+      ResultIsReady.wait(L, [this]() { return result().has_value(); });
     }
     return false; // Just to make compiler happy.
   }
@@ -243,16 +255,16 @@ void checkEventualResultWithTimeout(VerifyingConsumer &TestConsumer) {
   std::thread worker(std::move(task));
   worker.detach();
 
-  EXPECT_TRUE(WaitForExpectedStateResult.wait_for(std::chrono::seconds(3)) ==
+  EXPECT_TRUE(WaitForExpectedStateResult.wait_for(EventualResultTimeout) ==
               std::future_status::ready)
       << "The expected result state wasn't reached before the time-out.";
   std::unique_lock<std::mutex> L(TestConsumer.Mtx);
-  EXPECT_TRUE(TestConsumer.result().hasValue());
-  if (TestConsumer.result().hasValue()) {
+  EXPECT_TRUE(TestConsumer.result().has_value());
+  if (TestConsumer.result()) {
     EXPECT_TRUE(*TestConsumer.result());
   }
-  if ((TestConsumer.result().hasValue() && !TestConsumer.result().getValue()) ||
-      !TestConsumer.result().hasValue())
+  if ((TestConsumer.result() && !*TestConsumer.result()) ||
+      !TestConsumer.result())
     TestConsumer.printUnmetExpectations(llvm::outs());
 }
 } // namespace
@@ -448,4 +460,43 @@ TEST(DirectoryWatcherTest, InvalidatedWatcher) {
   } // DW is destructed here.
 
   checkEventualResultWithTimeout(TestConsumer);
+}
+
+TEST(DirectoryWatcherTest, InvalidatedWatcherAsync) {
+  DirectoryWatcherTestFixture fixture;
+  fixture.addFile("a");
+
+  // This test is checking that we get the initial notification for 'a' before
+  // the final 'invalidated'. Strictly speaking, we do not care whether 'a' is
+  // processed or not, only that it is neither racing with, nor after
+  // 'invalidated'. In practice, it is always processed in our implementations.
+  VerifyingConsumer TestConsumer{
+      {{EventKind::Modified, "a"}},
+      {{EventKind::WatcherGotInvalidated, ""}},
+      // We have to ignore these as it's a race between the test process
+      // which is scanning the directory and kernel which is sending
+      // notification.
+      {{EventKind::Modified, "a"}},
+  };
+
+  // A counter that can help detect data races on the event receiver,
+  // particularly if used with TSan. Expected count will be 2 or 3 depending on
+  // whether we get the kernel event or not (see comment above).
+  unsigned Count = 0;
+  {
+    llvm::Expected<std::unique_ptr<DirectoryWatcher>> DW =
+        DirectoryWatcher::create(
+            fixture.TestWatchedDir,
+            [&TestConsumer,
+             &Count](llvm::ArrayRef<DirectoryWatcher::Event> Events,
+                     bool IsInitial) {
+              Count += 1;
+              TestConsumer.consume(Events, IsInitial);
+            },
+            /*waitForInitialSync=*/false);
+    ASSERT_THAT_ERROR(DW.takeError(), Succeeded());
+  } // DW is destructed here.
+
+  checkEventualResultWithTimeout(TestConsumer);
+  ASSERT_TRUE(Count == 2u || Count == 3u);
 }

@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_LLVMUserExpression_h
-#define liblldb_LLVMUserExpression_h
+#ifndef LLDB_EXPRESSION_LLVMUSEREXPRESSION_H
+#define LLDB_EXPRESSION_LLVMUSEREXPRESSION_H
 
 #include <map>
 #include <string>
@@ -40,7 +40,7 @@ public:
   static bool classof(const Expression *obj) { return obj->isA(&ID); }
 
   // The IRPasses struct is filled in by a runtime after an expression is
-  // compiled and can be used to to run fixups/analysis passes as required.
+  // compiled and can be used to run fixups/analysis passes as required.
   // EarlyPasses are run on the generated module before lldb runs its own IR
   // fixups and inserts instrumentation code/pointer checks. LatePasses are run
   // after the module has been processed by llvm, before the module is
@@ -70,8 +70,6 @@ public:
   /// Return the string that the parser should parse.  Must be a full
   /// translation unit.
   const char *Text() override { return m_transformed_text.c_str(); }
-
-  lldb::ModuleSP GetJITModule() override;
 
 protected:
   lldb::ExpressionResults

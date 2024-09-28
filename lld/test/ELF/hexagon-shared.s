@@ -4,9 +4,9 @@
 # RUN: ld.lld -shared %t2.o -soname so -o %t3.so
 # RUN: ld.lld -shared %t.o %t3.so -o %t4.so
 # RUN: ld.lld -Bsymbolic -shared %t.o %t3.so -o %t5.so
-# RUN: llvm-objdump -d -j .plt %t4.so | FileCheck --check-prefix=PLT %s
-# RUN: llvm-objdump -d -j .text %t4.so | FileCheck --check-prefix=TEXT %s
-# RUN: llvm-objdump -D -j .got %t4.so | FileCheck --check-prefix=GOT %s
+# RUN: llvm-objdump --no-print-imm-hex -d -j .plt %t4.so | FileCheck --check-prefix=PLT %s
+# RUN: llvm-objdump --no-print-imm-hex -d -j .text %t4.so | FileCheck --check-prefix=TEXT %s
+# RUN: llvm-objdump --no-print-imm-hex -D -j .got %t4.so | FileCheck --check-prefix=GOT %s
 # RUN: llvm-readelf -r  %t4.so | FileCheck --check-prefix=RELO %s
 # RUN: llvm-readelf -r  %t5.so | FileCheck --check-prefix=SYMBOLIC %s
 
@@ -37,6 +37,11 @@ jumpr r0
 
 # R_HEX_GOT_16_X
 r0 = add(r1,##bar@GOT)
+
+# R_HEX_GOT_16_X, duplex
+{ r0 = add(r0,##bar@GOT)
+  memw(r0) = r2 }
+
 
 # foo is local so no plt will be generated
 foo:
@@ -78,6 +83,7 @@ pvar:
 # TEXT: if (p0) jump:nt 0x102d0
 # TEXT: r0 = #0 ; jump 0x102d0
 # TEXT: r0 = add(r1,##-65548)
+# TEXT: r0 = add(r0,##-65548); memw(r0+#0) = r2 }
 
 # GOT: .got:
 # GOT:  00 00 00 00 00000000 <unknown>

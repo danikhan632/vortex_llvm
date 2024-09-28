@@ -10,25 +10,25 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef __DNBDefs_h__
-#define __DNBDefs_h__
+#ifndef LLDB_TOOLS_DEBUGSERVER_SOURCE_DNBDEFS_H
+#define LLDB_TOOLS_DEBUGSERVER_SOURCE_DNBDEFS_H
 
-#include <signal.h>
-#include <stdint.h>
-#include <stdio.h>
+#include <csignal>
+#include <cstdint>
+#include <cstdio>
+#include <string>
 #include <sys/syslimits.h>
 #include <unistd.h>
+#include <vector>
 
 // Define nub_addr_t and the invalid address value from the architecture
-#if defined(__x86_64__) || defined(__ppc64__) || defined(__arm64__) ||         \
-    defined(__aarch64__)
+#if defined(__x86_64__) || defined(__arm64__) || defined(__aarch64__)
 
 // 64 bit address architectures
 typedef uint64_t nub_addr_t;
 #define INVALID_NUB_ADDRESS ((nub_addr_t)~0ull)
 
-#elif defined(__i386__) || defined(__powerpc__) || defined(__ppc__) ||         \
-    defined(__arm__)
+#elif defined(__i386__) || defined(__powerpc__) || defined(__arm__)
 
 // 32 bit address architectures
 
@@ -54,6 +54,7 @@ typedef uint32_t nub_event_t;
 typedef uint32_t nub_bool_t;
 
 #define INVALID_NUB_PROCESS ((nub_process_t)0)
+#define INVALID_NUB_PROCESS_ARCH ((nub_process_t)-1)
 #define INVALID_NUB_THREAD ((nub_thread_t)0)
 #define INVALID_NUB_WATCH_ID ((nub_watch_t)0)
 #define INVALID_NUB_HW_INDEX UINT32_MAX
@@ -233,7 +234,8 @@ enum DNBThreadStopType {
   eStopTypeInvalid = 0,
   eStopTypeSignal,
   eStopTypeException,
-  eStopTypeExec
+  eStopTypeExec,
+  eStopTypeWatchpoint
 };
 
 enum DNBMemoryPermissions {
@@ -263,6 +265,37 @@ struct DNBThreadStopInfo {
       nub_size_t data_count;
       nub_addr_t data[DNB_THREAD_STOP_INFO_MAX_EXC_DATA];
     } exception;
+
+    // eStopTypeWatchpoint
+    struct {
+      // The trigger address from the mach exception
+      // (likely the contents of the FAR register)
+      nub_addr_t mach_exception_addr;
+
+      // The trigger address, adjusted to be the start
+      // address of one of the existing watchpoints for
+      // lldb's benefit.
+      nub_addr_t addr;
+
+      // The watchpoint hardware index.
+      uint32_t hw_idx;
+
+      // If the esr_fields bitfields have been filled in.
+      bool esr_fields_set;
+      struct {
+        uint32_t
+            iss; // "ISS encoding for an exception from a Watchpoint exception"
+        uint32_t wpt;  // Watchpoint number
+        bool wptv;     // Watchpoint number Valid
+        bool wpf;      // Watchpoint might be false-positive
+        bool fnp;      // FAR not Precise
+        bool vncr;     // watchpoint from use of VNCR_EL2 reg by EL1
+        bool fnv;      // FAR not Valid
+        bool cm;       // Cache maintenance
+        bool wnr;      // Write not Read
+        uint32_t dfsc; // Data Fault Status Code
+      } esr_fields;
+    } watchpoint;
   } details;
 };
 
@@ -318,9 +351,14 @@ struct DNBExecutableImageInfo {
 };
 
 struct DNBRegionInfo {
+public:
+  DNBRegionInfo()
+      : addr(0), size(0), permissions(0), dirty_pages(), vm_types() {}
   nub_addr_t addr;
   nub_addr_t size;
   uint32_t permissions;
+  std::vector<nub_addr_t> dirty_pages;
+  std::vector<std::string> vm_types;
 };
 
 enum DNBProfileDataScanType {
@@ -360,4 +398,4 @@ typedef void (*DNBCallbackLog)(void *baton, uint32_t flags, const char *format,
 
 #define UNUSED_IF_ASSERT_DISABLED(x) ((void)(x))
 
-#endif // #ifndef __DNBDefs_h__
+#endif // LLDB_TOOLS_DEBUGSERVER_SOURCE_DNBDEFS_H

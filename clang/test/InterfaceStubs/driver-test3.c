@@ -8,12 +8,11 @@
 
 // CHECK-OBJ: bar
 
-// CHECK-IFS: --- !experimental-ifs-v1
+// CHECK-IFS: --- !ifs-v1
 // CHECK-IFS-NEXT: IfsVersion:
-// CHECK-IFS-NEXT: Triple:
-// CHECK-IFS-NEXT: ObjectFileFormat:
+// CHECK-IFS-NEXT: Target:
 // CHECK-IFS-NEXT: Symbols:
-// CHECK-IFS-NEXT:   "bar" : { Type: Func }
+// CHECK-IFS-NEXT:   - { Name: "bar", Type: Func }
 // CHECK-IFS-NEXT: ...
 
 int bar(int a) { return a; }

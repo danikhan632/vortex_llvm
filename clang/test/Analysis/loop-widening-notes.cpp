@@ -1,4 +1,4 @@
-// RUN: %clang_analyze_cc1 -analyzer-checker=core,alpha -analyzer-max-loop 2 -analyzer-config widen-loops=true -analyzer-output=text -verify -analyzer-config eagerly-assume=false %s
+// RUN: %clang_analyze_cc1 -analyzer-checker=core,alpha.core -analyzer-max-loop 2 -analyzer-config widen-loops=true -analyzer-output=text -verify -analyzer-config eagerly-assume=false %s
 
 int *p_a;
 int bar();
@@ -69,4 +69,16 @@ int test_for_loop() {
     flag_d += 10;
   return flag_d / num; // no-crash expected-warning {{Division by zero}} 
                        // expected-note@-1 {{Division by zero}}
+}
+
+int test_for_range_loop() {
+  int arr[10] = {0};
+  for(auto x : arr) { // expected-note {{Assigning value}} 
+    ++x;
+  }
+  if (arr[0] == 0)   // expected-note {{Assuming the condition is true}} 
+                     // expected-note@-1 {{Taking true branch}}
+    return 1/arr[0]; // expected-warning {{Division by zero}}
+                     // expected-note@-1 {{Division by zero}}
+  return 0;
 }

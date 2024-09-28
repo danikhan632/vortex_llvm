@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLDB_SBSection_h_
-#define LLDB_SBSection_h_
+#ifndef LLDB_API_SBSECTION_H
+#define LLDB_API_SBSECTION_H
 
 #include "lldb/API/SBData.h"
 #include "lldb/API/SBDefines.h"
@@ -76,6 +76,12 @@ public:
   ///     The number of host (8-bit) bytes needed to hold a target byte
   uint32_t GetTargetByteSize();
 
+  /// Return the alignment of the section in bytes
+  ///
+  /// \return
+  ///     The alignment of the section in bytes
+  uint32_t GetAlignment();
+
   bool operator==(const lldb::SBSection &rhs);
 
   bool operator!=(const lldb::SBSection &rhs);
@@ -98,4 +104,4 @@ private:
 
 } // namespace lldb
 
-#endif // LLDB_SBSection_h_
+#endif // LLDB_API_SBSECTION_H

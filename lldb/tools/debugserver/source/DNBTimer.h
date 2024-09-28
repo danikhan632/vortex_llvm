@@ -10,13 +10,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef __DNBTimer_h__
-#define __DNBTimer_h__
+#ifndef LLDB_TOOLS_DEBUGSERVER_SOURCE_DNBTIMER_H
+#define LLDB_TOOLS_DEBUGSERVER_SOURCE_DNBTIMER_H
 
 #include "DNBDefs.h"
 #include "PThreadMutex.h"
+#include <cstdint>
 #include <memory>
-#include <stdint.h>
 #include <sys/time.h>
 
 class DNBTimer {
@@ -53,7 +53,7 @@ public:
     PTHREAD_MUTEX_LOCKER(locker, m_mutexAP.get());
     gettimeofday(&m_timeval, NULL);
   }
-  // Get the total mircoseconds since Jan 1, 1970
+  // Get the total microseconds since Jan 1, 1970
   uint64_t TotalMicroSeconds() const {
     PTHREAD_MUTEX_LOCKER(locker, m_mutexAP.get());
     return (uint64_t)(m_timeval.tv_sec) * 1000000ull +
@@ -131,4 +131,4 @@ protected:
   struct timeval m_timeval;
 };
 
-#endif // #ifndef __DNBTimer_h__
+#endif // LLDB_TOOLS_DEBUGSERVER_SOURCE_DNBTIMER_H

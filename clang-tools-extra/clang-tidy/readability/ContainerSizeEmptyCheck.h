@@ -10,13 +10,12 @@
 #define LLVM_CLANG_TOOLS_EXTRA_CLANG_TIDY_READABILITY_CONTAINERSIZEEMPTYCHECK_H
 
 #include "../ClangTidyCheck.h"
+#include <vector>
 
-namespace clang {
-namespace tidy {
-namespace readability {
+namespace clang::tidy::readability {
 
-/// Checks whether a call to the `size()` method can be replaced with a call to
-/// `empty()`.
+/// Checks whether a call to the `size()`/`length()` method can be replaced with
+/// a call to `empty()`.
 ///
 /// The emptiness of a container should be checked using the `empty()` method
 /// instead of the `size()` method. It is not guaranteed that `size()` is a
@@ -28,12 +27,20 @@ namespace readability {
 class ContainerSizeEmptyCheck : public ClangTidyCheck {
 public:
   ContainerSizeEmptyCheck(StringRef Name, ClangTidyContext *Context);
+  bool isLanguageVersionSupported(const LangOptions &LangOpts) const override {
+    return LangOpts.CPlusPlus;
+  }
   void registerMatchers(ast_matchers::MatchFinder *Finder) override;
   void check(const ast_matchers::MatchFinder::MatchResult &Result) override;
+  void storeOptions(ClangTidyOptions::OptionMap &Opts) override;
+  std::optional<TraversalKind> getCheckTraversalKind() const override {
+    return TK_IgnoreUnlessSpelledInSource;
+  }
+
+private:
+  std::vector<llvm::StringRef> ExcludedComparisonTypes;
 };
 
-} // namespace readability
-} // namespace tidy
-} // namespace clang
+} // namespace clang::tidy::readability
 
 #endif // LLVM_CLANG_TOOLS_EXTRA_CLANG_TIDY_READABILITY_CONTAINERSIZEEMPTYCHECK_H

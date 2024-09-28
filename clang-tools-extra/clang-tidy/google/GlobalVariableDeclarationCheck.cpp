@@ -16,10 +16,7 @@
 
 using namespace clang::ast_matchers;
 
-namespace clang {
-namespace tidy {
-namespace google {
-namespace objc {
+namespace clang::tidy::google::objc {
 
 namespace {
 
@@ -29,7 +26,7 @@ FixItHint generateFixItHint(const VarDecl *Decl, bool IsConst) {
   if (IsConst && (Decl->getStorageClass() != SC_Static)) {
     // No fix available if it is not a static constant, since it is difficult
     // to determine the proper fix in this case.
-    return FixItHint();
+    return {};
   }
 
   char FC = Decl->getName()[0];
@@ -38,14 +35,14 @@ FixItHint generateFixItHint(const VarDecl *Decl, bool IsConst) {
     // is a single-character variable, since it is difficult to determine the
     // proper fix in this case. Users should create a proper variable name by
     // their own.
-    return FixItHint();
+    return {};
   }
   char SC = Decl->getName()[1];
   if ((FC == 'k' || FC == 'g') && !llvm::isAlpha(SC)) {
     // No fix available if the prefix is correct but the second character is
     // not alphabetical, since it is difficult to determine the proper fix in
     // this case.
-    return FixItHint();
+    return {};
   }
 
   auto NewName = (IsConst ? "k" : "g") +
@@ -59,10 +56,6 @@ FixItHint generateFixItHint(const VarDecl *Decl, bool IsConst) {
 }  // namespace
 
 void GlobalVariableDeclarationCheck::registerMatchers(MatchFinder *Finder) {
-  // The relevant Style Guide rule only applies to Objective-C.
-  if (!getLangOpts().ObjC)
-    return;
-
   // need to add two matchers since we need to bind different ids to distinguish
   // constants and variables. Since bind() can only be called on node matchers,
   // we cannot make it in one matcher.
@@ -102,7 +95,4 @@ void GlobalVariableDeclarationCheck::check(
   }
 }
 
-}  // namespace objc
-}  // namespace google
-}  // namespace tidy
-}  // namespace clang
+} // namespace clang::tidy::google::objc

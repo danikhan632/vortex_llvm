@@ -11,9 +11,9 @@
 
 #include "clang/Basic/CommentOptions.h"
 #include "clang/Basic/SourceLocation.h"
-#include "clang/Basic/SourceManager.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/Support/Allocator.h"
 #include <map>
 
 namespace clang {
@@ -21,7 +21,9 @@ namespace clang {
 class ASTContext;
 class ASTReader;
 class Decl;
+class DiagnosticsEngine;
 class Preprocessor;
+class SourceManager;
 
 namespace comments {
   class FullComment;
@@ -113,6 +115,17 @@ public:
     return extractBriefText(Context);
   }
 
+  bool hasUnsupportedSplice(const SourceManager &SourceMgr) const {
+    if (!isInvalid())
+      return false;
+    StringRef Text = getRawText(SourceMgr);
+    if (Text.size() < 6 || Text[0] != '/')
+      return false;
+    if (Text[1] == '*')
+      return Text[Text.size() - 1] != '/' || Text[Text.size() - 2] != '*';
+    return Text[1] != '/';
+  }
+
   /// Returns sanitized comment text, suitable for presentation in editor UIs.
   /// E.g. will transform:
   ///     // This is a long multiline comment.
@@ -137,6 +150,21 @@ public:
   std::string getFormattedText(const SourceManager &SourceMgr,
                                DiagnosticsEngine &Diags) const;
 
+  struct CommentLine {
+    std::string Text;
+    PresumedLoc Begin;
+    PresumedLoc End;
+
+    CommentLine(StringRef Text, PresumedLoc Begin, PresumedLoc End)
+        : Text(Text), Begin(Begin), End(End) {}
+  };
+
+  /// Returns sanitized comment text as separated lines with locations in
+  /// source, suitable for further processing and rendering requiring source
+  /// locations.
+  std::vector<CommentLine> getFormattedLines(const SourceManager &SourceMgr,
+                                             DiagnosticsEngine &Diags) const;
+
   /// Parse the comment, assuming it is attached to decl \c D.
   comments::FullComment *parse(const ASTContext &Context,
                                const Preprocessor *PP, const Decl *D) const;
@@ -145,11 +173,12 @@ private:
   SourceRange Range;
 
   mutable StringRef RawText;
-  mutable const char *BriefText;
+  mutable const char *BriefText = nullptr;
 
   mutable bool RawTextValid : 1;   ///< True if RawText is valid
   mutable bool BriefTextValid : 1; ///< True if BriefText is valid
 
+  LLVM_PREFERRED_TYPE(CommentKind)
   unsigned Kind : 3;
 
   /// True if comment is attached to a declaration in ASTContext.
@@ -171,23 +200,6 @@ private:
   const char *extractBriefText(const ASTContext &Context) const;
 
   friend class ASTReader;
-};
-
-/// Compare comments' source locations.
-template<>
-class BeforeThanCompare<RawComment> {
-  const SourceManager &SM;
-
-public:
-  explicit BeforeThanCompare(const SourceManager &SM) : SM(SM) { }
-
-  bool operator()(const RawComment &LHS, const RawComment &RHS) {
-    return SM.isBeforeInTranslationUnit(LHS.getBeginLoc(), RHS.getBeginLoc());
-  }
-
-  bool operator()(const RawComment *LHS, const RawComment *RHS) {
-    return operator()(*LHS, *RHS);
-  }
 };
 
 /// This class represents all comments included in the translation unit,

@@ -15,6 +15,8 @@ LLVM and API reference documentation.
    BranchWeightMetadata
    Bugpoint
    CommandGuide/index
+   ConvergenceAndUniformity
+   ConvergentOperations
    Coroutines
    DependenceGraphs/index
    ExceptionHandling
@@ -33,14 +35,18 @@ LLVM and API reference documentation.
    MarkedUpDisassembly
    MIRLangRef
    OptBisect
-   ORCv2
+   PCSectionsMetadata
    PDB/index
+   PointerAuth
    ScudoHardenedAllocator
    MemTagSanitizer
+   Security
+   SecurityTransparencyReports
    SegmentedStacks
    StackMaps
    SpeculativeLoadHardening
    Statepoints
+   SymbolizerMarkupFormat
    SystemLibrary
    TestingGuide
    TransformMetadata
@@ -53,17 +59,11 @@ LLVM and API reference documentation.
 API Reference
 -------------
 
-`Doxygen generated documentation <http://llvm.org/doxygen/>`_
-  (`classes <http://llvm.org/doxygen/inherits.html>`_)
+`Doxygen generated documentation <https://llvm.org/doxygen/>`_
+  (`classes <https://llvm.org/doxygen/inherits.html>`_)
 
 :doc:`HowToUseAttributes`
   Answers some questions about the new Attributes infrastructure.
-
-`Documentation for Go bindings <http://godoc.org/llvm.org/llvm/bindings/go/llvm>`_
-
-:doc:`ORCv2`
-   Describes the design and implementation of the ORC APIs, including some
-   usage examples, and a guide for users transitioning from ORCv1 to ORCv2.
 
 LLVM Reference
 --------------
@@ -82,6 +82,9 @@ Command Line Utilities
 
 :doc:`OptBisect`
   A command line option for debugging optimization-induced failures.
+
+:doc:`SymbolizerMarkupFormat`
+  A reference for the log symbolizer markup accepted by ``llvm-symbolizer``.
 
 :doc:`The Microsoft PDB File Format <PDB/index>`
   A detailed description of the Microsoft PDB (Program Database) file format.
@@ -128,6 +131,9 @@ LLVM IR
 
 :doc:`GlobalISel/index`
   This describes the prototype instruction selection replacement, GlobalISel.
+
+:doc:`ConvergentOperations`
+  Description of ``convergent`` operation semantics and related intrinsics.
 
 =====================
 Testing and Debugging
@@ -190,7 +196,7 @@ Additional Topics
 
 :doc:`MemTagSanitizer`
   Security hardening for production code aiming to mitigate memory
-  related vulnerabilities. Based on ARMv9 Memory Tagging Extension.
+  related vulnerabilities. Based on the Armv8.5-A Memory Tagging Extension.
 
 :doc:`Dependence Graphs <DependenceGraphs/index>`
   A description of the design of the various dependence graphs such as
@@ -212,5 +218,13 @@ Additional Topics
 :doc:`Coroutines`
   LLVM support for coroutines.
 
+:doc:`PointerAuth`
+  A description of pointer authentication, its LLVM IR representation, and its
+  support in the backend.
+
 :doc:`YamlIO`
    A reference guide for using LLVM's YAML I/O library.
+
+:doc:`ConvergenceAndUniformity`
+   A description of uniformity analysis in the presence of irreducible
+   control flow, and its implementation.

@@ -10,8 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef __DNBBreakpoint_h__
-#define __DNBBreakpoint_h__
+#ifndef LLDB_TOOLS_DEBUGSERVER_SOURCE_DNBBREAKPOINT_H
+#define LLDB_TOOLS_DEBUGSERVER_SOURCE_DNBBREAKPOINT_H
 
 #include <mach/mach.h>
 
@@ -122,7 +122,9 @@ public:
   DNBBreakpoint *Add(nub_addr_t addr, nub_size_t length, bool hardware);
   bool Remove(nub_addr_t addr);
   DNBBreakpoint *FindByAddress(nub_addr_t addr);
+  const DNBBreakpoint *FindNearestWatchpoint(nub_addr_t addr) const;
   const DNBBreakpoint *FindByAddress(nub_addr_t addr) const;
+  const DNBBreakpoint *FindByHardwareIndex(uint32_t idx) const;
 
   size_t FindBreakpointsThatOverlapRange(nub_addr_t addr, nub_addr_t size,
                                          std::vector<DNBBreakpoint *> &bps);

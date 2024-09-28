@@ -15,7 +15,6 @@
 #define LLVM_IR_MODULE_H
 
 #include "llvm-c/Types.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
@@ -36,6 +35,7 @@
 #include <cstdint>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -46,9 +46,8 @@ class FunctionType;
 class GVMaterializer;
 class LLVMContext;
 class MemoryBuffer;
-class Pass;
+class ModuleSummaryIndex;
 class RandomNumberGenerator;
-template <class PtrType> class SmallPtrSetImpl;
 class StructType;
 class VersionTuple;
 
@@ -59,13 +58,13 @@ class VersionTuple;
 /// other modules) this module depends on, a symbol table, and various data
 /// about the target's characteristics.
 ///
-/// A module maintains a GlobalValRefMap object that is used to hold all
+/// A module maintains a GlobalList object that is used to hold all
 /// constant references to global variables in the module.  When a global
-/// variable is destroyed, it should have no entries in the GlobalValueRefMap.
+/// variable is destroyed, it should have no entries in the GlobalList.
 /// The main container class for the LLVM Intermediate Representation.
-class Module {
-/// @name Types And Enumerations
-/// @{
+class LLVM_EXTERNAL_VISIBILITY Module {
+  /// @name Types And Enumerations
+  /// @{
 public:
   /// The type for the list of global variables.
   using GlobalListType = SymbolTableList<GlobalVariable>;
@@ -79,6 +78,8 @@ public:
   using NamedMDListType = ilist<NamedMDNode>;
   /// The type of the comdat "symbol" table.
   using ComdatSymTabType = StringMap<Comdat>;
+  /// The type for mapping names to named metadata.
+  using NamedMDSymTabType = StringMap<NamedMDNode *>;
 
   /// The Global Variable iterator.
   using global_iterator = GlobalListType::iterator;
@@ -145,14 +146,22 @@ public:
     /// Takes the max of the two values, which are required to be integers.
     Max = 7,
 
+    /// Takes the min of the two values, which are required to be integers.
+    Min = 8,
+
     // Markers:
     ModFlagBehaviorFirstVal = Error,
-    ModFlagBehaviorLastVal = Max
+    ModFlagBehaviorLastVal = Min
   };
 
   /// Checks if Metadata represents a valid ModFlagBehavior, and stores the
   /// converted result in MFB.
   static bool isValidModFlagBehavior(Metadata *MD, ModFlagBehavior &MFB);
+
+  /// Check if the given module flag metadata represents a valid module flag,
+  /// and store the flag behavior, the key string and the value metadata.
+  static bool isValidModuleFlag(const MDNode &ModFlag, ModFlagBehavior &MFB,
+                                MDString *&Key, Metadata *&Val);
 
   struct ModuleFlagEntry {
     ModFlagBehavior Behavior;
@@ -175,7 +184,7 @@ private:
   IFuncListType IFuncList;        ///< The IFuncs in the module
   NamedMDListType NamedMDList;    ///< The named metadata in the module
   std::string GlobalScopeAsm;     ///< Inline Asm at global scope.
-  ValueSymbolTable *ValSymTab;    ///< Symbol table for values
+  std::unique_ptr<ValueSymbolTable> ValSymTab; ///< Symbol table for values
   ComdatSymTabType ComdatSymTab;  ///< Symbol table for COMDATs
   std::unique_ptr<MemoryBuffer>
   OwnedMemoryBuffer;              ///< Memory buffer directly owned by this
@@ -187,8 +196,16 @@ private:
                                   ///< recorded in bitcode.
   std::string TargetTriple;       ///< Platform target triple Module compiled on
                                   ///< Format: (arch)(sub)-(vendor)-(sys0-(abi)
-  void *NamedMDSymTab;            ///< NamedMDNode names.
+  NamedMDSymTabType NamedMDSymTab;  ///< NamedMDNode names.
   DataLayout DL;                  ///< DataLayout associated with the module
+  StringMap<unsigned>
+      CurrentIntrinsicIds; ///< Keep track of the current unique id count for
+                           ///< the specified intrinsic basename.
+  DenseMap<std::pair<Intrinsic::ID, const FunctionType *>, unsigned>
+      UniquedIntrinsicNames; ///< Keep track of uniqued names of intrinsics
+                             ///< based on unnamed types. The combination of
+                             ///< ID and FunctionType maps to the extension that
+                             ///< is used to make the intrinsic name unique.
 
   friend class Constant;
 
@@ -196,6 +213,27 @@ private:
 /// @name Constructors
 /// @{
 public:
+  /// Is this Module using intrinsics to record the position of debugging
+  /// information, or non-intrinsic records? See IsNewDbgInfoFormat in
+  /// \ref BasicBlock.
+  bool IsNewDbgInfoFormat;
+
+  /// \see BasicBlock::convertToNewDbgValues.
+  void convertToNewDbgValues() {
+    for (auto &F : *this) {
+      F.convertToNewDbgValues();
+    }
+    IsNewDbgInfoFormat = true;
+  }
+
+  /// \see BasicBlock::convertFromNewDbgValues.
+  void convertFromNewDbgValues() {
+    for (auto &F : *this) {
+      F.convertFromNewDbgValues();
+    }
+    IsNewDbgInfoFormat = false;
+  }
+
   /// The Module constructor. Note that there is no default constructor. You
   /// must provide a name for the module upon construction.
   explicit Module(StringRef ModuleID, LLVMContext& C);
@@ -213,7 +251,7 @@ public:
   /// Returns the number of non-debug IR instructions in the module.
   /// This is equivalent to the sum of the IR instruction counts of each
   /// function contained in the module.
-  unsigned getInstructionCount();
+  unsigned getInstructionCount() const;
 
   /// Get the module's original source file name. When compiling from
   /// bitcode, this is taken from a bitcode record where it was recorded.
@@ -234,7 +272,7 @@ public:
   }
 
   /// Get the data layout for the module's target platform.
-  const DataLayout &getDataLayout() const;
+  const DataLayout &getDataLayout() const { return DL; }
 
   /// Get the target triple which is a string describing the target host.
   /// @returns a string containing the target triple.
@@ -257,7 +295,7 @@ public:
   /// when other randomness consuming passes are added or removed. In
   /// addition, the random stream will be reproducible across LLVM
   /// versions when the pass does not change.
-  std::unique_ptr<RandomNumberGenerator> createRNG(const Pass* P) const;
+  std::unique_ptr<RandomNumberGenerator> createRNG(const StringRef Name) const;
 
   /// Return true if size-info optimization remark is enabled, false
   /// otherwise.
@@ -271,22 +309,22 @@ public:
   /// @{
 
   /// Set the module identifier.
-  void setModuleIdentifier(StringRef ID) { ModuleID = ID; }
+  void setModuleIdentifier(StringRef ID) { ModuleID = std::string(ID); }
 
   /// Set the module's original source file name.
-  void setSourceFileName(StringRef Name) { SourceFileName = Name; }
+  void setSourceFileName(StringRef Name) { SourceFileName = std::string(Name); }
 
   /// Set the data layout
   void setDataLayout(StringRef Desc);
   void setDataLayout(const DataLayout &Other);
 
   /// Set the target triple.
-  void setTargetTriple(StringRef T) { TargetTriple = T; }
+  void setTargetTriple(StringRef T) { TargetTriple = std::string(T); }
 
   /// Set the module-scope inline assembly blocks.
   /// A trailing newline is added if the input doesn't have one.
   void setModuleInlineAsm(StringRef Asm) {
-    GlobalScopeAsm = Asm;
+    GlobalScopeAsm = std::string(Asm);
     if (!GlobalScopeAsm.empty() && GlobalScopeAsm.back() != '\n')
       GlobalScopeAsm += '\n';
   }
@@ -308,6 +346,9 @@ public:
   /// name is not found.
   GlobalValue *getNamedValue(StringRef Name) const;
 
+  /// Return the number of global values in the module.
+  unsigned getNumNamedValues() const;
+
   /// Return a unique non-zero ID for the specified metadata kind. This ID is
   /// uniqued across modules in the current LLVMContext.
   unsigned getMDKindID(StringRef Name) const;
@@ -321,11 +362,12 @@ public:
   /// \see LLVMContext::getOperandBundleTagID
   void getOperandBundleTags(SmallVectorImpl<StringRef> &Result) const;
 
-  /// Return the type with the specified name, or null if there is none by that
-  /// name.
-  StructType *getTypeByName(StringRef Name) const;
-
   std::vector<StructType *> getIdentifiedStructTypes() const;
+
+  /// Return a unique name for an intrinsic whose mangling is based on an
+  /// unnamed type. The Proto represents the function prototype.
+  std::string getUniqueIntrinsicName(StringRef BaseName, Intrinsic::ID Id,
+                                     const FunctionType *Proto);
 
 /// @}
 /// @name Function Accessors
@@ -342,6 +384,8 @@ public:
   /// In all cases, the returned value is a FunctionCallee wrapper around the
   /// 'FunctionType *T' passed in, as well as a 'Value*' either of the Function or
   /// the bitcast to the function.
+  ///
+  /// Note: For library calls getOrInsertLibFunc() should be used instead.
   FunctionCallee getOrInsertFunction(StringRef Name, FunctionType *T,
                                      AttributeList AttributeList);
 
@@ -491,10 +535,12 @@ public:
   void addModuleFlag(ModFlagBehavior Behavior, StringRef Key, Constant *Val);
   void addModuleFlag(ModFlagBehavior Behavior, StringRef Key, uint32_t Val);
   void addModuleFlag(MDNode *Node);
+  /// Like addModuleFlag but replaces the old module flag if it already exists.
+  void setModuleFlag(ModFlagBehavior Behavior, StringRef Key, Metadata *Val);
 
-/// @}
-/// @name Materialization
-/// @{
+  /// @}
+  /// @name Materialization
+  /// @{
 
   /// Sets the GVMaterializer to GVM. This module must not yet have a
   /// Materializer. To reset the materializer for a module that already has one,
@@ -517,6 +563,24 @@ public:
 
   llvm::Error materializeMetadata();
 
+  /// Detach global variable \p GV from the list but don't delete it.
+  void removeGlobalVariable(GlobalVariable *GV) { GlobalList.remove(GV); }
+  /// Remove global variable \p GV from the list and delete it.
+  void eraseGlobalVariable(GlobalVariable *GV) { GlobalList.erase(GV); }
+  /// Insert global variable \p GV at the end of the global variable list and
+  /// take ownership.
+  void insertGlobalVariable(GlobalVariable *GV) {
+    insertGlobalVariable(GlobalList.end(), GV);
+  }
+  /// Insert global variable \p GV into the global variable list before \p
+  /// Where and take ownership.
+  void insertGlobalVariable(GlobalListType::iterator Where, GlobalVariable *GV) {
+    GlobalList.insert(Where, GV);
+  }
+  // Use global_size() to get the total number of global variables.
+  // Use globals() to get the range of all global variables.
+
+private:
 /// @}
 /// @name Direct access to the globals list, functions list, and symbol table
 /// @{
@@ -529,7 +593,9 @@ public:
   static GlobalListType Module::*getSublistAccess(GlobalVariable*) {
     return &Module::GlobalList;
   }
+  friend class llvm::SymbolTableListTraits<llvm::GlobalVariable>;
 
+public:
   /// Get the Module's list of functions (constant).
   const FunctionListType &getFunctionList() const     { return FunctionList; }
   /// Get the Module's list of functions.
@@ -538,6 +604,36 @@ public:
     return &Module::FunctionList;
   }
 
+  /// Detach \p Alias from the list but don't delete it.
+  void removeAlias(GlobalAlias *Alias) { AliasList.remove(Alias); }
+  /// Remove \p Alias from the list and delete it.
+  void eraseAlias(GlobalAlias *Alias) { AliasList.erase(Alias); }
+  /// Insert \p Alias at the end of the alias list and take ownership.
+  void insertAlias(GlobalAlias *Alias) { AliasList.insert(AliasList.end(), Alias); }
+  // Use alias_size() to get the size of AliasList.
+  // Use aliases() to get a range of all Alias objects in AliasList.
+
+  /// Detach \p IFunc from the list but don't delete it.
+  void removeIFunc(GlobalIFunc *IFunc) { IFuncList.remove(IFunc); }
+  /// Remove \p IFunc from the list and delete it.
+  void eraseIFunc(GlobalIFunc *IFunc) { IFuncList.erase(IFunc); }
+  /// Insert \p IFunc at the end of the alias list and take ownership.
+  void insertIFunc(GlobalIFunc *IFunc) { IFuncList.push_back(IFunc); }
+  // Use ifunc_size() to get the number of functions in IFuncList.
+  // Use ifuncs() to get the range of all IFuncs.
+
+  /// Detach \p MDNode from the list but don't delete it.
+  void removeNamedMDNode(NamedMDNode *MDNode) { NamedMDList.remove(MDNode); }
+  /// Remove \p MDNode from the list and delete it.
+  void eraseNamedMDNode(NamedMDNode *MDNode) { NamedMDList.erase(MDNode); }
+  /// Insert \p MDNode at the end of the alias list and take ownership.
+  void insertNamedMDNode(NamedMDNode *MDNode) {
+    NamedMDList.push_back(MDNode);
+  }
+  // Use named_metadata_size() to get the size of the named meatadata list.
+  // Use named_metadata() to get the range of all named metadata.
+
+private: // Please use functions like insertAlias(), removeAlias() etc.
   /// Get the Module's list of aliases (constant).
   const AliasListType    &getAliasList() const        { return AliasList; }
   /// Get the Module's list of aliases.
@@ -546,6 +642,7 @@ public:
   static AliasListType Module::*getSublistAccess(GlobalAlias*) {
     return &Module::AliasList;
   }
+  friend class llvm::SymbolTableListTraits<llvm::GlobalAlias>;
 
   /// Get the Module's list of ifuncs (constant).
   const IFuncListType    &getIFuncList() const        { return IFuncList; }
@@ -555,6 +652,7 @@ public:
   static IFuncListType Module::*getSublistAccess(GlobalIFunc*) {
     return &Module::IFuncList;
   }
+  friend class llvm::SymbolTableListTraits<llvm::GlobalIFunc>;
 
   /// Get the Module's list of named metadata (constant).
   const NamedMDListType  &getNamedMDList() const      { return NamedMDList; }
@@ -565,6 +663,7 @@ public:
     return &Module::NamedMDList;
   }
 
+public:
   /// Get the symbol table of global variable and function identifiers
   const ValueSymbolTable &getValueSymbolTable() const { return *ValSymTab; }
   /// Get the Module's symbol table of global variable and function identifiers.
@@ -583,6 +682,7 @@ public:
   const_global_iterator global_begin() const { return GlobalList.begin(); }
   global_iterator       global_end  ()       { return GlobalList.end(); }
   const_global_iterator global_end  () const { return GlobalList.end(); }
+  size_t                global_size () const { return GlobalList.size(); }
   bool                  global_empty() const { return GlobalList.empty(); }
 
   iterator_range<global_iterator> globals() {
@@ -698,14 +798,19 @@ public:
   }
 
   /// An iterator for DICompileUnits that skips those marked NoDebug.
-  class debug_compile_units_iterator
-      : public std::iterator<std::input_iterator_tag, DICompileUnit *> {
+  class debug_compile_units_iterator {
     NamedMDNode *CUs;
     unsigned Idx;
 
     void SkipNoDebugCUs();
 
   public:
+    using iterator_category = std::input_iterator_tag;
+    using value_type = DICompileUnit *;
+    using difference_type = std::ptrdiff_t;
+    using pointer = value_type *;
+    using reference = value_type &;
+
     explicit debug_compile_units_iterator(NamedMDNode *CUs, unsigned Idx)
         : CUs(CUs), Idx(Idx) {
       SkipNoDebugCUs();
@@ -798,6 +903,9 @@ public:
   /// Returns the Dwarf Version by checking module flags.
   unsigned getDwarfVersion() const;
 
+  /// Returns the DWARF format by checking module flags.
+  bool isDwarf64() const;
+
   /// Returns the CodeView Version by checking module flags.
   /// Returns zero if not present in module.
   unsigned getCodeViewFlag() const;
@@ -829,10 +937,21 @@ public:
   /// @{
 
   /// Returns the code model (tiny, small, kernel, medium or large model)
-  Optional<CodeModel::Model> getCodeModel() const;
+  std::optional<CodeModel::Model> getCodeModel() const;
 
   /// Set the code model (tiny, small, kernel, medium or large)
   void setCodeModel(CodeModel::Model CL);
+  /// @}
+
+  /// @}
+  /// @name Utility function for querying and setting the large data threshold
+  /// @{
+
+  /// Returns the code model (tiny, small, kernel, medium or large model)
+  std::optional<uint64_t> getLargeDataThreshold() const;
+
+  /// Set the code model (tiny, small, kernel, medium or large)
+  void setLargeDataThreshold(uint64_t Threshold);
   /// @}
 
   /// @name Utility functions for querying and setting PGO summary
@@ -843,14 +962,58 @@ public:
 
   /// Returns profile summary metadata. When IsCS is true, use the context
   /// sensitive profile summary.
-  Metadata *getProfileSummary(bool IsCS);
+  Metadata *getProfileSummary(bool IsCS) const;
   /// @}
+
+  /// Returns whether semantic interposition is to be respected.
+  bool getSemanticInterposition() const;
+
+  /// Set whether semantic interposition is to be respected.
+  void setSemanticInterposition(bool);
 
   /// Returns true if PLT should be avoided for RTLib calls.
   bool getRtLibUseGOT() const;
 
   /// Set that PLT should be avoid for RTLib calls.
   void setRtLibUseGOT();
+
+  /// Get/set whether referencing global variables can use direct access
+  /// relocations on ELF targets.
+  bool getDirectAccessExternalData() const;
+  void setDirectAccessExternalData(bool Value);
+
+  /// Get/set whether synthesized functions should get the uwtable attribute.
+  UWTableKind getUwtable() const;
+  void setUwtable(UWTableKind Kind);
+
+  /// Get/set whether synthesized functions should get the "frame-pointer"
+  /// attribute.
+  FramePointerKind getFramePointer() const;
+  void setFramePointer(FramePointerKind Kind);
+
+  /// Get/set what kind of stack protector guard to use.
+  StringRef getStackProtectorGuard() const;
+  void setStackProtectorGuard(StringRef Kind);
+
+  /// Get/set which register to use as the stack protector guard register. The
+  /// empty string is equivalent to "global". Other values may be "tls" or
+  /// "sysreg".
+  StringRef getStackProtectorGuardReg() const;
+  void setStackProtectorGuardReg(StringRef Reg);
+
+  /// Get/set a symbol to use as the stack protector guard.
+  StringRef getStackProtectorGuardSymbol() const;
+  void setStackProtectorGuardSymbol(StringRef Symbol);
+
+  /// Get/set what offset from the stack protector to use.
+  int getStackProtectorGuardOffset() const;
+  void setStackProtectorGuardOffset(int Offset);
+
+  /// Get/set the stack alignment overridden from the default.
+  unsigned getOverrideStackAlignment() const;
+  void setOverrideStackAlignment(unsigned Align);
+
+  unsigned getMaxTLSAlignment() const;
 
   /// @name Utility functions for querying and setting the build SDK version
   /// @{
@@ -866,12 +1029,35 @@ public:
 
   /// Take ownership of the given memory buffer.
   void setOwnedMemoryBuffer(std::unique_ptr<MemoryBuffer> MB);
+
+  /// Set the partial sample profile ratio in the profile summary module flag,
+  /// if applicable.
+  void setPartialSampleProfileRatio(const ModuleSummaryIndex &Index);
+
+  /// Get the target variant triple which is a string describing a variant of
+  /// the target host platform. For example, Mac Catalyst can be a variant
+  /// target triple for a macOS target.
+  /// @returns a string containing the target variant triple.
+  StringRef getDarwinTargetVariantTriple() const;
+
+  /// Set the target variant triple which is a string describing a variant of
+  /// the target host platform.
+  void setDarwinTargetVariantTriple(StringRef T);
+
+  /// Get the target variant version build SDK version metadata.
+  ///
+  /// An empty version is returned if no such metadata is attached.
+  VersionTuple getDarwinTargetVariantSDKVersion() const;
+
+  /// Set the target variant version build SDK version metadata.
+  void setDarwinTargetVariantSDKVersion(VersionTuple Version);
 };
 
-/// Given "llvm.used" or "llvm.compiler.used" as a global name, collect
-/// the initializer elements of that global in Set and return the global itself.
+/// Given "llvm.used" or "llvm.compiler.used" as a global name, collect the
+/// initializer elements of that global in a SmallVector and return the global
+/// itself.
 GlobalVariable *collectUsedGlobalVariables(const Module &M,
-                                           SmallPtrSetImpl<GlobalValue *> &Set,
+                                           SmallVectorImpl<GlobalValue *> &Vec,
                                            bool CompilerUsed);
 
 /// An raw_ostream inserter for modules.

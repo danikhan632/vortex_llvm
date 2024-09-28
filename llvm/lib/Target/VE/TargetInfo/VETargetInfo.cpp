@@ -6,9 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "VE.h"
-#include "llvm/IR/Module.h"
-#include "llvm/Support/TargetRegistry.h"
+#include "TargetInfo/VETargetInfo.h"
+#include "llvm/MC/TargetRegistry.h"
 
 using namespace llvm;
 
@@ -17,7 +16,7 @@ Target &llvm::getTheVETarget() {
   return TheVETarget;
 }
 
-extern "C" void LLVMInitializeVETargetInfo() {
+extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeVETargetInfo() {
   RegisterTarget<Triple::ve, /*HasJIT=*/false> X(getTheVETarget(), "ve",
                                                  "VE", "VE");
 }

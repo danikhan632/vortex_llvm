@@ -74,16 +74,16 @@
 
 #include "ICF.h"
 #include "Config.h"
+#include "InputFiles.h"
 #include "LinkerScript.h"
 #include "OutputSections.h"
 #include "SymbolTable.h"
 #include "Symbols.h"
 #include "SyntheticSections.h"
-#include "Writer.h"
-#include "lld/Common/Threads.h"
-#include "llvm/ADT/StringExtras.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/Object/ELF.h"
+#include "llvm/Support/Parallel.h"
+#include "llvm/Support/TimeProfiler.h"
 #include "llvm/Support/xxhash.h"
 #include <algorithm>
 #include <atomic>
@@ -91,16 +91,16 @@
 using namespace llvm;
 using namespace llvm::ELF;
 using namespace llvm::object;
+using namespace lld;
+using namespace lld::elf;
 
-namespace lld {
-namespace elf {
 namespace {
 template <class ELFT> class ICF {
 public:
   void run();
 
 private:
-  void segregate(size_t begin, size_t end, bool constant);
+  void segregate(size_t begin, size_t end, uint32_t eqClassBase, bool constant);
 
   template <class RelTy>
   bool constantEq(const InputSection *a, ArrayRef<RelTy> relsA,
@@ -120,7 +120,7 @@ private:
 
   void forEachClass(llvm::function_ref<void(size_t, size_t)> fn);
 
-  std::vector<InputSection *> sections;
+  SmallVector<InputSection *, 0> sections;
 
   // We repeat the main loop while `Repeat` is true.
   std::atomic<bool> repeat;
@@ -165,7 +165,7 @@ static bool isEligible(InputSection *s) {
   // Don't merge writable sections. .data.rel.ro sections are marked as writable
   // but are semantically read-only.
   if ((s->flags & SHF_WRITE) && s->name != ".data.rel.ro" &&
-      !s->name.startswith(".data.rel.ro."))
+      !s->name.starts_with(".data.rel.ro."))
     return false;
 
   // SHF_LINK_ORDER sections are ICF'd as a unit with their dependent sections,
@@ -195,7 +195,8 @@ static bool isEligible(InputSection *s) {
 
 // Split an equivalence class into smaller classes.
 template <class ELFT>
-void ICF<ELFT>::segregate(size_t begin, size_t end, bool constant) {
+void ICF<ELFT>::segregate(size_t begin, size_t end, uint32_t eqClassBase,
+                          bool constant) {
   // This loop rearranges sections in [Begin, End) so that all sections
   // that are equal in terms of equals{Constant,Variable} are contiguous
   // in [Begin, End).
@@ -217,10 +218,11 @@ void ICF<ELFT>::segregate(size_t begin, size_t end, bool constant) {
     size_t mid = bound - sections.begin();
 
     // Now we split [Begin, End) into [Begin, Mid) and [Mid, End) by
-    // updating the sections in [Begin, Mid). We use Mid as an equivalence
-    // class ID because every group ends with a unique index.
+    // updating the sections in [Begin, Mid). We use Mid as the basis for
+    // the equivalence class ID because every group ends with a unique index.
+    // Add this to eqClassBase to avoid equality with unique IDs.
     for (size_t i = begin; i < mid; ++i)
-      sections[i]->eqClass[next] = mid;
+      sections[i]->eqClass[next] = eqClassBase + mid;
 
     // If we created a group, we need to iterate the main loop again.
     if (mid != end)
@@ -235,6 +237,8 @@ template <class ELFT>
 template <class RelTy>
 bool ICF<ELFT>::constantEq(const InputSection *secA, ArrayRef<RelTy> ra,
                            const InputSection *secB, ArrayRef<RelTy> rb) {
+  if (ra.size() != rb.size())
+    return false;
   for (size_t i = 0; i < ra.size(); ++i) {
     if (ra[i].r_offset != rb[i].r_offset ||
         ra[i].getType(config->isMips64EL) != rb[i].getType(config->isMips64EL))
@@ -308,8 +312,8 @@ bool ICF<ELFT>::constantEq(const InputSection *secA, ArrayRef<RelTy> ra,
 // except relocation targets.
 template <class ELFT>
 bool ICF<ELFT>::equalsConstant(const InputSection *a, const InputSection *b) {
-  if (a->numRelocations != b->numRelocations || a->flags != b->flags ||
-      a->getSize() != b->getSize() || a->data() != b->data())
+  if (a->flags != b->flags || a->getSize() != b->getSize() ||
+      a->content() != b->content())
     return false;
 
   // If two sections have different output sections, we cannot merge them.
@@ -317,10 +321,11 @@ bool ICF<ELFT>::equalsConstant(const InputSection *a, const InputSection *b) {
   if (a->getParent() != b->getParent())
     return false;
 
-  if (a->areRelocsRela)
-    return constantEq(a, a->template relas<ELFT>(), b,
-                      b->template relas<ELFT>());
-  return constantEq(a, a->template rels<ELFT>(), b, b->template rels<ELFT>());
+  const RelsOrRelas<ELFT> ra = a->template relsOrRelas<ELFT>();
+  const RelsOrRelas<ELFT> rb = b->template relsOrRelas<ELFT>();
+  return ra.areRelocsRel() || rb.areRelocsRel()
+             ? constantEq(a, ra.rels, b, rb.rels)
+             : constantEq(a, ra.relas, b, rb.relas);
 }
 
 // Compare two lists of relocations. Returns true if all pairs of
@@ -351,8 +356,8 @@ bool ICF<ELFT>::variableEq(const InputSection *secA, ArrayRef<RelTy> ra,
       continue;
     auto *y = cast<InputSection>(db->section);
 
-    // Ineligible sections are in the special equivalence class 0.
-    // They can never be the same in terms of the equivalence class.
+    // Sections that are in the special equivalence class 0, can never be the
+    // same in terms of the equivalence class.
     if (x->eqClass[current] == 0)
       return false;
     if (x->eqClass[current] != y->eqClass[current])
@@ -365,10 +370,11 @@ bool ICF<ELFT>::variableEq(const InputSection *secA, ArrayRef<RelTy> ra,
 // Compare "moving" part of two InputSections, namely relocation targets.
 template <class ELFT>
 bool ICF<ELFT>::equalsVariable(const InputSection *a, const InputSection *b) {
-  if (a->areRelocsRela)
-    return variableEq(a, a->template relas<ELFT>(), b,
-                      b->template relas<ELFT>());
-  return variableEq(a, a->template rels<ELFT>(), b, b->template rels<ELFT>());
+  const RelsOrRelas<ELFT> ra = a->template relsOrRelas<ELFT>();
+  const RelsOrRelas<ELFT> rb = b->template relsOrRelas<ELFT>();
+  return ra.areRelocsRel() || rb.areRelocsRel()
+             ? variableEq(a, ra.rels, b, rb.rels)
+             : variableEq(a, ra.relas, b, rb.relas);
 }
 
 template <class ELFT> size_t ICF<ELFT>::findBoundary(size_t begin, size_t end) {
@@ -399,7 +405,7 @@ template <class ELFT>
 void ICF<ELFT>::forEachClass(llvm::function_ref<void(size_t, size_t)> fn) {
   // If threading is disabled or the number of sections are
   // too small to use threading, call Fn sequentially.
-  if (!threadsEnabled || sections.size() < 1024) {
+  if (parallel::strategy.ThreadsRequested == 1 || sections.size() < 1024) {
     forEachClassRange(0, sections.size(), fn);
     ++cnt;
     return;
@@ -418,11 +424,11 @@ void ICF<ELFT>::forEachClass(llvm::function_ref<void(size_t, size_t)> fn) {
   boundaries[0] = 0;
   boundaries[numShards] = sections.size();
 
-  parallelForEachN(1, numShards, [&](size_t i) {
+  parallelFor(1, numShards, [&](size_t i) {
     boundaries[i] = findBoundary((i - 1) * step, sections.size());
   });
 
-  parallelForEachN(1, numShards + 1, [&](size_t i) {
+  parallelFor(1, numShards + 1, [&](size_t i) {
     if (boundaries[i - 1] < boundaries[i])
       forEachClassRange(boundaries[i - 1], boundaries[i], fn);
   });
@@ -441,7 +447,7 @@ static void combineRelocHashes(unsigned cnt, InputSection *isec,
       if (auto *relSec = dyn_cast_or_null<InputSection>(d->section))
         hash += relSec->eqClass[cnt % 2];
   }
-  // Set MSB to 1 to avoid collisions with non-hash IDs.
+  // Set MSB to 1 to avoid collisions with unique IDs.
   isec->eqClass[(cnt + 1) % 2] = hash | (1U << 31);
 }
 
@@ -455,27 +461,52 @@ template <class ELFT> void ICF<ELFT>::run() {
   // Compute isPreemptible early. We may add more symbols later, so this loop
   // cannot be merged with the later computeIsPreemptible() pass which is used
   // by scanRelocations().
-  for (Symbol *sym : symtab->symbols())
-    sym->isPreemptible = computeIsPreemptible(*sym);
+  if (config->hasDynSymTab)
+    for (Symbol *sym : symtab.getSymbols())
+      sym->isPreemptible = computeIsPreemptible(*sym);
+
+  // Two text sections may have identical content and relocations but different
+  // LSDA, e.g. the two functions may have catch blocks of different types. If a
+  // text section is referenced by a .eh_frame FDE with LSDA, it is not
+  // eligible. This is implemented by iterating over CIE/FDE and setting
+  // eqClass[0] to the referenced text section from a live FDE.
+  //
+  // If two .gcc_except_table have identical semantics (usually identical
+  // content with PC-relative encoding), we will lose folding opportunity.
+  uint32_t uniqueId = 0;
+  for (Partition &part : partitions)
+    part.ehFrame->iterateFDEWithLSDA<ELFT>(
+        [&](InputSection &s) { s.eqClass[0] = s.eqClass[1] = ++uniqueId; });
 
   // Collect sections to merge.
-  for (InputSectionBase *sec : inputSections) {
-    auto *s = cast<InputSection>(sec);
-    if (isEligible(s))
-      sections.push_back(s);
+  for (InputSectionBase *sec : ctx.inputSections) {
+    auto *s = dyn_cast<InputSection>(sec);
+    if (s && s->eqClass[0] == 0) {
+      if (isEligible(s))
+        sections.push_back(s);
+      else
+        // Ineligible sections are assigned unique IDs, i.e. each section
+        // belongs to an equivalence class of its own.
+        s->eqClass[0] = s->eqClass[1] = ++uniqueId;
+    }
   }
 
   // Initially, we use hash values to partition sections.
   parallelForEach(sections, [&](InputSection *s) {
-    s->eqClass[0] = xxHash64(s->data());
+    // Set MSB to 1 to avoid collisions with unique IDs.
+    s->eqClass[0] = xxh3_64bits(s->content()) | (1U << 31);
   });
 
+  // Perform 2 rounds of relocation hash propagation. 2 is an empirical value to
+  // reduce the average sizes of equivalence classes, i.e. segregate() which has
+  // a large time complexity will have less work to do.
   for (unsigned cnt = 0; cnt != 2; ++cnt) {
     parallelForEach(sections, [&](InputSection *s) {
-      if (s->areRelocsRela)
-        combineRelocHashes<ELFT>(cnt, s, s->template relas<ELFT>());
+      const RelsOrRelas<ELFT> rels = s->template relsOrRelas<ELFT>();
+      if (rels.areRelocsRel())
+        combineRelocHashes<ELFT>(cnt, s, rels.rels);
       else
-        combineRelocHashes<ELFT>(cnt, s, s->template rels<ELFT>());
+        combineRelocHashes<ELFT>(cnt, s, rels.relas);
     });
   }
 
@@ -485,14 +516,20 @@ template <class ELFT> void ICF<ELFT>::run() {
     return a->eqClass[0] < b->eqClass[0];
   });
 
-  // Compare static contents and assign unique IDs for each static content.
-  forEachClass([&](size_t begin, size_t end) { segregate(begin, end, true); });
+  // Compare static contents and assign unique equivalence class IDs for each
+  // static content. Use a base offset for these IDs to ensure no overlap with
+  // the unique IDs already assigned.
+  uint32_t eqClassBase = ++uniqueId;
+  forEachClass([&](size_t begin, size_t end) {
+    segregate(begin, end, eqClassBase, true);
+  });
 
   // Split groups by comparing relocations until convergence is obtained.
   do {
     repeat = false;
-    forEachClass(
-        [&](size_t begin, size_t end) { segregate(begin, end, false); });
+    forEachClass([&](size_t begin, size_t end) {
+      segregate(begin, end, eqClassBase, false);
+    });
   } while (repeat);
 
   log("ICF needed " + Twine(cnt) + " iterations");
@@ -514,23 +551,39 @@ template <class ELFT> void ICF<ELFT>::run() {
     }
   });
 
+  // Change Defined symbol's section field to the canonical one.
+  auto fold = [](Symbol *sym) {
+    if (auto *d = dyn_cast<Defined>(sym))
+      if (auto *sec = dyn_cast_or_null<InputSection>(d->section))
+        if (sec->repl != d->section) {
+          d->section = sec->repl;
+          d->folded = true;
+        }
+  };
+  for (Symbol *sym : symtab.getSymbols())
+    fold(sym);
+  parallelForEach(ctx.objectFiles, [&](ELFFileBase *file) {
+    for (Symbol *sym : file->getLocalSymbols())
+      fold(sym);
+  });
+
   // InputSectionDescription::sections is populated by processSectionCommands().
   // ICF may fold some input sections assigned to output sections. Remove them.
-  for (BaseCommand *base : script->sectionCommands)
-    if (auto *sec = dyn_cast<OutputSection>(base))
-      for (BaseCommand *sub_base : sec->sectionCommands)
-        if (auto *isd = dyn_cast<InputSectionDescription>(sub_base))
+  for (SectionCommand *cmd : script->sectionCommands)
+    if (auto *osd = dyn_cast<OutputDesc>(cmd))
+      for (SectionCommand *subCmd : osd->osec.commands)
+        if (auto *isd = dyn_cast<InputSectionDescription>(subCmd))
           llvm::erase_if(isd->sections,
                          [](InputSection *isec) { return !isec->isLive(); });
 }
 
 // ICF entry point function.
-template <class ELFT> void doIcf() { ICF<ELFT>().run(); }
+template <class ELFT> void elf::doIcf() {
+  llvm::TimeTraceScope timeScope("ICF");
+  ICF<ELFT>().run();
+}
 
-template void doIcf<ELF32LE>();
-template void doIcf<ELF32BE>();
-template void doIcf<ELF64LE>();
-template void doIcf<ELF64BE>();
-
-} // namespace elf
-} // namespace lld
+template void elf::doIcf<ELF32LE>();
+template void elf::doIcf<ELF32BE>();
+template void elf::doIcf<ELF64LE>();
+template void elf::doIcf<ELF64BE>();

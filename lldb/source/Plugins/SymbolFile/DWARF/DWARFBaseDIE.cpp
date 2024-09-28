@@ -1,4 +1,4 @@
-//===-- DWARFBaseDIE.cpp ---------------------------------------*- C++ -*-===//
+//===-- DWARFBaseDIE.cpp --------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -15,15 +15,17 @@
 #include "lldb/Core/Module.h"
 #include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Utility/Log.h"
+#include <optional>
 
 using namespace lldb_private;
+using namespace lldb_private::plugin::dwarf;
 
-llvm::Optional<DIERef> DWARFBaseDIE::GetDIERef() const {
+std::optional<DIERef> DWARFBaseDIE::GetDIERef() const {
   if (!IsValid())
-    return llvm::None;
+    return std::nullopt;
 
-  return DIERef(m_cu->GetSymbolFileDWARF().GetDwoNum(), m_cu->GetDebugSection(),
-                m_die->GetOffset());
+  return DIERef(m_cu->GetSymbolFileDWARF().GetFileIndex(),
+                m_cu->GetDebugSection(), m_die->GetOffset());
 }
 
 dw_tag_t DWARFBaseDIE::Tag() const {
@@ -34,7 +36,7 @@ dw_tag_t DWARFBaseDIE::Tag() const {
 }
 
 const char *DWARFBaseDIE::GetTagAsCString() const {
-  return lldb_private::DW_TAG_value_to_name(Tag());
+  return DW_TAG_value_to_name(Tag());
 }
 
 const char *DWARFBaseDIE::GetAttributeValueAsString(const dw_attr_t attr,
@@ -53,6 +55,13 @@ uint64_t DWARFBaseDIE::GetAttributeValueAsUnsigned(const dw_attr_t attr,
     return fail_value;
 }
 
+std::optional<uint64_t>
+DWARFBaseDIE::GetAttributeValueAsOptionalUnsigned(const dw_attr_t attr) const {
+  if (IsValid())
+    return m_die->GetAttributeValueAsOptionalUnsigned(GetCU(), attr);
+  return std::nullopt;
+}
+
 uint64_t DWARFBaseDIE::GetAttributeValueAsAddress(const dw_attr_t attr,
                                               uint64_t fail_value) const {
   if (IsValid())
@@ -62,8 +71,10 @@ uint64_t DWARFBaseDIE::GetAttributeValueAsAddress(const dw_attr_t attr,
 }
 
 lldb::user_id_t DWARFBaseDIE::GetID() const {
-  if (IsValid())
-    return GetDWARF()->GetUID(*this);
+  const std::optional<DIERef> &ref = this->GetDIERef();
+  if (ref)
+    return ref->get_id();
+
   return LLDB_INVALID_UID;
 }
 
@@ -72,13 +83,6 @@ const char *DWARFBaseDIE::GetName() const {
     return m_die->GetName(m_cu);
   else
     return nullptr;
-}
-
-lldb::LanguageType DWARFBaseDIE::GetLanguage() const {
-  if (IsValid())
-    return m_cu->GetLanguageType();
-  else
-    return lldb::eLanguageTypeUnknown;
 }
 
 lldb::ModuleSP DWARFBaseDIE::GetModule() const {
@@ -103,24 +107,6 @@ SymbolFileDWARF *DWARFBaseDIE::GetDWARF() const {
     return nullptr;
 }
 
-llvm::Expected<lldb_private::TypeSystem &> DWARFBaseDIE::GetTypeSystem() const {
-  if (!m_cu)
-    return llvm::make_error<llvm::StringError>(
-        "Unable to get TypeSystem, no compilation unit available",
-        llvm::inconvertibleErrorCode());
-  return m_cu->GetTypeSystem();
-}
-
-DWARFASTParser *DWARFBaseDIE::GetDWARFParser() const {
-  auto type_system_or_err = GetTypeSystem();
-  if (auto err = type_system_or_err.takeError()) {
-    LLDB_LOG_ERROR(lldb_private::GetLogIfAnyCategoriesSet(LIBLLDB_LOG_SYMBOLS),
-                   std::move(err), "Unable to get DWARFASTParser");
-    return nullptr;
-  }
-  return type_system_or_err->GetDWARFParser();
-}
-
 bool DWARFBaseDIE::HasChildren() const {
   return m_die && m_die->HasChildren();
 }
@@ -129,15 +115,14 @@ bool DWARFBaseDIE::Supports_DW_AT_APPLE_objc_complete_type() const {
   return IsValid() && GetDWARF()->Supports_DW_AT_APPLE_objc_complete_type(m_cu);
 }
 
-size_t DWARFBaseDIE::GetAttributes(DWARFAttributes &attributes,
-                               uint32_t depth) const {
+DWARFAttributes DWARFBaseDIE::GetAttributes(Recurse recurse) const {
   if (IsValid())
-    return m_die->GetAttributes(m_cu, attributes, depth);
-  if (depth == 0)
-    attributes.Clear();
-  return 0;
+    return m_die->GetAttributes(m_cu, recurse);
+  return DWARFAttributes();
 }
 
+namespace lldb_private::plugin {
+namespace dwarf {
 bool operator==(const DWARFBaseDIE &lhs, const DWARFBaseDIE &rhs) {
   return lhs.GetDIE() == rhs.GetDIE() && lhs.GetCU() == rhs.GetCU();
 }
@@ -145,6 +130,8 @@ bool operator==(const DWARFBaseDIE &lhs, const DWARFBaseDIE &rhs) {
 bool operator!=(const DWARFBaseDIE &lhs, const DWARFBaseDIE &rhs) {
   return !(lhs == rhs);
 }
+} // namespace dwarf
+} // namespace lldb_private::plugin
 
 const DWARFDataExtractor &DWARFBaseDIE::GetData() const {
   // Clients must check if this DIE is valid before calling this function.

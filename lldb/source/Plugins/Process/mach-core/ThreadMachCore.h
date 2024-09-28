@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_ThreadMachCore_h_
-#define liblldb_ThreadMachCore_h_
+#ifndef LLDB_SOURCE_PLUGINS_PROCESS_MACH_CORE_THREADMACHCORE_H
+#define LLDB_SOURCE_PLUGINS_PROCESS_MACH_CORE_THREADMACHCORE_H
 
 #include <string>
 
@@ -17,7 +17,8 @@ class ProcessMachCore;
 
 class ThreadMachCore : public lldb_private::Thread {
 public:
-  ThreadMachCore(lldb_private::Process &process, lldb::tid_t tid);
+  ThreadMachCore(lldb_private::Process &process, lldb::tid_t tid,
+                 uint32_t objfile_lc_thread_idx);
 
   ~ThreadMachCore() override;
 
@@ -57,9 +58,10 @@ protected:
   std::string m_dispatch_queue_name;
   lldb::addr_t m_thread_dispatch_qaddr;
   lldb::RegisterContextSP m_thread_reg_ctx_sp;
+  uint32_t m_objfile_lc_thread_idx;
 
   // Protected member functions.
   bool CalculateStopInfo() override;
 };
 
-#endif // liblldb_ThreadMachCore_h_
+#endif // LLDB_SOURCE_PLUGINS_PROCESS_MACH_CORE_THREADMACHCORE_H

@@ -30,8 +30,6 @@ using namespace llvm::xray;
 using llvm::yaml::Input;
 
 namespace {
-using XRayRecordStorage =
-    std::aligned_storage<sizeof(XRayRecord), alignof(XRayRecord)>::type;
 
 Error loadNaiveFormatLog(StringRef Data, bool IsLittleEndian,
                          XRayFileHeader &FileHeader,
@@ -52,6 +50,9 @@ Error loadNaiveFormatLog(StringRef Data, bool IsLittleEndian,
   if (!FileHeaderOrError)
     return FileHeaderOrError.takeError();
   FileHeader = std::move(FileHeaderOrError.get());
+
+  size_t NumReservations = llvm::divideCeil(Reader.size() - OffsetPtr, 32U);
+  Records.reserve(NumReservations);
 
   // Each record after the header will be 32 bytes, in the following format:
   //
@@ -410,6 +411,7 @@ Expected<Trace> llvm::xray::loadTraceFile(StringRef Filename, bool Sort) {
   auto TraceOrError = loadTrace(LittleEndianDE, Sort);
   if (!TraceOrError) {
     DataExtractor BigEndianDE(Data, false, 8);
+    consumeError(TraceOrError.takeError());
     TraceOrError = loadTrace(BigEndianDE, Sort);
   }
   return TraceOrError;

@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLDB_SBAddress_h_
-#define LLDB_SBAddress_h_
+#ifndef LLDB_API_SBADDRESS_H
+#define LLDB_API_SBADDRESS_H
 
 #include "lldb/API/SBDefines.h"
 #include "lldb/API/SBModule.h"
@@ -107,7 +107,9 @@ protected:
 
   const lldb_private::Address *operator->() const;
 
+#ifndef SWIG
   friend bool LLDB_API operator==(const SBAddress &lhs, const SBAddress &rhs);
+#endif
 
   lldb_private::Address *get();
 
@@ -115,16 +117,18 @@ protected:
 
   const lldb_private::Address &ref() const;
 
-  SBAddress(const lldb_private::Address *lldb_object_ptr);
+  SBAddress(const lldb_private::Address &address);
 
-  void SetAddress(const lldb_private::Address *lldb_object_ptr);
+  void SetAddress(const lldb_private::Address &address);
 
 private:
   std::unique_ptr<lldb_private::Address> m_opaque_up;
 };
 
+#ifndef SWIG
 bool LLDB_API operator==(const SBAddress &lhs, const SBAddress &rhs);
+#endif
 
 } // namespace lldb
 
-#endif // LLDB_SBAddress_h_
+#endif // LLDB_API_SBADDRESS_H

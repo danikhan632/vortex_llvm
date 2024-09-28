@@ -14,72 +14,17 @@
 #ifndef LLVM_CLANG_BASIC_OPENMPKINDS_H
 #define LLVM_CLANG_BASIC_OPENMPKINDS_H
 
+#include "clang/Basic/LangOptions.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Frontend/OpenMP/OMPConstants.h"
 
 namespace clang {
 
-/// OpenMP context selector sets.
-enum OpenMPContextSelectorSetKind {
-#define OPENMP_CONTEXT_SELECTOR_SET(Name) OMP_CTX_SET_##Name,
-#include "clang/Basic/OpenMPKinds.def"
-  OMP_CTX_SET_unknown,
-};
-
-/// OpenMP context selectors.
-enum OpenMPContextSelectorKind {
-#define OPENMP_CONTEXT_SELECTOR(Name) OMP_CTX_##Name,
-#include "clang/Basic/OpenMPKinds.def"
-  OMP_CTX_unknown,
-};
-
-OpenMPContextSelectorSetKind getOpenMPContextSelectorSet(llvm::StringRef Str);
-llvm::StringRef
-getOpenMPContextSelectorSetName(OpenMPContextSelectorSetKind Kind);
-OpenMPContextSelectorKind getOpenMPContextSelector(llvm::StringRef Str);
-llvm::StringRef getOpenMPContextSelectorName(OpenMPContextSelectorKind Kind);
-
-/// Struct to store the context selectors info.
-template <typename VectorType, typename ScoreT> struct OpenMPCtxSelectorData {
-  OpenMPContextSelectorSetKind CtxSet = OMP_CTX_SET_unknown;
-  OpenMPContextSelectorKind Ctx = OMP_CTX_unknown;
-  ScoreT Score;
-  VectorType Names;
-  explicit OpenMPCtxSelectorData() = default;
-  explicit OpenMPCtxSelectorData(OpenMPContextSelectorSetKind CtxSet,
-                                 OpenMPContextSelectorKind Ctx,
-                                 const ScoreT &Score, VectorType &&Names)
-      : CtxSet(CtxSet), Ctx(Ctx), Score(Score), Names(Names) {}
-  template <typename U>
-  explicit OpenMPCtxSelectorData(OpenMPContextSelectorSetKind CtxSet,
-                                 OpenMPContextSelectorKind Ctx,
-                                 const ScoreT &Score, const U &Names)
-      : CtxSet(CtxSet), Ctx(Ctx), Score(Score),
-        Names(Names.begin(), Names.end()) {}
-};
-
 /// OpenMP directives.
 using OpenMPDirectiveKind = llvm::omp::Directive;
 
 /// OpenMP clauses.
-enum OpenMPClauseKind {
-#define OPENMP_CLAUSE(Name, Class) \
-  OMPC_##Name,
-#include "clang/Basic/OpenMPKinds.def"
-  OMPC_threadprivate,
-  OMPC_uniform,
-  OMPC_device_type,
-  OMPC_match,
-  OMPC_unknown
-};
-
-/// OpenMP attributes for 'default' clause.
-enum OpenMPDefaultClauseKind {
-#define OPENMP_DEFAULT_KIND(Name) \
-  OMPC_DEFAULT_##Name,
-#include "clang/Basic/OpenMPKinds.def"
-  OMPC_DEFAULT_unknown
-};
+using OpenMPClauseKind = llvm::omp::Clause;
 
 /// OpenMP attributes for 'schedule' clause.
 enum OpenMPScheduleClauseKind {
@@ -96,6 +41,13 @@ enum OpenMPScheduleClauseModifier {
   OMPC_SCHEDULE_MODIFIER_##Name,
 #include "clang/Basic/OpenMPKinds.def"
   OMPC_SCHEDULE_MODIFIER_last
+};
+
+/// OpenMP modifiers for 'device' clause.
+enum OpenMPDeviceClauseModifier {
+#define OPENMP_DEVICE_MODIFIER(Name) OMPC_DEVICE_##Name,
+#include "clang/Basic/OpenMPKinds.def"
+  OMPC_DEVICE_unknown,
 };
 
 /// OpenMP attributes for 'depend' clause.
@@ -131,21 +83,21 @@ enum OpenMPMapModifierKind {
   OMPC_MAP_MODIFIER_last
 };
 
-/// OpenMP modifier kind for 'to' clause.
-enum OpenMPToModifierKind {
-#define OPENMP_TO_MODIFIER_KIND(Name) \
-  OMPC_TO_MODIFIER_##Name,
+/// Number of allowed map-type-modifiers.
+static constexpr unsigned NumberOfOMPMapClauseModifiers =
+    OMPC_MAP_MODIFIER_last - OMPC_MAP_MODIFIER_unknown - 1;
+
+/// OpenMP modifier kind for 'to' or 'from' clause.
+enum OpenMPMotionModifierKind {
+#define OPENMP_MOTION_MODIFIER_KIND(Name) \
+  OMPC_MOTION_MODIFIER_##Name,
 #include "clang/Basic/OpenMPKinds.def"
-  OMPC_TO_MODIFIER_unknown
+  OMPC_MOTION_MODIFIER_unknown
 };
 
-/// OpenMP modifier kind for 'from' clause.
-enum OpenMPFromModifierKind {
-#define OPENMP_FROM_MODIFIER_KIND(Name) \
-  OMPC_FROM_MODIFIER_##Name,
-#include "clang/Basic/OpenMPKinds.def"
-  OMPC_FROM_MODIFIER_unknown
-};
+/// Number of allowed motion-modifiers.
+static constexpr unsigned NumberOfOMPMotionModifiers =
+    OMPC_MOTION_MODIFIER_unknown;
 
 /// OpenMP attributes for 'dist_schedule' clause.
 enum OpenMPDistScheduleClauseKind {
@@ -179,6 +131,20 @@ enum OpenMPAtomicDefaultMemOrderClauseKind {
   OMPC_ATOMIC_DEFAULT_MEM_ORDER_unknown
 };
 
+/// OpenMP attributes for 'at' clause.
+enum OpenMPAtClauseKind {
+#define OPENMP_AT_KIND(Name) OMPC_AT_##Name,
+#include "clang/Basic/OpenMPKinds.def"
+  OMPC_AT_unknown
+};
+
+/// OpenMP attributes for 'severity' clause.
+enum OpenMPSeverityClauseKind {
+#define OPENMP_SEVERITY_KIND(Name) OMPC_SEVERITY_##Name,
+#include "clang/Basic/OpenMPKinds.def"
+  OMPC_SEVERITY_unknown
+};
+
 /// OpenMP device type for 'device_type' clause.
 enum OpenMPDeviceType {
 #define OPENMP_DEVICE_TYPE_KIND(Name) \
@@ -194,6 +160,21 @@ enum OpenMPLastprivateModifier {
   OMPC_LASTPRIVATE_unknown,
 };
 
+/// OpenMP attributes for 'order' clause.
+enum OpenMPOrderClauseKind {
+#define OPENMP_ORDER_KIND(Name) OMPC_ORDER_##Name,
+#include "clang/Basic/OpenMPKinds.def"
+  OMPC_ORDER_unknown,
+};
+
+/// OpenMP modifiers for 'order' clause.
+enum OpenMPOrderClauseModifier {
+  OMPC_ORDER_MODIFIER_unknown = OMPC_ORDER_unknown,
+#define OPENMP_ORDER_MODIFIER(Name) OMPC_ORDER_MODIFIER_##Name,
+#include "clang/Basic/OpenMPKinds.def"
+  OMPC_ORDER_MODIFIER_last
+};
+
 /// Scheduling data for loop-based OpenMP directives.
 struct OpenMPScheduleTy final {
   OpenMPScheduleClauseKind Schedule = OMPC_SCHEDULE_unknown;
@@ -201,15 +182,59 @@ struct OpenMPScheduleTy final {
   OpenMPScheduleClauseModifier M2 = OMPC_SCHEDULE_MODIFIER_unknown;
 };
 
-OpenMPClauseKind getOpenMPClauseKind(llvm::StringRef Str);
-const char *getOpenMPClauseName(OpenMPClauseKind Kind);
+/// OpenMP modifiers for 'reduction' clause.
+enum OpenMPReductionClauseModifier {
+#define OPENMP_REDUCTION_MODIFIER(Name) OMPC_REDUCTION_##Name,
+#include "clang/Basic/OpenMPKinds.def"
+  OMPC_REDUCTION_unknown,
+};
 
-unsigned getOpenMPSimpleClauseType(OpenMPClauseKind Kind, llvm::StringRef Str);
+/// OpenMP adjust-op kinds for 'adjust_args' clause.
+enum OpenMPAdjustArgsOpKind {
+#define OPENMP_ADJUST_ARGS_KIND(Name) OMPC_ADJUST_ARGS_##Name,
+#include "clang/Basic/OpenMPKinds.def"
+  OMPC_ADJUST_ARGS_unknown,
+};
+
+/// OpenMP bindings for the 'bind' clause.
+enum OpenMPBindClauseKind {
+#define OPENMP_BIND_KIND(Name) OMPC_BIND_##Name,
+#include "clang/Basic/OpenMPKinds.def"
+  OMPC_BIND_unknown
+};
+
+enum OpenMPGrainsizeClauseModifier {
+#define OPENMP_GRAINSIZE_MODIFIER(Name) OMPC_GRAINSIZE_##Name,
+#include "clang/Basic/OpenMPKinds.def"
+  OMPC_GRAINSIZE_unknown
+};
+
+enum OpenMPNumTasksClauseModifier {
+#define OPENMP_NUMTASKS_MODIFIER(Name) OMPC_NUMTASKS_##Name,
+#include "clang/Basic/OpenMPKinds.def"
+  OMPC_NUMTASKS_unknown
+};
+
+/// OpenMP dependence types for 'doacross' clause.
+enum OpenMPDoacrossClauseModifier {
+#define OPENMP_DOACROSS_MODIFIER(Name) OMPC_DOACROSS_##Name,
+#include "clang/Basic/OpenMPKinds.def"
+  OMPC_DOACROSS_unknown
+};
+
+/// Contains 'interop' data for 'append_args' and 'init' clauses.
+class Expr;
+struct OMPInteropInfo final {
+  OMPInteropInfo(bool IsTarget = false, bool IsTargetSync = false)
+      : IsTarget(IsTarget), IsTargetSync(IsTargetSync) {}
+  bool IsTarget;
+  bool IsTargetSync;
+  llvm::SmallVector<Expr *, 4> PreferTypes;
+};
+
+unsigned getOpenMPSimpleClauseType(OpenMPClauseKind Kind, llvm::StringRef Str,
+                                   const LangOptions &LangOpts);
 const char *getOpenMPSimpleClauseTypeName(OpenMPClauseKind Kind, unsigned Type);
-
-bool isAllowedClauseForDirective(OpenMPDirectiveKind DKind,
-                                 OpenMPClauseKind CKind,
-                                 unsigned OpenMPVersion);
 
 /// Checks if the specified directive is a directive with an associated
 /// loop construct.
@@ -286,6 +311,13 @@ bool isOpenMPDistributeDirective(OpenMPDirectiveKind DKind);
 /// otherwise - false.
 bool isOpenMPNestingDistributeDirective(OpenMPDirectiveKind DKind);
 
+/// Checks if the specified directive constitutes a 'loop' directive in the
+/// outermost nest.  For example, 'omp teams loop' or 'omp loop'.
+/// \param DKind Specified directive.
+/// \return true - the directive has loop on the outermost nest.
+/// otherwise - false.
+bool isOpenMPGenericLoopDirective(OpenMPDirectiveKind DKind);
+
 /// Checks if the specified clause is one of private clauses like
 /// 'private', 'firstprivate', 'reduction' etc..
 /// \param Kind Clause kind.
@@ -308,10 +340,34 @@ bool isOpenMPTaskingDirective(OpenMPDirectiveKind Kind);
 /// functions
 bool isOpenMPLoopBoundSharingDirective(OpenMPDirectiveKind Kind);
 
+/// Checks if the specified directive is a loop transformation directive.
+/// \param DKind Specified directive.
+/// \return True iff the directive is a loop transformation.
+bool isOpenMPLoopTransformationDirective(OpenMPDirectiveKind DKind);
+
 /// Return the captured regions of an OpenMP directive.
 void getOpenMPCaptureRegions(
     llvm::SmallVectorImpl<OpenMPDirectiveKind> &CaptureRegions,
     OpenMPDirectiveKind DKind);
+
+/// Checks if the specified directive is a combined construct for which
+/// the first construct is a parallel construct.
+/// \param DKind Specified directive.
+/// \return true - if the above condition is met for this directive
+/// otherwise - false.
+bool isOpenMPCombinedParallelADirective(OpenMPDirectiveKind DKind);
+
+/// Checks if the specified target directive, combined or not, needs task based
+/// thread_limit
+/// \param DKind Specified directive.
+/// \return true - if the above condition is met for this directive
+/// otherwise - false.
+bool needsTaskBasedThreadLimit(OpenMPDirectiveKind DKind);
+
+/// Checks if the parameter to the fail clause in "#pragma atomic compare fail"
+/// is restricted only to memory order clauses of "OMPC_acquire",
+/// "OMPC_relaxed" and "OMPC_seq_cst".
+bool checkFailClauseParameter(OpenMPClauseKind FailClauseParameter);
 }
 
 #endif

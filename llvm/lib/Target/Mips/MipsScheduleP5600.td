@@ -20,7 +20,8 @@ def MipsP5600Model : SchedMachineModel {
                                          IsGP64bit, IsPTR64bit,
                                          InMicroMips, InMips16Mode,
                                          HasCnMips, HasCnMipsP,
-                                         HasDSP, HasDSPR2, HasMT, HasCRC];
+                                         HasDSP, HasDSPR2, HasMips3D, HasMT,
+                                         HasCRC];
 }
 
 let SchedModel = MipsP5600Model in {
@@ -118,7 +119,7 @@ def P5600WriteCache : SchedWriteRes<[P5600IssueLDST]>;
 def P5600WriteStore : SchedWriteRes<[P5600IssueLDST, P5600CTISTD]> {
   // FIXME: This is a bit pessimistic. P5600CTISTD is only used during cycle 2
   //        not during 0, 1, and 2.
-  let ResourceCycles = [ 1, 3 ];
+  let ReleaseAtCycles = [ 1, 3 ];
 }
 
 def P5600WriteGPRFromBypass : SchedWriteRes<[P5600IssueLDST]> {
@@ -164,12 +165,12 @@ def P5600WriteAL2CondMov : SchedWriteRes<[P5600IssueAL2, P5600CTISTD]> {
 def P5600WriteAL2Div : SchedWriteRes<[P5600IssueAL2, P5600AL2Div]> {
   // Estimated worst case
   let Latency = 34;
-  let ResourceCycles = [1, 34];
+  let ReleaseAtCycles = [1, 34];
 }
 def P5600WriteAL2DivU : SchedWriteRes<[P5600IssueAL2, P5600AL2Div]> {
   // Estimated worst case
   let Latency = 34;
-  let ResourceCycles = [1, 34];
+  let ReleaseAtCycles = [1, 34];
 }
 def P5600WriteAL2Mul : SchedWriteRes<[P5600IssueAL2]> { let Latency = 3; }
 def P5600WriteAL2Mult: SchedWriteRes<[P5600IssueAL2]> { let Latency = 5; }
@@ -240,47 +241,47 @@ def P5600WriteFPUL_MADDSUB : SchedWriteRes<[P5600IssueFPUL]> { let Latency = 6; 
 def P5600WriteFPUDivI : SchedWriteRes<[P5600IssueFPUL, P5600FPUDivSqrt]> {
   // Best/Common/Worst case = 7 / 23 / 27
   let Latency = 23; // Using common case
-  let ResourceCycles = [ 1, 23 ];
+  let ReleaseAtCycles = [ 1, 23 ];
 }
 def P5600WriteFPUDivS : SchedWriteRes<[P5600IssueFPUL, P5600FPUDivSqrt]> {
   // Best/Common/Worst case = 7 / 23 / 27
   let Latency = 23; // Using common case
-  let ResourceCycles = [ 1, 23 ];
+  let ReleaseAtCycles = [ 1, 23 ];
 }
 def P5600WriteFPUDivD : SchedWriteRes<[P5600IssueFPUL, P5600FPUDivSqrt]> {
   // Best/Common/Worst case = 7 / 31 / 35
   let Latency = 31; // Using common case
-  let ResourceCycles = [ 1, 31 ];
+  let ReleaseAtCycles = [ 1, 31 ];
 }
 def P5600WriteFPURcpS : SchedWriteRes<[P5600IssueFPUL, P5600FPUDivSqrt]> {
   // Best/Common/Worst case = 7 / 19 / 23
   let Latency = 19; // Using common case
-  let ResourceCycles = [ 1, 19 ];
+  let ReleaseAtCycles = [ 1, 19 ];
 }
 def P5600WriteFPURcpD : SchedWriteRes<[P5600IssueFPUL, P5600FPUDivSqrt]> {
   // Best/Common/Worst case = 7 / 27 / 31
   let Latency = 27; // Using common case
-  let ResourceCycles = [ 1, 27 ];
+  let ReleaseAtCycles = [ 1, 27 ];
 }
 def P5600WriteFPURsqrtS : SchedWriteRes<[P5600IssueFPUL, P5600FPUDivSqrt]> {
   // Best/Common/Worst case = 7 / 27 / 27
   let Latency = 27; // Using common case
-  let ResourceCycles = [ 1, 27 ];
+  let ReleaseAtCycles = [ 1, 27 ];
 }
 def P5600WriteFPURsqrtD : SchedWriteRes<[P5600IssueFPUL, P5600FPUDivSqrt]> {
   // Best/Common/Worst case = 7 / 27 / 31
   let Latency = 27; // Using common case
-  let ResourceCycles = [ 1, 27 ];
+  let ReleaseAtCycles = [ 1, 27 ];
 }
 def P5600WriteFPUSqrtS : SchedWriteRes<[P5600IssueFPUL, P5600FPUDivSqrt]> {
   // Best/Common/Worst case = 7 / 27 / 31
   let Latency = 27; // Using common case
-  let ResourceCycles = [ 1, 27 ];
+  let ReleaseAtCycles = [ 1, 27 ];
 }
 def P5600WriteFPUSqrtD : SchedWriteRes<[P5600IssueFPUL, P5600FPUDivSqrt]> {
   // Best/Common/Worst case = 7 / 35 / 39
   let Latency = 35; // Using common case
-  let ResourceCycles = [ 1, 35 ];
+  let ReleaseAtCycles = [ 1, 35 ];
 }
 def P5600WriteMSAShortLogic : SchedWriteRes<[P5600IssueFPUS]>;
 def P5600WriteMSAShortInt : SchedWriteRes<[P5600IssueFPUS]> { let Latency = 2; }
@@ -448,8 +449,8 @@ def : InstRW<[P5600WriteMSAShortLogic], (instregex "^(NLOC|NLZC)_[BHWD]$")>;
 // cvt.ps.[sw], cvt.s.(pl|pu), c.<cc>.[ds], c.<cc>.ps, mul.[ds], mul.ps,
 // pl[lu].ps, sub.[ds], sub.ps, trunc.w.[ds], trunc.w.ps
 def : InstRW<[P5600WriteFPUL],
-             (instrs FADD_D32, FADD_D64, FADD_S, FMUL_D32, FMUL_D64, FMUL_S,
-              FSUB_D32, FSUB_D64, FSUB_S)>;
+             (instrs FADD_D32, FADD_D64, FADD_PS64, FADD_S, FMUL_D32, FMUL_D64,
+              FMUL_PS64, FMUL_S, FSUB_D32, FSUB_D64, FSUB_PS64, FSUB_S)>;
 def : InstRW<[P5600WriteFPUL], (instregex "^TRUNC_(L|W)_(S|D32|D64)$")>;
 def : InstRW<[P5600WriteFPUL],
              (instregex "^CVT_(S|D32|D64|L|W)_(S|D32|D64|L|W)$")>;
@@ -457,7 +458,7 @@ def : InstRW<[P5600WriteFPUL], (instrs CVT_PS_S64, CVT_S_PL64, CVT_S_PU64)>;
 def : InstRW<[P5600WriteFPUL], (instregex "^C_[A-Z]+_(S|D32|D64)$")>;
 def : InstRW<[P5600WriteFPUL], (instregex "^FCMP_(S32|D32|D64)$")>;
 def : InstRW<[P5600WriteFPUL], (instregex "^PseudoCVT_(S|D32|D64)_(L|W)$")>;
-def : InstRW<[P5600WriteFPUL], (instrs PLL_PS64, PLU_PS64)>;
+def : InstRW<[P5600WriteFPUL], (instrs PLL_PS64, PLU_PS64, PUL_PS64, PUU_PS64)>;
 
 // div.[ds], div.ps
 def : InstRW<[P5600WriteFPUDivS], (instrs FDIV_S)>;

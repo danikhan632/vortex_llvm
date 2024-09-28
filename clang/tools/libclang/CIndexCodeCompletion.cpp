@@ -11,8 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "CIndexer.h"
 #include "CIndexDiagnostic.h"
+#include "CIndexer.h"
 #include "CLog.h"
 #include "CXCursor.h"
 #include "CXSourceLocation.h"
@@ -25,6 +25,7 @@
 #include "clang/Basic/SourceManager.h"
 #include "clang/Frontend/ASTUnit.h"
 #include "clang/Frontend/CompilerInstance.h"
+#include "clang/Frontend/FrontendActions.h"
 #include "clang/Sema/CodeCompleteConsumer.h"
 #include "clang/Sema/Sema.h"
 #include "llvm/ADT/SmallString.h"
@@ -40,7 +41,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
-
 
 #ifdef UDP_CODE_COMPLETION_LOGGER
 #include "clang/Basic/Version.h"
@@ -254,7 +254,7 @@ struct AllocatedCXCodeCompleteResults : public CXCodeCompleteResults {
   SmallVector<StoredDiagnostic, 8> Diagnostics;
 
   /// Allocated API-exposed wrappters for Diagnostics.
-  SmallVector<CXStoredDiagnostic *, 8> DiagnosticsWrappers;
+  SmallVector<std::unique_ptr<CXStoredDiagnostic>, 8> DiagnosticsWrappers;
 
   IntrusiveRefCntPtr<DiagnosticOptions> DiagOpts;
   
@@ -371,7 +371,6 @@ AllocatedCXCodeCompleteResults::AllocatedCXCodeCompleteResults(
 }
   
 AllocatedCXCodeCompleteResults::~AllocatedCXCodeCompleteResults() {
-  llvm::DeleteContainerPointers(DiagnosticsWrappers);
   delete [] Results;
 
   for (unsigned I = 0, N = TemporaryBuffers.size(); I != N; ++I)
@@ -538,10 +537,13 @@ static unsigned long long getContextsForContextKind(
     case CodeCompletionContext::CCC_Other:
     case CodeCompletionContext::CCC_ObjCInterface:
     case CodeCompletionContext::CCC_ObjCImplementation:
+    case CodeCompletionContext::CCC_ObjCClassForwardDecl:
     case CodeCompletionContext::CCC_NewName:
     case CodeCompletionContext::CCC_MacroName:
     case CodeCompletionContext::CCC_PreprocessorExpression:
     case CodeCompletionContext::CCC_PreprocessorDirective:
+    case CodeCompletionContext::CCC_Attribute:
+    case CodeCompletionContext::CCC_TopLevelOrExpression:
     case CodeCompletionContext::CCC_TypeQualifiers: {
       //Only Clang results should be accepted, so we'll set all of the other
       //context bits to 0 (i.e. the empty set)
@@ -656,14 +658,15 @@ namespace {
     void ProcessOverloadCandidates(Sema &S, unsigned CurrentArg,
                                    OverloadCandidate *Candidates,
                                    unsigned NumCandidates,
-                                   SourceLocation OpenParLoc) override {
+                                   SourceLocation OpenParLoc,
+                                   bool Braced) override {
       StoredResults.reserve(StoredResults.size() + NumCandidates);
       for (unsigned I = 0; I != NumCandidates; ++I) {
-        CodeCompletionString *StoredCompletion
-          = Candidates[I].CreateSignatureString(CurrentArg, S, getAllocator(),
+        CodeCompletionString *StoredCompletion =
+            Candidates[I].CreateSignatureString(CurrentArg, S, getAllocator(),
                                                 getCodeCompletionTUInfo(),
-                                                includeBriefComments());
-        
+                                                includeBriefComments(), Braced);
+
         CXCompletionResult R;
         R.CursorKind = CXCursor_OverloadCandidate;
         R.CompletionString = StoredCompletion;
@@ -762,7 +765,8 @@ clang_codeCompleteAt_Impl(CXTranslationUnit TU, const char *complete_filename,
                     IncludeBriefComments, Capture,
                     CXXIdx->getPCHContainerOperations(), *Results->Diag,
                     Results->LangOpts, *Results->SourceMgr, *Results->FileMgr,
-                    Results->Diagnostics, Results->TemporaryBuffers);
+                    Results->Diagnostics, Results->TemporaryBuffers,
+                    /*SyntaxOnlyAction=*/nullptr);
 
   Results->DiagnosticsWrappers.resize(Results->Diagnostics.size());
 
@@ -868,7 +872,7 @@ CXCodeCompleteResults *clang_codeCompleteAt(CXTranslationUnit TU,
   auto CodeCompleteAtImpl = [=, &result]() {
     result = clang_codeCompleteAt_Impl(
         TU, complete_filename, complete_line, complete_column,
-        llvm::makeArrayRef(unsaved_files, num_unsaved_files), options);
+        llvm::ArrayRef(unsaved_files, num_unsaved_files), options);
   };
 
   llvm::CrashRecoveryContext CRC;
@@ -914,10 +918,12 @@ clang_codeCompleteGetDiagnostic(CXCodeCompleteResults *ResultsIn,
   if (!Results || Index >= Results->Diagnostics.size())
     return nullptr;
 
-  CXStoredDiagnostic *Diag = Results->DiagnosticsWrappers[Index];
+  CXStoredDiagnostic *Diag = Results->DiagnosticsWrappers[Index].get();
   if (!Diag)
-    Results->DiagnosticsWrappers[Index] = Diag =
-        new CXStoredDiagnostic(Results->Diagnostics[Index], Results->LangOpts);
+    Diag = (Results->DiagnosticsWrappers[Index] =
+                std::make_unique<CXStoredDiagnostic>(
+                    Results->Diagnostics[Index], Results->LangOpts))
+               .get();
   return Diag;
 }
 
@@ -1025,7 +1031,7 @@ namespace {
       if (XText.empty() || YText.empty())
         return !XText.empty();
             
-      int result = XText.compare_lower(YText);
+      int result = XText.compare_insensitive(YText);
       if (result < 0)
         return true;
       if (result > 0)

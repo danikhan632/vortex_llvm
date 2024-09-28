@@ -8,7 +8,6 @@
 #ifndef LLVM_MC_MCSYMBOLXCOFF_H
 #define LLVM_MC_MCSYMBOLXCOFF_H
 
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/BinaryFormat/XCOFF.h"
 #include "llvm/MC/MCSymbol.h"
@@ -18,53 +17,67 @@ namespace llvm {
 class MCSectionXCOFF;
 
 class MCSymbolXCOFF : public MCSymbol {
+
+  enum XCOFFSymbolFlags : uint16_t { SF_EHInfo = 0x0001 };
+
 public:
   MCSymbolXCOFF(const StringMapEntry<bool> *Name, bool isTemporary)
       : MCSymbol(SymbolKindXCOFF, Name, isTemporary) {}
 
   static bool classof(const MCSymbol *S) { return S->isXCOFF(); }
 
+  static StringRef getUnqualifiedName(StringRef Name) {
+    if (Name.back() == ']') {
+      StringRef Lhs, Rhs;
+      std::tie(Lhs, Rhs) = Name.rsplit('[');
+      assert(!Rhs.empty() && "Invalid SMC format in XCOFF symbol.");
+      return Lhs;
+    }
+    return Name;
+  }
+
   void setStorageClass(XCOFF::StorageClass SC) {
-    assert((!StorageClass.hasValue() || StorageClass.getValue() == SC) &&
-           "Redefining StorageClass of XCOFF MCSymbol.");
     StorageClass = SC;
   };
 
   XCOFF::StorageClass getStorageClass() const {
-    assert(StorageClass.hasValue() &&
-           "StorageClass not set on XCOFF MCSymbol.");
-    return StorageClass.getValue();
+    assert(StorageClass && "StorageClass not set on XCOFF MCSymbol.");
+    return *StorageClass;
   }
 
-  void setContainingCsect(MCSectionXCOFF *C) {
-    assert((!ContainingCsect || ContainingCsect == C) &&
-           "Trying to set a containing csect that doesn't match the one that"
-           "this symbol is already mapped to.");
-    ContainingCsect = C;
+  StringRef getUnqualifiedName() const { return getUnqualifiedName(getName()); }
+
+  MCSectionXCOFF *getRepresentedCsect() const;
+
+  void setRepresentedCsect(MCSectionXCOFF *C);
+
+  void setVisibilityType(XCOFF::VisibilityType SVT) { VisibilityType = SVT; };
+
+  XCOFF::VisibilityType getVisibilityType() const { return VisibilityType; }
+
+  bool hasRename() const { return HasRename; }
+
+  void setSymbolTableName(StringRef STN) {
+    SymbolTableName = STN;
+    HasRename = true;
   }
 
-  MCSectionXCOFF *getContainingCsect() const {
-    assert(ContainingCsect &&
-           "Trying to get containing csect but none was set.");
-    return ContainingCsect;
+  StringRef getSymbolTableName() const {
+    if (hasRename())
+      return SymbolTableName;
+    return getUnqualifiedName();
   }
 
-  bool hasContainingCsect() const { return ContainingCsect != nullptr; }
+  bool isEHInfo() const { return getFlags() & SF_EHInfo; }
 
-  StringRef getUnqualifiedName() const {
-    const StringRef name = getName();
-    if (name.back() == ']') {
-      StringRef lhs, rhs;
-      std::tie(lhs, rhs) = name.rsplit('[');
-      assert(!rhs.empty() && "Invalid SMC format in XCOFF symbol.");
-      return lhs;
-    }
-    return name;
-  }
+  void setEHInfo() const { modifyFlags(SF_EHInfo, SF_EHInfo); }
 
 private:
-  Optional<XCOFF::StorageClass> StorageClass;
-  MCSectionXCOFF *ContainingCsect = nullptr;
+  std::optional<XCOFF::StorageClass> StorageClass;
+  MCSectionXCOFF *RepresentedCsect = nullptr;
+  XCOFF::VisibilityType VisibilityType = XCOFF::SYM_V_UNSPECIFIED;
+  StringRef SymbolTableName;
+  bool HasRename = false;
 };
 
 } // end namespace llvm

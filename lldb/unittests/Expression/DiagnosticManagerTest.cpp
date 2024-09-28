@@ -1,4 +1,4 @@
-//===-- DiagnosticManagerTest.cpp --------------------------------*- C++-*-===//
+//===-- DiagnosticManagerTest.cpp -----------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -74,6 +74,9 @@ TEST(DiagnosticManagerTest, HasFixits) {
 
 TEST(DiagnosticManagerTest, GetStringNoDiags) {
   DiagnosticManager mgr;
+  EXPECT_EQ("", mgr.GetString());
+  std::unique_ptr<Diagnostic> empty;
+  mgr.AddDiagnostic(std::move(empty));
   EXPECT_EQ("", mgr.GetString());
 }
 

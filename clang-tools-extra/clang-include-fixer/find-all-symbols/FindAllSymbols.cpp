@@ -16,8 +16,8 @@
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 #include "clang/ASTMatchers/ASTMatchers.h"
 #include "clang/Tooling/Tooling.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/Support/FileSystem.h"
+#include <optional>
 
 using namespace clang::ast_matchers;
 
@@ -69,7 +69,7 @@ std::vector<SymbolInfo::Context> GetContexts(const NamedDecl *ND) {
   return Contexts;
 }
 
-llvm::Optional<SymbolInfo>
+std::optional<SymbolInfo>
 CreateSymbolInfo(const NamedDecl *ND, const SourceManager &SM,
                  const HeaderMapCollector *Collector) {
   SymbolInfo::SymbolKind Type;
@@ -85,7 +85,7 @@ CreateSymbolInfo(const NamedDecl *ND, const SourceManager &SM,
     Type = SymbolInfo::SymbolKind::EnumDecl;
     // Ignore anonymous enum declarations.
     if (ND->getName().empty())
-      return llvm::None;
+      return std::nullopt;
   } else {
     assert(llvm::isa<RecordDecl>(ND) &&
            "Matched decl must be one of VarDecl, "
@@ -93,20 +93,21 @@ CreateSymbolInfo(const NamedDecl *ND, const SourceManager &SM,
            "EnumDecl and RecordDecl!");
     // C-style record decl can have empty name, e.g "struct { ... } var;".
     if (ND->getName().empty())
-      return llvm::None;
+      return std::nullopt;
     Type = SymbolInfo::SymbolKind::Class;
   }
 
   SourceLocation Loc = SM.getExpansionLoc(ND->getLocation());
   if (!Loc.isValid()) {
-    llvm::errs() << "Declaration " << ND->getNameAsString() << "("
+    llvm::errs() << "Declaration " << ND->getDeclName() << "("
                  << ND->getDeclKindName()
                  << ") has invalid declaration location.";
-    return llvm::None;
+    return std::nullopt;
   }
 
   std::string FilePath = getIncludePath(SM, Loc, Collector);
-  if (FilePath.empty()) return llvm::None;
+  if (FilePath.empty())
+    return std::nullopt;
 
   return SymbolInfo(ND->getNameAsString(), Type, FilePath, GetContexts(ND));
 }
@@ -128,7 +129,7 @@ void FindAllSymbols::registerMatchers(MatchFinder *MatchFinder) {
   auto HasNSOrTUCtxMatcher =
       hasDeclContext(anyOf(namespaceDecl(), translationUnitDecl()));
 
-  // We need seperate rules for C record types and C++ record types since some
+  // We need separate rules for C record types and C++ record types since some
   // template related matchers are inapplicable on C record declarations.
   //
   // Matchers specific to C++ code.
@@ -215,7 +216,8 @@ void FindAllSymbols::registerMatchers(MatchFinder *MatchFinder) {
   // Uses of most types: just look at what the typeLoc refers to.
   MatchFinder->addMatcher(
       typeLoc(isExpansionInMainFile(),
-              loc(qualType(hasDeclaration(Types.bind("use"))))),
+              loc(qualType(allOf(unless(elaboratedType()),
+                                 hasDeclaration(Types.bind("use")))))),
       this);
   // Uses of typedefs: these are often transparent to hasDeclaration, so we need
   // to handle them explicitly.
@@ -251,7 +253,8 @@ void FindAllSymbols::run(const MatchFinder::MatchResult &Result) {
 
   const SourceManager *SM = Result.SourceManager;
   if (auto Symbol = CreateSymbolInfo(ND, *SM, Collector)) {
-    Filename = SM->getFileEntryForID(SM->getMainFileID())->getName();
+    Filename =
+        std::string(SM->getFileEntryRefForID(SM->getMainFileID())->getName());
     FileSymbols[*Symbol] += Signals;
   }
 }

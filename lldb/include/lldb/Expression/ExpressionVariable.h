@@ -6,10 +6,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_ExpressionVariable_h_
-#define liblldb_ExpressionVariable_h_
+#ifndef LLDB_EXPRESSION_EXPRESSIONVARIABLE_H
+#define LLDB_EXPRESSION_EXPRESSIONVARIABLE_H
 
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "llvm/ADT/DenseMap.h"
@@ -17,22 +18,22 @@
 #include "lldb/Core/ValueObject.h"
 #include "lldb/Utility/ConstString.h"
 #include "lldb/lldb-public.h"
+#include "llvm/Support/ExtensibleRTTI.h"
 
 namespace lldb_private {
 
 class ExpressionVariable
-    : public std::enable_shared_from_this<ExpressionVariable> {
+    : public std::enable_shared_from_this<ExpressionVariable>,
+      public llvm::RTTIExtends<ExpressionVariable, llvm::RTTIRoot> {
 public:
-  // See TypeSystem.h for how to add subclasses to this.
-  enum LLVMCastKind { eKindClang, eKindSwift, eKindGo, kNumKinds };
+  /// LLVM RTTI support
+  static char ID;
 
-  LLVMCastKind getKind() const { return m_kind; }
+  ExpressionVariable();
 
-  ExpressionVariable(LLVMCastKind kind) : m_flags(0), m_kind(kind) {}
+  virtual ~ExpressionVariable() = default;
 
-  virtual ~ExpressionVariable();
-
-  size_t GetByteSize() { return m_frozen_sp->GetByteSize(); }
+  std::optional<uint64_t> GetByteSize() { return m_frozen_sp->GetByteSize(); }
 
   ConstString GetName() { return m_frozen_sp->GetName(); }
 
@@ -48,7 +49,7 @@ public:
 
   void SetRegisterInfo(const RegisterInfo *reg_info) {
     return m_frozen_sp->GetValue().SetContext(
-        Value::eContextTypeRegisterInfo, const_cast<RegisterInfo *>(reg_info));
+        Value::ContextType::RegisterInfo, const_cast<RegisterInfo *>(reg_info));
   }
 
   CompilerType GetCompilerType() { return m_frozen_sp->GetCompilerType(); }
@@ -109,7 +110,6 @@ public:
   // these should be private
   lldb::ValueObjectSP m_frozen_sp;
   lldb::ValueObjectSP m_live_sp;
-  LLVMCastKind m_kind;
 };
 
 /// \class ExpressionVariableList ExpressionVariable.h
@@ -200,14 +200,14 @@ private:
   std::vector<lldb::ExpressionVariableSP> m_variables;
 };
 
-class PersistentExpressionState : public ExpressionVariableList {
+class PersistentExpressionState
+    : public ExpressionVariableList,
+      public llvm::RTTIExtends<PersistentExpressionState, llvm::RTTIRoot> {
 public:
-  // See TypeSystem.h for how to add subclasses to this.
-  enum LLVMCastKind { eKindClang, eKindSwift, eKindGo, kNumKinds };
+  /// LLVM RTTI support
+  static char ID;
 
-  LLVMCastKind getKind() const { return m_kind; }
-
-  PersistentExpressionState(LLVMCastKind kind) : m_kind(kind) {}
+  PersistentExpressionState();
 
   virtual ~PersistentExpressionState();
 
@@ -221,25 +221,23 @@ public:
                            uint32_t addr_byte_size) = 0;
 
   /// Return a new persistent variable name with the specified prefix.
-  ConstString GetNextPersistentVariableName(Target &target,
-                                            llvm::StringRef prefix);
-
-  virtual llvm::StringRef
-  GetPersistentVariablePrefix(bool is_error = false) const = 0;
+  virtual ConstString GetNextPersistentVariableName(bool is_error = false) = 0;
 
   virtual void
   RemovePersistentVariable(lldb::ExpressionVariableSP variable) = 0;
 
-  virtual llvm::Optional<CompilerType>
+  virtual std::optional<CompilerType>
   GetCompilerTypeFromPersistentDecl(ConstString type_name) = 0;
 
   virtual lldb::addr_t LookupSymbol(ConstString name);
 
   void RegisterExecutionUnit(lldb::IRExecutionUnitSP &execution_unit_sp);
 
-private:
-  LLVMCastKind m_kind;
+protected:
+  virtual llvm::StringRef
+  GetPersistentVariablePrefix(bool is_error = false) const = 0;
 
+private:
   typedef std::set<lldb::IRExecutionUnitSP> ExecutionUnitSet;
   ExecutionUnitSet
       m_execution_units; ///< The execution units that contain valuable symbols.
@@ -251,4 +249,4 @@ private:
 
 } // namespace lldb_private
 
-#endif // liblldb_ExpressionVariable_h_
+#endif // LLDB_EXPRESSION_EXPRESSIONVARIABLE_H

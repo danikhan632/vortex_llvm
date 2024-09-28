@@ -1,5 +1,10 @@
-// RUN: %clang_cc1 -fopenmp -x c++ -triple powerpc64le-unknown-unknown -fopenmp-targets=nvptx64-nvidia-cuda -emit-llvm-bc %s -o %t-ppc-host.bc -fexceptions -fcxx-exceptions
-// RUN: %clang_cc1 -verify -fopenmp -x c++ -triple nvptx64-unknown-unknown -fopenmp-targets=nvptx64-nvidia-cuda -emit-llvm %s -fopenmp-is-device -fopenmp-host-ir-file-path %t-ppc-host.bc -o - -fexceptions -fcxx-exceptions -ferror-limit 100
+// RUN: %clang_cc1 -fopenmp -x c++ -triple powerpc64le-unknown-unknown \
+// RUN:   -verify=host -fopenmp-targets=nvptx64-nvidia-cuda -emit-llvm-bc \
+// RUN:   %s -o %t-ppc-host.bc -fexceptions -fcxx-exceptions
+// RUN: %clang_cc1 -verify -fopenmp -x c++ -triple nvptx64-unknown-unknown \
+// RUN:   -fopenmp-targets=nvptx64-nvidia-cuda -emit-llvm %s \
+// RUN:   -fopenmp-is-target-device -fopenmp-host-ir-file-path %t-ppc-host.bc -o - \
+// RUN:   -fexceptions -fcxx-exceptions -ferror-limit 100
 
 #ifndef HEADER
 #define HEADER
@@ -29,7 +34,7 @@ T FA() {
 #pragma omp declare target
 struct S {
   int a;
-  S(int a) : a(a) { throw 1; } // expected-error {{cannot use 'throw' with exceptions disabled}}
+  S(int a) : a(a) { throw 1; } // expected-warning {{target 'nvptx64-unknown-unknown' does not support exception handling; 'throw' is assumed to be never reached}}
 };
 
 int foo() { return 0; }
@@ -38,7 +43,7 @@ int d;
 #pragma omp end declare target
 int c;
 
-int bar() { return 1 + foo() + bar() + baz1() + baz2(); }
+int bar() { return 1 + foo() + bar() + baz1() + baz2(); } // expected-note {{called by 'bar'}}
 
 int maini1() {
   int a;
@@ -47,11 +52,12 @@ int maini1() {
 #pragma omp target map(tofrom \
                        : a, b)
   {
+    // expected-note@+1 {{called by 'maini1'}}
     S s(a);
     static long aaa = 23;
-    a = foo() + bar() + b + c + d + aa + aaa + FA<int>();
+    a = foo() + bar() + b + c + d + aa + aaa + FA<int>(); // expected-note{{called by 'maini1'}}
     if (!a)
-      throw "Error"; // expected-error {{cannot use 'throw' with exceptions disabled}}
+      throw "Error"; // expected-warning {{target 'nvptx64-unknown-unknown' does not support exception handling; 'throw' is assumed to be never reached}}
   }
   } catch(...) {
   }
@@ -61,14 +67,14 @@ int maini1() {
 int baz3() { return 2 + baz2(); }
 int baz2() {
 #pragma omp target
-  try { // expected-error {{cannot use 'try' with exceptions disabled}}
+  try { // expected-warning {{target 'nvptx64-unknown-unknown' does not support exception handling; 'catch' block is ignored}}
   ++c;
   } catch (...) {
   }
   return 2 + baz3();
 }
 
-int baz1() { throw 1; } // expected-error {{cannot use 'throw' with exceptions disabled}}
+int baz1() { throw 1; } // expected-warning {{target 'nvptx64-unknown-unknown' does not support exception handling; 'throw' is assumed to be never reached}}
 
 int foobar1();
 int foobar2();
@@ -79,6 +85,19 @@ int (*B)() = &foobar2;
 #pragma omp end declare target
 
 int foobar1() { throw 1; }
-int foobar2() { throw 1; } // expected-error {{cannot use 'throw' with exceptions disabled}}
+int foobar2() { throw 1; } // expected-warning {{target 'nvptx64-unknown-unknown' does not support exception handling; 'throw' is assumed to be never reached}}
+
+
+int foobar3();
+int (*C)() = &foobar3; // expected-warning {{declaration is not declared in any declare target region}}
+                       // host-warning@-1 {{declaration is not declared in any declare target region}}
+#pragma omp declare target
+int (*D)() = C; // expected-note {{used here}}
+                // host-note@-1 {{used here}}
+#pragma omp end declare target
+int foobar3() { throw 1; } // expected-warning {{target 'nvptx64-unknown-unknown' does not support exception handling; 'throw' is assumed to be never reached}}
+
+// Check no infinite recursion in deferred diagnostic emitter.
+long E = (long)&E;
 
 #endif // HEADER

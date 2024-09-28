@@ -1,6 +1,6 @@
 //===- PassStatistics.cpp -------------------------------------------------===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -21,23 +21,22 @@ namespace {
 /// Information pertaining to a specific statistic.
 struct Statistic {
   const char *name, *desc;
-  unsigned value;
+  uint64_t value;
 };
-} // end anonymous namespace
+} // namespace
 
 /// Utility to print a pass entry in the statistics output.
 static void printPassEntry(raw_ostream &os, unsigned indent, StringRef pass,
-                           MutableArrayRef<Statistic> stats = llvm::None) {
+                           MutableArrayRef<Statistic> stats = std::nullopt) {
   os.indent(indent) << pass << "\n";
   if (stats.empty())
     return;
 
   // Make sure to sort the statistics by name.
-  llvm::array_pod_sort(stats.begin(), stats.end(),
-                       [](const auto *lhs, const auto *rhs) {
-                         return llvm::array_pod_sort_comparator<const char *>(
-                             &lhs->name, &rhs->name);
-                       });
+  llvm::array_pod_sort(
+      stats.begin(), stats.end(), [](const auto *lhs, const auto *rhs) {
+        return StringRef{lhs->name}.compare(StringRef{rhs->name});
+      });
 
   // Collect the largest name and value length from each of the statistics.
   size_t largestName = 0, largestValue = 0;
@@ -60,10 +59,11 @@ static void printPassEntry(raw_ostream &os, unsigned indent, StringRef pass,
 static void printResultsAsList(raw_ostream &os, OpPassManager &pm) {
   llvm::StringMap<std::vector<Statistic>> mergedStats;
   std::function<void(Pass *)> addStats = [&](Pass *pass) {
-    auto *adaptor = getAdaptorPassBase(pass);
+    auto *adaptor = dyn_cast<OpToOpPassAdaptor>(pass);
 
     // If this is not an adaptor, add the stats to the list if there are any.
     if (!adaptor) {
+#if LLVM_ENABLE_STATS
       auto statistics = pass->getStatistics();
       if (statistics.empty())
         return;
@@ -73,9 +73,10 @@ static void printResultsAsList(raw_ostream &os, OpPassManager &pm) {
         for (Pass::Statistic *it : pass->getStatistics())
           passEntry.push_back({it->getName(), it->getDesc(), it->getValue()});
       } else {
-        for (auto &it : llvm::enumerate(pass->getStatistics()))
-          passEntry[it.index()].value += it.value()->getValue();
+        for (auto [idx, statistic] : llvm::enumerate(pass->getStatistics()))
+          passEntry[idx].value += statistic->getValue();
       }
+#endif
       return;
     }
 
@@ -88,36 +89,37 @@ static void printResultsAsList(raw_ostream &os, OpPassManager &pm) {
     addStats(&pass);
 
   // Sort the statistics by pass name and then by record name.
-  std::vector<std::pair<StringRef, std::vector<Statistic>>> passAndStatistics;
-  for (auto &passIt : mergedStats)
-    passAndStatistics.push_back({passIt.first(), std::move(passIt.second)});
-  llvm::sort(passAndStatistics, [](const auto &lhs, const auto &rhs) {
-    return lhs.first.compare(rhs.first) < 0;
-  });
+  auto passAndStatistics =
+      llvm::to_vector<16>(llvm::make_pointer_range(mergedStats));
+  llvm::array_pod_sort(passAndStatistics.begin(), passAndStatistics.end(),
+                       [](const decltype(passAndStatistics)::value_type *lhs,
+                          const decltype(passAndStatistics)::value_type *rhs) {
+                         return (*lhs)->getKey().compare((*rhs)->getKey());
+                       });
 
   // Print the timing information sequentially.
   for (auto &statData : passAndStatistics)
-    printPassEntry(os, /*indent=*/2, statData.first, statData.second);
+    printPassEntry(os, /*indent=*/2, statData->first(), statData->second);
 }
 
 /// Print the results in pipeline mode that mirrors the internal pass manager
 /// structure.
 static void printResultsAsPipeline(raw_ostream &os, OpPassManager &pm) {
+#if LLVM_ENABLE_STATS
   std::function<void(unsigned, Pass *)> printPass = [&](unsigned indent,
                                                         Pass *pass) {
-    // Handle the case of an adaptor pass.
-    if (auto *adaptor = getAdaptorPassBase(pass)) {
+    if (auto *adaptor = dyn_cast<OpToOpPassAdaptor>(pass)) {
       // If this adaptor has more than one internal pipeline, print an entry for
       // it.
       auto mgrs = adaptor->getPassManagers();
       if (mgrs.size() > 1) {
-        printPassEntry(os, indent, adaptor->getName());
+        printPassEntry(os, indent, adaptor->getAdaptorName());
         indent += 2;
       }
 
       // Print each of the children passes.
       for (OpPassManager &mgr : mgrs) {
-        auto name = ("'" + mgr.getOpName().getStringRef() + "' Pipeline").str();
+        auto name = ("'" + mgr.getOpAnchorName() + "' Pipeline").str();
         printPassEntry(os, indent, name);
         for (Pass &pass : mgr.getPasses())
           printPass(indent + 2, &pass);
@@ -133,6 +135,7 @@ static void printResultsAsPipeline(raw_ostream &os, OpPassManager &pm) {
   };
   for (Pass &pass : pm.getPasses())
     printPass(/*indent=*/0, &pass);
+#endif
 }
 
 static void printStatistics(OpPassManager &pm, PassDisplayMode displayMode) {
@@ -195,8 +198,8 @@ void OpPassManager::mergeStatisticsInto(OpPassManager &other) {
     Pass &pass = std::get<0>(passPair), &otherPass = std::get<1>(passPair);
 
     // If this is an adaptor, then recursively merge the pass managers.
-    if (auto *adaptorPass = getAdaptorPassBase(&pass)) {
-      auto *otherAdaptorPass = getAdaptorPassBase(&otherPass);
+    if (auto *adaptorPass = dyn_cast<OpToOpPassAdaptor>(&pass)) {
+      auto *otherAdaptorPass = cast<OpToOpPassAdaptor>(&otherPass);
       for (auto mgrs : llvm::zip(adaptorPass->getPassManagers(),
                                  otherAdaptorPass->getPassManagers()))
         std::get<0>(mgrs).mergeStatisticsInto(std::get<1>(mgrs));
@@ -217,17 +220,17 @@ void OpPassManager::mergeStatisticsInto(OpPassManager &other) {
 /// consumption(e.g. dumping).
 static void prepareStatistics(OpPassManager &pm) {
   for (Pass &pass : pm.getPasses()) {
-    OpToOpPassAdaptorBase *adaptor = getAdaptorPassBase(&pass);
+    OpToOpPassAdaptor *adaptor = dyn_cast<OpToOpPassAdaptor>(&pass);
     if (!adaptor)
       continue;
     MutableArrayRef<OpPassManager> nestedPms = adaptor->getPassManagers();
 
-    // If this is a parallel adaptor, merge the statistics from the async
-    // pass managers into the main nested pass managers.
-    if (auto *parallelAdaptor = dyn_cast<OpToOpPassAdaptorParallel>(&pass)) {
-      for (auto &asyncPM : parallelAdaptor->getParallelPassManagers()) {
-        for (unsigned i = 0, e = asyncPM.size(); i != e; ++i)
-          asyncPM[i].mergeStatisticsInto(nestedPms[i]);
+    // Merge the statistics from the async pass managers into the main nested
+    // pass managers.  Prepare recursively before merging.
+    for (auto &asyncPM : adaptor->getParallelPassManagers()) {
+      for (unsigned i = 0, e = asyncPM.size(); i != e; ++i) {
+        prepareStatistics(asyncPM[i]);
+        asyncPM[i].mergeStatisticsInto(nestedPms[i]);
       }
     }
 

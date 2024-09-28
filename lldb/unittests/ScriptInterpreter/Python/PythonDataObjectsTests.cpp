@@ -1,4 +1,4 @@
-//===-- PythonDataObjectsTests.cpp ------------------------------*- C++ -*-===//
+//===-- PythonDataObjectsTests.cpp ----------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -19,9 +19,10 @@
 
 #include "PythonTestSuite.h"
 
+#include <variant>
+
 using namespace lldb_private;
 using namespace lldb_private::python;
-using llvm::Error;
 using llvm::Expected;
 
 class PythonDataObjectsTest : public PythonTestSuite {
@@ -123,13 +124,11 @@ TEST_F(PythonDataObjectsTest, TestInstanceNameResolutionNoDot) {
   EXPECT_TRUE(major_version_field.IsAllocated());
   EXPECT_TRUE(minor_version_field.IsAllocated());
 
-  PythonInteger major_version_value =
-      major_version_field.AsType<PythonInteger>();
-  PythonInteger minor_version_value =
-      minor_version_field.AsType<PythonInteger>();
+  auto major_version_value = As<long long>(major_version_field);
+  auto minor_version_value = As<long long>(minor_version_field);
 
-  EXPECT_EQ(PY_MAJOR_VERSION, major_version_value.GetInteger());
-  EXPECT_EQ(PY_MINOR_VERSION, minor_version_value.GetInteger());
+  EXPECT_THAT_EXPECTED(major_version_value, llvm::HasValue(PY_MAJOR_VERSION));
+  EXPECT_THAT_EXPECTED(minor_version_value, llvm::HasValue(PY_MINOR_VERSION));
 }
 
 TEST_F(PythonDataObjectsTest, TestGlobalNameResolutionWithDot) {
@@ -137,16 +136,14 @@ TEST_F(PythonDataObjectsTest, TestGlobalNameResolutionWithDot) {
   EXPECT_TRUE(sys_path.IsAllocated());
   EXPECT_TRUE(PythonList::Check(sys_path.get()));
 
-  PythonInteger version_major =
-      m_main_module.ResolveName("sys.version_info.major")
-          .AsType<PythonInteger>();
-  PythonInteger version_minor =
-      m_main_module.ResolveName("sys.version_info.minor")
-          .AsType<PythonInteger>();
-  EXPECT_TRUE(version_major.IsAllocated());
-  EXPECT_TRUE(version_minor.IsAllocated());
-  EXPECT_EQ(PY_MAJOR_VERSION, version_major.GetInteger());
-  EXPECT_EQ(PY_MINOR_VERSION, version_minor.GetInteger());
+  auto version_major =
+      As<long long>(m_main_module.ResolveName("sys.version_info.major"));
+
+  auto version_minor =
+      As<long long>(m_main_module.ResolveName("sys.version_info.minor"));
+
+  EXPECT_THAT_EXPECTED(version_major, llvm::HasValue(PY_MAJOR_VERSION));
+  EXPECT_THAT_EXPECTED(version_minor, llvm::HasValue(PY_MINOR_VERSION));
 }
 
 TEST_F(PythonDataObjectsTest, TestDictionaryResolutionWithDot) {
@@ -155,29 +152,18 @@ TEST_F(PythonDataObjectsTest, TestDictionaryResolutionWithDot) {
   dict.SetItemForKey(PythonString("sys"), m_sys_module);
 
   // Now use that dictionary to resolve `sys.version_info.major`
-  PythonInteger version_major =
-      PythonObject::ResolveNameWithDictionary("sys.version_info.major", dict)
-          .AsType<PythonInteger>();
-  PythonInteger version_minor =
-      PythonObject::ResolveNameWithDictionary("sys.version_info.minor", dict)
-          .AsType<PythonInteger>();
-  EXPECT_EQ(PY_MAJOR_VERSION, version_major.GetInteger());
-  EXPECT_EQ(PY_MINOR_VERSION, version_minor.GetInteger());
+  auto version_major = As<long long>(
+      PythonObject::ResolveNameWithDictionary("sys.version_info.major", dict));
+
+  auto version_minor = As<long long>(
+      PythonObject::ResolveNameWithDictionary("sys.version_info.minor", dict));
+
+  EXPECT_THAT_EXPECTED(version_major, llvm::HasValue(PY_MAJOR_VERSION));
+  EXPECT_THAT_EXPECTED(version_minor, llvm::HasValue(PY_MINOR_VERSION));
 }
 
 TEST_F(PythonDataObjectsTest, TestPythonInteger) {
   // Test that integers behave correctly when wrapped by a PythonInteger.
-
-#if PY_MAJOR_VERSION < 3
-  // Verify that `PythonInt` works correctly when given a PyInt object.
-  // Note that PyInt doesn't exist in Python 3.x, so this is only for 2.x
-  PyObject *py_int = PyInt_FromLong(12);
-  EXPECT_TRUE(PythonInteger::Check(py_int));
-  PythonInteger python_int(PyRefType::Owned, py_int);
-
-  EXPECT_EQ(PyObjectType::Integer, python_int.GetObjectType());
-  EXPECT_EQ(12, python_int.GetInteger());
-#endif
 
   // Verify that `PythonInteger` works correctly when given a PyLong object.
   PyObject *py_long = PyLong_FromLong(12);
@@ -187,12 +173,14 @@ TEST_F(PythonDataObjectsTest, TestPythonInteger) {
 
   // Verify that you can reset the value and that it is reflected properly.
   python_long.SetInteger(40);
-  EXPECT_EQ(40, python_long.GetInteger());
+  auto e = As<long long>(python_long);
+  EXPECT_THAT_EXPECTED(e, llvm::HasValue(40));
 
   // Test that creating a `PythonInteger` object works correctly with the
   // int constructor.
   PythonInteger constructed_int(7);
-  EXPECT_EQ(7, constructed_int.GetInteger());
+  auto value = As<long long>(constructed_int);
+  EXPECT_THAT_EXPECTED(value, llvm::HasValue(7));
 }
 
 TEST_F(PythonDataObjectsTest, TestPythonBoolean) {
@@ -226,13 +214,8 @@ TEST_F(PythonDataObjectsTest, TestPythonBytes) {
   EXPECT_TRUE(PythonBytes::Check(py_bytes));
   PythonBytes python_bytes(PyRefType::Owned, py_bytes);
 
-#if PY_MAJOR_VERSION < 3
-  EXPECT_TRUE(PythonString::Check(py_bytes));
-  EXPECT_EQ(PyObjectType::String, python_bytes.GetObjectType());
-#else
   EXPECT_FALSE(PythonString::Check(py_bytes));
   EXPECT_EQ(PyObjectType::Bytes, python_bytes.GetObjectType());
-#endif
 
   llvm::ArrayRef<uint8_t> bytes = python_bytes.GetBytes();
   EXPECT_EQ(bytes.size(), strlen(test_bytes));
@@ -259,23 +242,12 @@ TEST_F(PythonDataObjectsTest, TestPythonString) {
   static const char *test_string = "PythonDataObjectsTest::TestPythonString1";
   static const char *test_string2 = "PythonDataObjectsTest::TestPythonString2";
 
-#if PY_MAJOR_VERSION < 3
-  // Verify that `PythonString` works correctly when given a PyString object.
-  // Note that PyString doesn't exist in Python 3.x, so this is only for 2.x
-  PyObject *py_string = PyString_FromString(test_string);
-  EXPECT_TRUE(PythonString::Check(py_string));
-  PythonString python_string(PyRefType::Owned, py_string);
-
-  EXPECT_EQ(PyObjectType::String, python_string.GetObjectType());
-  EXPECT_STREQ(test_string, python_string.GetString().data());
-#else
   // Verify that `PythonString` works correctly when given a PyUnicode object.
   PyObject *py_unicode = PyUnicode_FromString(test_string);
   EXPECT_TRUE(PythonString::Check(py_unicode));
   PythonString python_unicode(PyRefType::Owned, py_unicode);
   EXPECT_EQ(PyObjectType::String, python_unicode.GetObjectType());
   EXPECT_STREQ(test_string, python_unicode.GetString().data());
-#endif
 
   // Test that creating a `PythonString` object works correctly with the
   // string constructor
@@ -295,10 +267,23 @@ TEST_F(PythonDataObjectsTest, TestPythonStringToStr) {
 
 TEST_F(PythonDataObjectsTest, TestPythonIntegerToStr) {}
 
-TEST_F(PythonDataObjectsTest, TestPythonIntegerToStructuredInteger) {
+TEST_F(PythonDataObjectsTest, TestPythonIntegerToStructuredUnsignedInteger) {
   PythonInteger integer(7);
   auto int_sp = integer.CreateStructuredInteger();
-  EXPECT_EQ(7U, int_sp->GetValue());
+  EXPECT_TRUE(
+      std::holds_alternative<StructuredData::UnsignedIntegerSP>(int_sp));
+  StructuredData::UnsignedIntegerSP uint_sp =
+      std::get<StructuredData::UnsignedIntegerSP>(int_sp);
+  EXPECT_EQ(7U, uint_sp->GetValue());
+}
+
+TEST_F(PythonDataObjectsTest, TestPythonIntegerToStructuredSignedInteger) {
+  PythonInteger integer(-42);
+  auto int_sp = integer.CreateStructuredInteger();
+  EXPECT_TRUE(std::holds_alternative<StructuredData::SignedIntegerSP>(int_sp));
+  StructuredData::SignedIntegerSP sint_sp =
+      std::get<StructuredData::SignedIntegerSP>(int_sp);
+  EXPECT_EQ(-42, sint_sp->GetValue());
 }
 
 TEST_F(PythonDataObjectsTest, TestPythonStringToStructuredString) {
@@ -339,7 +324,8 @@ TEST_F(PythonDataObjectsTest, TestPythonListValueEquality) {
   PythonInteger chk_int(PyRefType::Borrowed, chk_value1.get());
   PythonString chk_str(PyRefType::Borrowed, chk_value2.get());
 
-  EXPECT_EQ(long_value0, chk_int.GetInteger());
+  auto chkint = As<long long>(chk_value1);
+  ASSERT_THAT_EXPECTED(chkint, llvm::HasValue(long_value0));
   EXPECT_EQ(string_value1, chk_str.GetString());
 }
 
@@ -367,7 +353,8 @@ TEST_F(PythonDataObjectsTest, TestPythonListManipulation) {
   PythonInteger chk_int(PyRefType::Borrowed, chk_value1.get());
   PythonString chk_str(PyRefType::Borrowed, chk_value2.get());
 
-  EXPECT_EQ(long_value0, chk_int.GetInteger());
+  auto e = As<long long>(chk_int);
+  EXPECT_THAT_EXPECTED(e, llvm::HasValue(long_value0));
   EXPECT_EQ(string_value1, chk_str.GetString());
 }
 
@@ -385,7 +372,7 @@ TEST_F(PythonDataObjectsTest, TestPythonListToStructuredList) {
   EXPECT_EQ(lldb::eStructuredDataTypeString,
             array_sp->GetItemAtIndex(1)->GetType());
 
-  auto int_sp = array_sp->GetItemAtIndex(0)->GetAsInteger();
+  auto int_sp = array_sp->GetItemAtIndex(0)->GetAsUnsignedInteger();
   auto string_sp = array_sp->GetItemAtIndex(1)->GetAsString();
 
   EXPECT_EQ(long_value0, long(int_sp->GetValue()));
@@ -487,10 +474,10 @@ TEST_F(PythonDataObjectsTest, TestPythonDictionaryValueEquality) {
   EXPECT_TRUE(PythonInteger::Check(chk_value1.get()));
   EXPECT_TRUE(PythonString::Check(chk_value2.get()));
 
-  PythonInteger chk_int(PyRefType::Borrowed, chk_value1.get());
   PythonString chk_str(PyRefType::Borrowed, chk_value2.get());
+  auto chkint = As<long long>(chk_value1);
 
-  EXPECT_EQ(value_0, chk_int.GetInteger());
+  EXPECT_THAT_EXPECTED(chkint, llvm::HasValue(value_0));
   EXPECT_EQ(value_1, chk_str.GetString());
 }
 
@@ -517,6 +504,9 @@ TEST_F(PythonDataObjectsTest, TestPythonDictionaryManipulation) {
     dict.SetItemForKey(keys[i], values[i]);
 
   EXPECT_EQ(dict_entries, dict.GetSize());
+  EXPECT_FALSE(dict.HasKey("not_in_dict"));
+  EXPECT_TRUE(dict.HasKey(key_0));
+  EXPECT_TRUE(dict.HasKey(key_1));
 
   // Verify that the keys and values match
   PythonObject chk_value1 = dict.GetItemForKey(keys[0]);
@@ -524,10 +514,10 @@ TEST_F(PythonDataObjectsTest, TestPythonDictionaryManipulation) {
   EXPECT_TRUE(PythonInteger::Check(chk_value1.get()));
   EXPECT_TRUE(PythonString::Check(chk_value2.get()));
 
-  PythonInteger chk_int(PyRefType::Borrowed, chk_value1.get());
+  auto chkint = As<long long>(chk_value1);
   PythonString chk_str(PyRefType::Borrowed, chk_value2.get());
 
-  EXPECT_EQ(value_0, chk_int.GetInteger());
+  EXPECT_THAT_EXPECTED(chkint, llvm::HasValue(value_0));
   EXPECT_EQ(value_1, chk_str.GetString());
 }
 
@@ -549,7 +539,7 @@ TEST_F(PythonDataObjectsTest, TestPythonDictionaryToStructuredDictionary) {
   EXPECT_TRUE(dict_sp->HasKey(string_key1));
 
   auto string_sp = dict_sp->GetValueForKey(string_key0)->GetAsString();
-  auto int_sp = dict_sp->GetValueForKey(string_key1)->GetAsInteger();
+  auto int_sp = dict_sp->GetValueForKey(string_key1)->GetAsUnsignedInteger();
 
   EXPECT_EQ(string_value0, string_sp->GetValue());
   EXPECT_EQ(int_value1, long(int_sp->GetValue()));
@@ -582,7 +572,7 @@ TEST_F(PythonDataObjectsTest, TestPythonCallableInvoke) {
 
 TEST_F(PythonDataObjectsTest, TestPythonFile) {
   auto file = FileSystem::Instance().Open(FileSpec(FileSystem::DEV_NULL),
-                                          File::eOpenOptionRead);
+                                          File::eOpenOptionReadOnly);
   ASSERT_THAT_EXPECTED(file, llvm::Succeeded());
   auto py_file = PythonFile::FromFile(*file.get(), "r");
   ASSERT_THAT_EXPECTED(py_file, llvm::Succeeded());
@@ -594,10 +584,9 @@ TEST_F(PythonDataObjectsTest, TestObjectAttributes) {
   EXPECT_TRUE(py_int.HasAttribute("numerator"));
   EXPECT_FALSE(py_int.HasAttribute("this_should_not_exist"));
 
-  PythonInteger numerator_attr =
-      py_int.GetAttributeValue("numerator").AsType<PythonInteger>();
-  EXPECT_TRUE(numerator_attr.IsAllocated());
-  EXPECT_EQ(42, numerator_attr.GetInteger());
+  auto numerator_attr = As<long long>(py_int.GetAttributeValue("numerator"));
+
+  EXPECT_THAT_EXPECTED(numerator_attr, llvm::HasValue(42));
 }
 
 TEST_F(PythonDataObjectsTest, TestExtractingUInt64ThroughStructuredData) {
@@ -620,7 +609,7 @@ TEST_F(PythonDataObjectsTest, TestExtractingUInt64ThroughStructuredData) {
           structured_dict_ptr->GetValueForKey(key_name);
       EXPECT_TRUE((bool)structured_addr_value_sp);
       const uint64_t extracted_value =
-          structured_addr_value_sp->GetIntegerValue(123);
+          structured_addr_value_sp->GetUnsignedIntegerValue(123);
       EXPECT_TRUE(extracted_value == value);
     }
   }
@@ -816,6 +805,8 @@ main = foo
                                 testing::ContainsRegex("line 7, in baz"),
                                 testing::ContainsRegex("ZeroDivisionError")))));
 
+#if !((defined(_WIN32) || defined(_WIN64)) && (defined(__aarch64__) || defined(_M_ARM64)))
+
   static const char script2[] = R"(
 class MyError(Exception):
   def __str__(self):
@@ -828,10 +819,15 @@ def main():
 
   PythonScript lol(script2);
 
-  EXPECT_THAT_EXPECTED(lol(),
-                       llvm::Failed<PythonException>(testing::Property(
-                           &PythonException::ReadBacktrace,
-                           testing::ContainsRegex("unprintable MyError"))));
+  EXPECT_THAT_EXPECTED(
+      lol(),
+      llvm::Failed<PythonException>(testing::Property(
+          &PythonException::ReadBacktrace,
+          testing::AnyOf(
+              testing::ContainsRegex("MyError: <exception str\\(\\) failed>"),
+              testing::ContainsRegex("unprintable MyError")))));
+
+#endif
 }
 
 TEST_F(PythonDataObjectsTest, TestRun) {

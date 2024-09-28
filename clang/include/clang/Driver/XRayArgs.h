@@ -25,10 +25,7 @@ class XRayArgs {
   std::vector<std::string> ExtraDeps;
   std::vector<std::string> Modes;
   XRayInstrSet InstrumentationBundle;
-  bool XRayInstrument = false;
-  int InstructionThreshold = 200;
-  bool XRayAlwaysEmitCustomEvents = false;
-  bool XRayAlwaysEmitTypedEvents = false;
+  llvm::opt::Arg *XRayInstrument = nullptr;
   bool XRayRT = true;
 
 public:

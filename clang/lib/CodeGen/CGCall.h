@@ -16,26 +16,22 @@
 
 #include "CGValue.h"
 #include "EHScopeStack.h"
+#include "clang/AST/ASTFwd.h"
 #include "clang/AST/CanonicalType.h"
 #include "clang/AST/GlobalDecl.h"
 #include "clang/AST/Type.h"
+#include "llvm/ADT/STLForwardCompat.h"
 #include "llvm/IR/Value.h"
 
-// FIXME: Restructure so we don't have to expose so much stuff.
-#include "ABIInfo.h"
-
 namespace llvm {
-class AttributeList;
-class Function;
 class Type;
 class Value;
 } // namespace llvm
 
 namespace clang {
-class ASTContext;
 class Decl;
 class FunctionDecl;
-class ObjCMethodDecl;
+class TargetOptions;
 class VarDecl;
 
 namespace CodeGen {
@@ -48,11 +44,11 @@ class CGCalleeInfo {
   GlobalDecl CalleeDecl;
 
 public:
-  explicit CGCalleeInfo() : CalleeProtoTy(nullptr), CalleeDecl() {}
+  explicit CGCalleeInfo() : CalleeProtoTy(nullptr) {}
   CGCalleeInfo(const FunctionProtoType *calleeProtoTy, GlobalDecl calleeDecl)
       : CalleeProtoTy(calleeProtoTy), CalleeDecl(calleeDecl) {}
   CGCalleeInfo(const FunctionProtoType *calleeProtoTy)
-      : CalleeProtoTy(calleeProtoTy), CalleeDecl() {}
+      : CalleeProtoTy(calleeProtoTy) {}
   CGCalleeInfo(GlobalDecl calleeDecl)
       : CalleeProtoTy(nullptr), CalleeDecl(calleeDecl) {}
 
@@ -109,11 +105,11 @@ public:
   /// Construct a callee.  Call this constructor directly when this
   /// isn't a direct call.
   CGCallee(const CGCalleeInfo &abstractInfo, llvm::Value *functionPtr)
-      : KindOrFunctionPointer(SpecialKind(uintptr_t(functionPtr))) {
+      : KindOrFunctionPointer(
+            SpecialKind(reinterpret_cast<uintptr_t>(functionPtr))) {
     AbstractInfo = abstractInfo;
     assert(functionPtr && "configuring callee without function pointer");
     assert(functionPtr->getType()->isPointerTy());
-    assert(functionPtr->getType()->getPointerElementType()->isFunctionTy());
   }
 
   static CGCallee forBuiltin(unsigned builtinID,
@@ -185,7 +181,8 @@ public:
   }
   void setFunctionPointer(llvm::Value *functionPtr) {
     assert(isOrdinary());
-    KindOrFunctionPointer = SpecialKind(uintptr_t(functionPtr));
+    KindOrFunctionPointer =
+        SpecialKind(reinterpret_cast<uintptr_t>(functionPtr));
   }
 
   bool isVirtual() const {
@@ -260,7 +257,7 @@ public:
 /// arguments in a call.
 class CallArgList : public SmallVector<CallArg, 8> {
 public:
-  CallArgList() : StackBase(nullptr) {}
+  CallArgList() = default;
 
   struct Writeback {
     /// The original argument.  Note that the argument l-value
@@ -346,7 +343,7 @@ private:
   SmallVector<CallArgCleanup, 1> CleanupsToDeactivate;
 
   /// The stacksave call.  It dominates all of the argument evaluation.
-  llvm::CallInst *StackBase;
+  llvm::CallInst *StackBase = nullptr;
 };
 
 /// FunctionArgList - Type for representing both the decl and type
@@ -357,28 +354,77 @@ class FunctionArgList : public SmallVector<const VarDecl *, 16> {};
 /// ReturnValueSlot - Contains the address where the return value of a
 /// function can be stored, and whether the address is volatile or not.
 class ReturnValueSlot {
-  llvm::PointerIntPair<llvm::Value *, 2, unsigned int> Value;
-  CharUnits Alignment;
+  Address Addr = Address::invalid();
 
   // Return value slot flags
-  enum Flags {
-    IS_VOLATILE = 0x1,
-    IS_UNUSED = 0x2,
-  };
+  unsigned IsVolatile : 1;
+  unsigned IsUnused : 1;
+  unsigned IsExternallyDestructed : 1;
 
 public:
-  ReturnValueSlot() {}
-  ReturnValueSlot(Address Addr, bool IsVolatile, bool IsUnused = false)
-      : Value(Addr.isValid() ? Addr.getPointer() : nullptr,
-              (IsVolatile ? IS_VOLATILE : 0) | (IsUnused ? IS_UNUSED : 0)),
-        Alignment(Addr.isValid() ? Addr.getAlignment() : CharUnits::Zero()) {}
+  ReturnValueSlot()
+      : IsVolatile(false), IsUnused(false), IsExternallyDestructed(false) {}
+  ReturnValueSlot(Address Addr, bool IsVolatile, bool IsUnused = false,
+                  bool IsExternallyDestructed = false)
+      : Addr(Addr), IsVolatile(IsVolatile), IsUnused(IsUnused),
+        IsExternallyDestructed(IsExternallyDestructed) {}
 
-  bool isNull() const { return !getValue().isValid(); }
-
-  bool isVolatile() const { return Value.getInt() & IS_VOLATILE; }
-  Address getValue() const { return Address(Value.getPointer(), Alignment); }
-  bool isUnused() const { return Value.getInt() & IS_UNUSED; }
+  bool isNull() const { return !Addr.isValid(); }
+  bool isVolatile() const { return IsVolatile; }
+  Address getValue() const { return Addr; }
+  bool isUnused() const { return IsUnused; }
+  bool isExternallyDestructed() const { return IsExternallyDestructed; }
 };
+
+/// Adds attributes to \p F according to our \p CodeGenOpts and \p LangOpts, as
+/// though we had emitted it ourselves. We remove any attributes on F that
+/// conflict with the attributes we add here.
+///
+/// This is useful for adding attrs to bitcode modules that you want to link
+/// with but don't control, such as CUDA's libdevice.  When linking with such
+/// a bitcode library, you might want to set e.g. its functions'
+/// "unsafe-fp-math" attribute to match the attr of the functions you're
+/// codegen'ing.  Otherwise, LLVM will interpret the bitcode module's lack of
+/// unsafe-fp-math attrs as tantamount to unsafe-fp-math=false, and then LLVM
+/// will propagate unsafe-fp-math=false up to every transitive caller of a
+/// function in the bitcode library!
+///
+/// With the exception of fast-math attrs, this will only make the attributes
+/// on the function more conservative.  But it's unsafe to call this on a
+/// function which relies on particular fast-math attributes for correctness.
+/// It's up to you to ensure that this is safe.
+void mergeDefaultFunctionDefinitionAttributes(llvm::Function &F,
+                                              const CodeGenOptions &CodeGenOpts,
+                                              const LangOptions &LangOpts,
+                                              const TargetOptions &TargetOpts,
+                                              bool WillInternalize);
+
+enum class FnInfoOpts {
+  None = 0,
+  IsInstanceMethod = 1 << 0,
+  IsChainCall = 1 << 1,
+  IsDelegateCall = 1 << 2,
+};
+
+inline FnInfoOpts operator|(FnInfoOpts A, FnInfoOpts B) {
+  return static_cast<FnInfoOpts>(llvm::to_underlying(A) |
+                                 llvm::to_underlying(B));
+}
+
+inline FnInfoOpts operator&(FnInfoOpts A, FnInfoOpts B) {
+  return static_cast<FnInfoOpts>(llvm::to_underlying(A) &
+                                 llvm::to_underlying(B));
+}
+
+inline FnInfoOpts operator|=(FnInfoOpts A, FnInfoOpts B) {
+  A = A | B;
+  return A;
+}
+
+inline FnInfoOpts operator&=(FnInfoOpts A, FnInfoOpts B) {
+  A = A & B;
+  return A;
+}
 
 } // end namespace CodeGen
 } // end namespace clang

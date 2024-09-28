@@ -37,7 +37,7 @@ For example, consider this IR:
            br i1 %cond, label %B, label %C, !prof !0
        ; ...
    }
-   !0 = metadata !{metadata !"branch_weights", i32 7, i32 8}
+   !0 = !{!"branch_weights", i32 7, i32 8}
 
 and this simple graph representation::
 
@@ -82,7 +82,7 @@ by a cut edge should equal ``UINT64_MAX``.  In other words, mass is conserved
 as it "falls" through the DAG.
 
 If a function's basic block graph is a DAG, then block masses are valid block
-frequencies.  This works poorly in practise though, since downstream users rely
+frequencies.  This works poorly in practice though, since downstream users rely
 on adding block frequencies together without hitting the maximum.
 
 Loop Scale

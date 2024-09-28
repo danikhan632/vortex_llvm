@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_BreakpointLocationList_h_
-#define liblldb_BreakpointLocationList_h_
+#ifndef LLDB_BREAKPOINT_BREAKPOINTLOCATIONLIST_H
+#define LLDB_BREAKPOINT_BREAKPOINTLOCATIONLIST_H
 
 #include <map>
 #include <mutex>
@@ -126,6 +126,9 @@ public:
   ///     Hit count of all locations in this list.
   uint32_t GetHitCount() const;
 
+  /// Resets the hit count of all locations in this list.
+  void ResetHitCount();
+
   /// Enquires of the breakpoint location in this list with ID \a breakID
   /// whether we should stop.
   ///
@@ -212,4 +215,4 @@ public:
 
 } // namespace lldb_private
 
-#endif // liblldb_BreakpointLocationList_h_
+#endif // LLDB_BREAKPOINT_BREAKPOINTLOCATIONLIST_H

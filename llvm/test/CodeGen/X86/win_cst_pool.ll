@@ -14,7 +14,7 @@ define double @double() {
 ; CHECK-NEXT:         .section        .rdata,"dr",discard,__real@0000000000800000
 ; CHECK-NEXT:         .p2align  3
 ; CHECK-NEXT: __real@0000000000800000:
-; CHECK-NEXT:         .quad   8388608
+; CHECK-NEXT:         .quad   0x0000000000800000
 ; CHECK:      double:
 ; CHECK:               movsd   __real@0000000000800000(%rip), %xmm0
 ; CHECK-NEXT:          ret
@@ -22,7 +22,7 @@ define double @double() {
 ; MINGW:              .section        .rdata,"dr"
 ; MINGW-NEXT:         .p2align  3
 ; MINGW-NEXT: [[LABEL:\.LC.*]]:
-; MINGW-NEXT:         .quad   8388608
+; MINGW-NEXT:         .quad   0x0000000000800000
 ; MINGW:      double:
 ; MINGW:               movsd   [[LABEL]](%rip), %xmm0
 ; MINGW-NEXT:          ret
@@ -65,16 +65,14 @@ define <8 x i16> @vec2() {
 define <4 x float> @undef1() {
   ret <4 x float> <float 1.0, float 1.0, float undef, float undef>
 
-; CHECK:             .globl  __xmm@00000000000000003f8000003f800000
-; CHECK-NEXT:        .section        .rdata,"dr",discard,__xmm@00000000000000003f8000003f800000
-; CHECK-NEXT:        .p2align  4
-; CHECK-NEXT: __xmm@00000000000000003f8000003f800000:
-; CHECK-NEXT:        .long   1065353216              # float 1
-; CHECK-NEXT:        .long   1065353216              # float 1
-; CHECK-NEXT:        .zero   4
-; CHECK-NEXT:        .zero   4
+; CHECK:             .globl  __real@3f800000
+; CHECK-NEXT:        .section        .rdata,"dr",discard,__real@3f800000
+; CHECK-NEXT:        .p2align  2
+; CHECK-NEXT: __real@3f800000:
+; CHECK-NEXT:        .long   0x3f800000              # float 1
+; CHECK-NEXT:        .text
 ; CHECK:      undef1:
-; CHECK:               movaps  __xmm@00000000000000003f8000003f800000(%rip), %xmm0
+; CHECK:               vbroadcastss  __real@3f800000(%rip), %xmm0
 ; CHECK-NEXT:          ret
 }
 
@@ -88,8 +86,8 @@ define float @pr23966(i32 %a) {
 ; CHECK-NEXT:         .section        .rdata,"dr",discard,__real@bf8000003f800000
 ; CHECK-NEXT:         .p2align  3
 ; CHECK-NEXT: __real@bf8000003f800000:
-; CHECK-NEXT:         .long   1065353216
-; CHECK-NEXT:         .long   3212836864
+; CHECK-NEXT:         .long   0x3f800000
+; CHECK-NEXT:         .long   0xbf800000
 
 define <4 x i64> @ymm() {
 entry:

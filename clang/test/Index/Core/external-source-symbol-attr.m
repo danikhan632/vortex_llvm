@@ -4,6 +4,8 @@
 #define GEN_DECL(mod_name) __attribute__((external_source_symbol(language="Swift", defined_in=mod_name, generated_declaration)))
 #define PUSH_GEN_DECL(mod_name) push(GEN_DECL(mod_name), apply_to=any(enum, objc_interface, objc_category, objc_protocol))
 
+#define GEN_DECL_USR(mod_name, usr) __attribute__((external_source_symbol(language="Swift", defined_in=mod_name, USR=usr, generated_declaration)))
+
 // Forward declarations should not affect module namespacing below
 @class I1;
 @class I2;
@@ -21,6 +23,10 @@ EXT_DECL("some_module")
 // CHECK: [[@LINE-1]]:12 | class/Swift | I2 | c:@M@some_module@objc(cs)I2 | {{.*}} | Decl | rel: 0
 -(void)method;
 // CHECK: [[@LINE-1]]:8 | instance-method/Swift | method | c:@M@some_module@objc(cs)I2(im)method | -[I2 method] | Decl,Dyn,RelChild | rel: 1
+@property int prop;
+// CHECK: [[@LINE-1]]:15 | instance-method/acc-get/Swift | prop | c:@M@some_module@objc(cs)I2(im)prop |
+// CHECK: [[@LINE-2]]:15 | instance-method/acc-set/Swift | setProp: | c:@M@some_module@objc(cs)I2(im)setProp: |
+// CHECK: [[@LINE-3]]:15 | instance-property/Swift | prop | c:@M@some_module@objc(cs)I2(py)prop |
 @end
 
 void test1(I1 *o) {
@@ -45,6 +51,10 @@ EXT_DECL("cat_module")
 // CHECK: [[@LINE-1]]:15 | extension/Swift | cat2 | c:@CM@cat_module@some_module@objc(cy)I1@cat2 |
 -(void)cat_method2;
 // CHECK: [[@LINE-1]]:8 | instance-method/Swift | cat_method2 | c:@CM@cat_module@some_module@objc(cs)I1(im)cat_method2
+@property int cat_prop2;
+// CHECK: [[@LINE-1]]:15 | instance-method/acc-get/Swift | cat_prop2 | c:@CM@cat_module@some_module@objc(cs)I1(im)cat_prop2 |
+// CHECK: [[@LINE-2]]:15 | instance-method/acc-set/Swift | setCat_prop2: | c:@CM@cat_module@some_module@objc(cs)I1(im)setCat_prop2: |
+// CHECK: [[@LINE-3]]:15 | instance-property/Swift | cat_prop2 | c:@CM@cat_module@some_module@objc(cs)I1(py)cat_prop2 |
 @end
 
 #define NS_ENUM(_name, _type) enum _name:_type _name; enum _name : _type
@@ -101,4 +111,11 @@ void test2(I3 *i3, id<ExtProt2> prot2, SomeEnum some) {
 void test3(I3 *i3) {
   [i3 meth_other_mod];
   // CHECK: [[@LINE-1]]:7 | instance-method/Swift | meth_other_mod | c:@CM@other_mod_for_cat@modname@objc(cs)I3(im)meth_other_mod |
+}
+
+void function() GEN_DECL_USR("SwiftMod", "s:8SwiftMod8functionyyF");
+
+void test4() {
+  function();
+  // CHECK: [[@LINE-1]]:3 | function/Swift | function | s:8SwiftMod8functionyyF
 }

@@ -1,4 +1,4 @@
-//===-- RegisterContextLinux_s390x.cpp --------------------------*- C++ -*-===//
+//===-- RegisterContextLinux_s390x.cpp ------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -53,11 +53,6 @@ RegisterContextLinux_s390x::RegisterContextLinux_s390x(
       m_register_info_p(GetRegisterInfoPtr(target_arch)),
       m_register_info_count(GetRegisterInfoCount(target_arch)),
       m_user_register_count(GetUserRegisterInfoCount(target_arch)) {}
-
-const std::vector<lldb_private::RegisterInfo> *
-RegisterContextLinux_s390x::GetDynamicRegisterInfoP() const {
-  return &d_register_infos;
-}
 
 const RegisterInfo *RegisterContextLinux_s390x::GetRegisterInfo() const {
   return m_register_info_p;

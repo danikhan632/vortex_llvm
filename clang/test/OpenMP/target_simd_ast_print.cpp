@@ -4,6 +4,12 @@
 // RUN: %clang_cc1 -verify -fopenmp -fopenmp-version=50 -DOMP5 -ast-print %s -Wno-openmp-mapping | FileCheck %s --check-prefix=CHECK --check-prefix=OMP50
 // RUN: %clang_cc1 -fopenmp -fopenmp-version=50 -DOMP5 -x c++ -std=c++11 -emit-pch -o %t %s -Wno-openmp-mapping
 // RUN: %clang_cc1 -fopenmp -fopenmp-version=50 -DOMP5 -std=c++11 -include-pch %t -fsyntax-only -verify %s -ast-print -Wno-openmp-mapping | FileCheck %s --check-prefix=CHECK --check-prefix=OMP50
+// RUN: %clang_cc1 -verify -fopenmp -fopenmp-version=51 -ast-print %s -Wno-openmp-mapping -DOMP51 | FileCheck %s --check-prefix=CHECK --check-prefix=OMP51
+// RUN: %clang_cc1 -fopenmp -fopenmp-version=51 -x c++ -std=c++11 -emit-pch -o %t %s -Wno-openmp-mapping -DOMP51
+// RUN: %clang_cc1 -fopenmp -fopenmp-version=51 -std=c++11 -include-pch %t -fsyntax-only -verify %s -ast-print -Wno-openmp-mapping -DOMP51 | FileCheck %s --check-prefix=CHECK --check-prefix=OMP51
+// RUN: %clang_cc1 -verify -fopenmp -fopenmp-version=52 -ast-print %s -Wno-openmp-mapping -DOMP52 | FileCheck %s --check-prefix=CHECK --check-prefix=OMP52
+// RUN: %clang_cc1 -fopenmp -fopenmp-version=52 -x c++ -std=c++11 -emit-pch -o %t %s -Wno-openmp-mapping -DOMP52
+// RUN: %clang_cc1 -fopenmp -fopenmp-version=52 -std=c++11 -include-pch %t -fsyntax-only -verify %s -ast-print -Wno-openmp-mapping -DOMP52 | FileCheck %s --check-prefix=CHECK --check-prefix=OMP52
 
 // RUN: %clang_cc1 -verify -fopenmp-simd -fopenmp-version=45 -ast-print %s -Wno-openmp-mapping | FileCheck %s --check-prefix=CHECK --check-prefix=OMP45
 // RUN: %clang_cc1 -fopenmp-simd -fopenmp-version=45 -x c++ -std=c++11 -emit-pch -o %t %s -Wno-openmp-mapping
@@ -11,10 +17,28 @@
 // RUN: %clang_cc1 -verify -fopenmp-simd -fopenmp-version=50 -DOMP5 -ast-print %s -Wno-openmp-mapping | FileCheck %s --check-prefix=CHECK --check-prefix=OMP50
 // RUN: %clang_cc1 -fopenmp-simd -fopenmp-version=50 -DOMP5 -x c++ -std=c++11 -emit-pch -o %t %s -Wno-openmp-mapping
 // RUN: %clang_cc1 -fopenmp-simd -fopenmp-version=50 -DOMP5 -std=c++11 -include-pch %t -fsyntax-only -verify %s -ast-print -Wno-openmp-mapping | FileCheck %s --check-prefix=CHECK --check-prefix=OMP50
+// RUN: %clang_cc1 -verify -fopenmp-simd -fopenmp-version=51 -ast-print %s -Wno-openmp-mapping -DOMP51 | FileCheck %s --check-prefix=CHECK --check-prefix=OMP51
+// RUN: %clang_cc1 -fopenmp-simd -fopenmp-version=51 -x c++ -std=c++11 -emit-pch -o %t %s -Wno-openmp-mapping -DOMP51
+// RUN: %clang_cc1 -fopenmp-simd -fopenmp-version=51 -std=c++11 -include-pch %t -fsyntax-only -verify %s -ast-print -Wno-openmp-mapping -DOMP51 | FileCheck %s --check-prefix=CHECK --check-prefix=OMP51
+// expected-no-diagnostics
+// RUN: %clang_cc1 -verify -fopenmp-simd -fopenmp-version=52 -ast-print %s -Wno-openmp-mapping -DOMP52 | FileCheck %s --check-prefix=CHECK --check-prefix=OMP52
+// RUN: %clang_cc1 -fopenmp-simd -fopenmp-version=52 -x c++ -std=c++11 -emit-pch -o %t %s -Wno-openmp-mapping -DOMP52
+// RUN: %clang_cc1 -fopenmp-simd -fopenmp-version=52 -std=c++11 -include-pch %t -fsyntax-only -verify %s -ast-print -Wno-openmp-mapping -DOMP52 | FileCheck %s --check-prefix=CHECK --check-prefix=OMP52
 // expected-no-diagnostics
 
 #ifndef HEADER
 #define HEADER
+
+typedef void **omp_allocator_handle_t;
+extern const omp_allocator_handle_t omp_null_allocator;
+extern const omp_allocator_handle_t omp_default_mem_alloc;
+extern const omp_allocator_handle_t omp_large_cap_mem_alloc;
+extern const omp_allocator_handle_t omp_const_mem_alloc;
+extern const omp_allocator_handle_t omp_high_bw_mem_alloc;
+extern const omp_allocator_handle_t omp_low_lat_mem_alloc;
+extern const omp_allocator_handle_t omp_cgroup_mem_alloc;
+extern const omp_allocator_handle_t omp_pteam_mem_alloc;
+extern const omp_allocator_handle_t omp_thread_mem_alloc;
 
 void foo() {}
 
@@ -116,13 +140,15 @@ T tmain(T argc, T *argv) {
   // CHECK-NEXT: }
 
 #ifdef OMP5
-#pragma omp target simd if(target:argc > 0) if (simd:argc)
+#pragma omp target simd if(target:argc > 0) if (simd:argc) allocate(omp_default_mem_alloc:f) private(f) uses_allocators(omp_default_mem_alloc)
 #else
 #pragma omp target simd if(target:argc > 0)
 #endif // OMP5
   for (T i = 0; i < 2; ++i) {}
   // OMP45: #pragma omp target simd if(target: argc > 0)
-  // OMP50: #pragma omp target simd if(target: argc > 0) if(simd: argc)
+  // OMP50: #pragma omp target simd if(target: argc > 0) if(simd: argc) allocate(omp_default_mem_alloc: f) private(f) uses_allocators(omp_default_mem_alloc)
+  // OMP51: #pragma omp target simd if(target: argc > 0)
+  // OMP52: #pragma omp target simd if(target: argc > 0)
   // CHECK-NEXT: for (T i = 0; i < 2; ++i) {
   // CHECK-NEXT: }
 
@@ -220,11 +246,15 @@ int main(int argc, char **argv) {
 // CHECK-NEXT: for (int i = 0; i < 2; ++i)
 // CHECK-NEXT: a = 2;
 
+#ifdef OMP52
+#pragma omp target simd private(argc, b), firstprivate(argv, c), lastprivate(d, f) collapse(2) if (target: argc) reduction(+ : h) linear(a: step(-5))
+#else
 #pragma omp target simd private(argc, b), firstprivate(argv, c), lastprivate(d, f) collapse(2) if (target: argc) reduction(+ : h) linear(a:-5)
+#endif
   for (int i = 0; i < 10; ++i)
     for (int j = 0; j < 10; ++j)
       foo();
-  // CHECK: #pragma omp target simd private(argc,b) firstprivate(argv,c) lastprivate(d,f) collapse(2) if(target: argc) reduction(+: h) linear(a: -5)
+  // CHECK: #pragma omp target simd private(argc,b) firstprivate(argv,c) lastprivate(d,f) collapse(2) if(target: argc) reduction(+: h) linear(a: step(-5))
   // CHECK-NEXT: for (int i = 0; i < 10; ++i)
   // CHECK-NEXT: for (int j = 0; j < 10; ++j)
   // CHECK-NEXT: foo();
@@ -241,14 +271,18 @@ int main(int argc, char **argv) {
   // CHECK-NEXT: for (int i = 0; i < 2; ++i) {
   // CHECK-NEXT: }
 
-#ifdef OMP5
-#pragma omp target simd if (target:argc > 0) if(simd:argc) nontemporal(argc, c, d) lastprivate(conditional: d, f)
+#if defined(OMP51) || defined(OMP52)
+#pragma omp target simd if (target:argc > 0) if(simd:argc) nontemporal(argc, c, d) lastprivate(conditional: d, f) order(reproducible:concurrent)
+#elif OMP5
+#pragma omp target simd if (target:argc > 0) if(simd:argc) nontemporal(argc, c, d) lastprivate(conditional: d, f) order(concurrent)
 #else
 #pragma omp target simd if (target:argc > 0)
-#endif // OMP5
+#endif // OMP51
   for (int i = 0; i < 2; ++i) {}
   // OMP45: #pragma omp target simd if(target: argc > 0)
-  // OMP50: #pragma omp target simd if(target: argc > 0) if(simd: argc) nontemporal(argc,c,d) lastprivate(conditional: d,f)
+  // OMP50: #pragma omp target simd if(target: argc > 0) if(simd: argc) nontemporal(argc,c,d) lastprivate(conditional: d,f) order(concurrent)
+  // OMP51: #pragma omp target simd if(target: argc > 0) if(simd: argc) nontemporal(argc,c,d) lastprivate(conditional: d,f) order(reproducible: concurrent)
+  // OMP52: #pragma omp target simd if(target: argc > 0) if(simd: argc) nontemporal(argc,c,d) lastprivate(conditional: d,f) order(reproducible: concurrent)
   // CHECK-NEXT: for (int i = 0; i < 2; ++i) {
   // CHECK-NEXT: }
 

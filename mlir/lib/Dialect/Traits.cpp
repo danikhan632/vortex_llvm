@@ -1,16 +1,61 @@
 //===- Traits.cpp - Common op traits shared by dialects -------------------===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Dialect/Traits.h"
-#include "mlir/IR/StandardTypes.h"
+#include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/TypeUtilities.h"
 #include "llvm/Support/FormatVariadic.h"
+#include <optional>
 
 using namespace mlir;
+
+bool OpTrait::util::staticallyKnownBroadcastable(ArrayRef<int64_t> shape1,
+                                                 ArrayRef<int64_t> shape2) {
+  SmallVector<SmallVector<int64_t, 6>, 2> extents;
+  extents.emplace_back(shape1.begin(), shape1.end());
+  extents.emplace_back(shape2.begin(), shape2.end());
+  return staticallyKnownBroadcastable(extents);
+}
+
+bool OpTrait::util::staticallyKnownBroadcastable(
+    ArrayRef<SmallVector<int64_t, 6>> shapes) {
+  assert(!shapes.empty() && "Expected at least one shape");
+  size_t maxRank = shapes[0].size();
+  for (size_t i = 1; i != shapes.size(); ++i)
+    maxRank = std::max(maxRank, shapes[i].size());
+
+  // We look backwards through every column of `shapes`.
+  for (size_t i = 0; i != maxRank; ++i) {
+    bool seenDynamic = false;
+    std::optional<int64_t> nonOneDim;
+    for (ArrayRef<int64_t> extent : shapes) {
+      int64_t dim = i >= extent.size() ? 1 : extent[extent.size() - i - 1];
+
+      if (dim == 1)
+        continue;
+
+      // Dimensions are compatible when
+      //.  1. One is dynamic, the rest are 1
+      if (ShapedType::isDynamic(dim)) {
+        if (seenDynamic || nonOneDim)
+          return false;
+        seenDynamic = true;
+      }
+
+      //   2. All are 1 or a specific constant.
+      if (nonOneDim && dim != *nonOneDim)
+        return false;
+
+      nonOneDim = dim;
+    }
+  }
+  return true;
+}
 
 bool OpTrait::util::getBroadcastedShape(ArrayRef<int64_t> shape1,
                                         ArrayRef<int64_t> shape2,
@@ -36,7 +81,7 @@ bool OpTrait::util::getBroadcastedShape(ArrayRef<int64_t> shape1,
 
   // Check each dimension is consistent.
   for (; i1 != e1 && i2 != e2; ++i1, ++i2, ++iR) {
-    if (*i1 == -1 || *i2 == -1) {
+    if (ShapedType::isDynamic(*i1) || ShapedType::isDynamic(*i2)) {
       // One or both dimensions is unknown. Follow TensorFlow behavior:
       // - If either dimension is greater than 1, we assume that the program is
       //   correct, and the other dimension will be broadcast to match it.
@@ -50,7 +95,7 @@ bool OpTrait::util::getBroadcastedShape(ArrayRef<int64_t> shape1,
       } else if (*i2 == 1) {
         *iR = *i1;
       } else {
-        *iR = -1;
+        *iR = ShapedType::kDynamic;
       }
     } else {
       if (*i1 == *i2 || *i2 == 1) {
@@ -71,7 +116,7 @@ bool OpTrait::util::getBroadcastedShape(ArrayRef<int64_t> shape1,
 /// Returns the shape of the given type. Scalars will be considered as having a
 /// shape with zero dimensions.
 static ArrayRef<int64_t> getShape(Type type) {
-  if (auto sType = type.dyn_cast<ShapedType>())
+  if (auto sType = dyn_cast<ShapedType>(type))
     return sType.getShape();
   return {};
 }
@@ -80,39 +125,41 @@ static ArrayRef<int64_t> getShape(Type type) {
 /// following NumPy broadcast semantics. Returned type may have dynamic shape if
 /// either of the input types has dynamic shape. Returns null type if the two
 /// given types are not broadcast-compatible.
-Type OpTrait::util::getBroadcastedType(Type type1, Type type2) {
-  // Returns the scalar type out of the given type.
-  auto getScalarType = [](Type type) -> Type {
-    if (auto shapedType = type.dyn_cast<ShapedType>())
-      return shapedType.getElementType();
-    return type;
-  };
-
-  // Make sure underlying scalar type is the same.
-  auto scalarType = getScalarType(type1);
-  if (scalarType != getScalarType(type2))
-    return {};
+///
+/// elementType, if specified, will be used as the element type of the
+/// broadcasted result type. Otherwise it is required that the element type of
+/// type1 and type2 is the same and this element type will be used as the
+/// resultant element type.
+Type OpTrait::util::getBroadcastedType(Type type1, Type type2,
+                                       Type elementType) {
+  // If the elementType is not specified, then the use the common element type
+  // of the inputs or fail if there is no common element type.
+  if (!elementType) {
+    elementType = getElementTypeOrSelf(type1);
+    if (elementType != getElementTypeOrSelf(type2))
+      return {};
+  }
 
   // If one of the types is unranked tensor, then the other type shouldn't be
   // vector and the result should have unranked tensor type.
-  if (type1.isa<UnrankedTensorType>() || type2.isa<UnrankedTensorType>()) {
-    if (type1.isa<VectorType>() || type2.isa<VectorType>())
+  if (isa<UnrankedTensorType>(type1) || isa<UnrankedTensorType>(type2)) {
+    if (isa<VectorType>(type1) || isa<VectorType>(type2))
       return {};
-    return UnrankedTensorType::get(scalarType);
+    return UnrankedTensorType::get(elementType);
   }
 
   // Returns the type kind if the given type is a vector or ranked tensor type.
-  // Returns llvm::None otherwise.
-  auto getCompositeTypeKind = [](Type type) -> Optional<StandardTypes::Kind> {
-    if (type.isa<VectorType>() || type.isa<RankedTensorType>())
-      return static_cast<StandardTypes::Kind>(type.getKind());
-    return llvm::None;
+  // Returns std::nullopt otherwise.
+  auto getCompositeTypeKind = [](Type type) -> std::optional<TypeID> {
+    if (isa<VectorType, RankedTensorType>(type))
+      return type.getTypeID();
+    return std::nullopt;
   };
 
   // Make sure the composite type, if has, is consistent.
-  auto compositeKind1 = getCompositeTypeKind(type1);
-  auto compositeKind2 = getCompositeTypeKind(type2);
-  Optional<StandardTypes::Kind> resultCompositeKind;
+  std::optional<TypeID> compositeKind1 = getCompositeTypeKind(type1);
+  std::optional<TypeID> compositeKind2 = getCompositeTypeKind(type2);
+  std::optional<TypeID> resultCompositeKind;
 
   if (compositeKind1 && compositeKind2) {
     // Disallow mixing vector and tensor.
@@ -131,81 +178,100 @@ Type OpTrait::util::getBroadcastedType(Type type1, Type type2) {
     return {};
 
   // Compose the final broadcasted type
-  if (resultCompositeKind == StandardTypes::Vector)
-    return VectorType::get(resultShape, scalarType);
-  if (resultCompositeKind == StandardTypes::RankedTensor)
-    return RankedTensorType::get(resultShape, scalarType);
-  return scalarType;
+  if (resultCompositeKind == VectorType::getTypeID())
+    return VectorType::get(resultShape, elementType);
+  if (resultCompositeKind == RankedTensorType::getTypeID())
+    return RankedTensorType::get(resultShape, elementType);
+  return elementType;
 }
 
-/// Returns true if the given types has both vector types and tensor types.
-static bool hasBothVectorAndTensorType(ArrayRef<Type> types) {
-  return llvm::any_of(types, [](Type t) { return t.isa<VectorType>(); }) &&
-         llvm::any_of(types, [](Type t) { return t.isa<TensorType>(); });
+/// Returns a tuple corresponding to whether range has tensor or vector type.
+template <typename iterator_range>
+static std::tuple<bool, bool> hasTensorOrVectorType(iterator_range types) {
+  return std::make_tuple(
+      llvm::any_of(types, [](Type t) { return isa<TensorType>(t); }),
+      llvm::any_of(types, [](Type t) { return isa<VectorType>(t); }));
 }
 
-static bool areCompatibleShapes(ArrayRef<int64_t> shape1,
-                                ArrayRef<int64_t> shape2) {
-  auto isCompatible = [](int64_t dim1, int64_t dim2) {
-    return dim1 == dim2 || dim1 == -1 || dim2 == -1;
+static bool isCompatibleInferredReturnShape(ArrayRef<int64_t> inferred,
+                                            ArrayRef<int64_t> existing) {
+  // If both interred and existing dimensions are static, they must be equal.
+  auto isCompatible = [](int64_t inferredDim, int64_t existingDim) {
+    return ShapedType::isDynamic(existingDim) ||
+           ShapedType::isDynamic(inferredDim) || inferredDim == existingDim;
   };
-  if (shape1.size() != shape2.size())
+  if (inferred.size() != existing.size())
     return false;
-  for (auto p : llvm::zip(shape1, shape2))
-    if (!isCompatible(std::get<0>(p), std::get<1>(p)))
+  for (auto [inferredDim, existingDim] : llvm::zip(inferred, existing))
+    if (!isCompatible(inferredDim, existingDim))
       return false;
   return true;
 }
 
+static std::string getShapeString(ArrayRef<int64_t> shape) {
+  // TODO: should replace with printing shape more uniformly across here and
+  // when in type.
+  std::string ret;
+  llvm::raw_string_ostream ss(ret);
+  ss << '\'';
+  llvm::interleave(
+      shape, ss,
+      [&](int64_t dim) {
+        if (ShapedType::isDynamic(dim))
+          ss << '?';
+        else
+          ss << dim;
+      },
+      "x");
+  ss << '\'';
+  return ss.str();
+}
+
 LogicalResult OpTrait::impl::verifyCompatibleOperandBroadcast(Operation *op) {
-  assert(op->getNumOperands() == 2 &&
-         "only support broadcast check on two operands");
-  assert(op->getNumResults() == 1 &&
-         "only support broadcast check on one result");
-
-  auto type1 = op->getOperand(0).getType();
-  auto type2 = op->getOperand(1).getType();
-  auto retType = op->getResult(0).getType();
-
-  // We forbid broadcasting vector and tensor.
-  if (hasBothVectorAndTensorType({type1, type2, retType}))
+  // Ensure broadcasting only tensor or only vector types.
+  auto operandsHasTensorVectorType =
+      hasTensorOrVectorType(op->getOperandTypes());
+  auto resultsHasTensorVectorType = hasTensorOrVectorType(op->getResultTypes());
+  if ((std::get<0>(operandsHasTensorVectorType) ||
+       std::get<0>(resultsHasTensorVectorType)) &&
+      (std::get<1>(operandsHasTensorVectorType) ||
+       std::get<1>(resultsHasTensorVectorType)))
     return op->emitError("cannot broadcast vector with tensor");
 
-  if (retType.isa<UnrankedTensorType>())
+  auto rankedOperands = make_filter_range(
+      op->getOperandTypes(), [](Type t) { return isa<RankedTensorType>(t); });
+
+  // If all operands are unranked, then all result shapes are possible.
+  if (rankedOperands.empty())
     return success();
 
-  bool isUnranked1 = type1.isa<UnrankedTensorType>();
-  bool isUnranked2 = type2.isa<UnrankedTensorType>();
-
-  // If both operands are unranked, then all result shapes are possible.
-  if (isUnranked1 && isUnranked2)
-    return success();
-
-  // If one of the operands is unranked, then the known dimensions in the result
-  // should be compatible with the other shaped operand.
-  if (isUnranked1 || isUnranked2) {
-    // Result should have higher rank than the shaped operand's rank and then
-    // the result's trailing dimensions should be compatible with the operand
-    // shape.
-    ArrayRef<int64_t> shape = getShape(!isUnranked1 ? type1 : type2);
-    ArrayRef<int64_t> actualSuffix = getShape(retType).take_back(shape.size());
-    if (!areCompatibleShapes(actualSuffix, shape))
-      return op->emitOpError()
-             << "result type " << retType
-             << " has shape incompatible with a ranked operand type";
-    return success();
+  // Compute broadcasted shape of operands (which requires that operands are
+  // broadcast compatible). The results need to be broadcast compatible with
+  // this result shape.
+  SmallVector<int64_t, 4> resultShape;
+  (void)util::getBroadcastedShape(getShape(*rankedOperands.begin()), {},
+                                  resultShape);
+  for (auto other : make_early_inc_range(rankedOperands)) {
+    SmallVector<int64_t, 4> temp = resultShape;
+    if (!util::getBroadcastedShape(temp, getShape(other), resultShape))
+      return op->emitOpError("operands don't have broadcast-compatible shapes");
   }
 
-  // If both operands are shaped, then the computed broadcasted shape should be
-  // compatible with the result shape.
-  SmallVector<int64_t, 4> resultShape;
-  if (!util::getBroadcastedShape(getShape(type1), getShape(type2), resultShape))
-    return op->emitOpError("operands don't have broadcast-compatible shapes");
+  auto rankedResults = make_filter_range(
+      op->getResultTypes(), [](Type t) { return isa<RankedTensorType>(t); });
 
-  if (!areCompatibleShapes(resultShape, getShape(retType)))
-    return op->emitOpError() << "result type " << retType
-                             << " does not have shape compatible with the one "
-                                "computed from the operand types";
+  // If all of the results are unranked then no further verification.
+  if (rankedResults.empty())
+    return success();
 
+  for (auto type : rankedResults) {
+    ArrayRef<int64_t> actualSuffix =
+        getShape(type).take_back(resultShape.size());
+    if (!isCompatibleInferredReturnShape(resultShape, actualSuffix))
+      return op->emitOpError()
+             << "result type " << getShapeString(getShape(type))
+             << " not broadcast compatible with broadcasted operands's shapes "
+             << getShapeString(resultShape);
+  }
   return success();
 }

@@ -6,19 +6,21 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_SourceManager_h_
-#define liblldb_SourceManager_h_
+#ifndef LLDB_CORE_SOURCEMANAGER_H
+#define LLDB_CORE_SOURCEMANAGER_H
 
 #include "lldb/Utility/FileSpec.h"
 #include "lldb/lldb-defines.h"
 #include "lldb/lldb-forward.h"
 
 #include "llvm/Support/Chrono.h"
+#include "llvm/Support/RWMutex.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <memory>
-#include <stddef.h>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -35,13 +37,13 @@ public:
                            const SourceManager::File &rhs);
 
   public:
-    File(const FileSpec &file_spec, Target *target);
+    File(const FileSpec &file_spec, lldb::TargetSP target_sp);
     File(const FileSpec &file_spec, lldb::DebuggerSP debugger_sp);
-    ~File() = default;
 
-    void UpdateIfNeeded();
+    bool ModificationTimeIsStale() const;
+    bool PathRemappingIsStale() const;
 
-    size_t DisplaySourceLines(uint32_t line, llvm::Optional<size_t> column,
+    size_t DisplaySourceLines(uint32_t line, std::optional<size_t> column,
                               uint32_t context_before, uint32_t context_after,
                               Stream *s);
     void FindLinesMatchingRegex(RegularExpression &regex, uint32_t start_line,
@@ -64,7 +66,12 @@ public:
 
     uint32_t GetNumLines();
 
+    llvm::sys::TimePoint<> GetTimestamp() const { return m_mod_time; }
+
   protected:
+    /// Set file and update modification time.
+    void SetFileSpec(FileSpec file_spec);
+
     bool CalculateLineOffsets(uint32_t line = UINT32_MAX);
 
     FileSpec m_file_spec_orig; // The original file spec that was used (can be
@@ -83,40 +90,56 @@ public:
     typedef std::vector<uint32_t> LineOffsets;
     LineOffsets m_offsets;
     lldb::DebuggerWP m_debugger_wp;
+    lldb::TargetWP m_target_wp;
 
   private:
-    void CommonInitializer(const FileSpec &file_spec, Target *target);
+    void CommonInitializer(const FileSpec &file_spec, lldb::TargetSP target_sp);
   };
 
   typedef std::shared_ptr<File> FileSP;
 
-  // The SourceFileCache class separates the source manager from the cache of
-  // source files, so the cache can be stored in the Debugger, but the source
-  // managers can be per target.
+  /// The SourceFileCache class separates the source manager from the cache of
+  /// source files. There is one source manager per Target but both the Debugger
+  /// and the Process have their own source caches.
+  ///
+  /// The SourceFileCache just handles adding, storing, removing and looking up
+  /// source files. The caching policies are implemented in
+  /// SourceManager::GetFile.
   class SourceFileCache {
   public:
     SourceFileCache() = default;
     ~SourceFileCache() = default;
 
-    void AddSourceFile(const FileSP &file_sp);
+    void AddSourceFile(const FileSpec &file_spec, FileSP file_sp);
+    void RemoveSourceFile(const FileSP &file_sp);
+
     FileSP FindSourceFile(const FileSpec &file_spec) const;
 
-  protected:
+    // Removes all elements from the cache.
+    void Clear() { m_file_cache.clear(); }
+
+    void Dump(Stream &stream) const;
+
+  private:
+    void AddSourceFileImpl(const FileSpec &file_spec, FileSP file_sp);
+
     typedef std::map<FileSpec, FileSP> FileCache;
     FileCache m_file_cache;
+
+    mutable llvm::sys::RWMutex m_mutex;
   };
 
-  // Constructors and Destructors
-  // A source manager can be made with a non-null target, in which case it can
-  // use the path remappings to find
-  // source files that are not in their build locations.  With no target it
-  // won't be able to do this.
+  /// A source manager can be made with a valid Target, in which case it can use
+  /// the path remappings to find source files that are not in their build
+  /// locations.  Without a target it won't be able to do this.
+  /// @{
   SourceManager(const lldb::DebuggerSP &debugger_sp);
   SourceManager(const lldb::TargetSP &target_sp);
+  /// @}
 
   ~SourceManager();
 
-  FileSP GetLastFile() { return m_last_file_sp; }
+  FileSP GetLastFile() { return GetFile(m_last_file_spec); }
 
   size_t
   DisplaySourceLinesWithLineNumbers(const FileSpec &file, uint32_t line,
@@ -138,7 +161,9 @@ public:
 
   bool GetDefaultFileAndLine(FileSpec &file_spec, uint32_t &line);
 
-  bool DefaultFileAndLineSet() { return (m_last_file_sp.get() != nullptr); }
+  bool DefaultFileAndLineSet() {
+    return (GetFile(m_last_file_spec).get() != nullptr);
+  }
 
   void FindLinesMatchingRegex(FileSpec &file_spec, RegularExpression &regex,
                               uint32_t start_line, uint32_t end_line,
@@ -147,7 +172,7 @@ public:
   FileSP GetFile(const FileSpec &file_spec);
 
 protected:
-  FileSP m_last_file_sp;
+  FileSpec m_last_file_spec;
   uint32_t m_last_line;
   uint32_t m_last_count;
   bool m_default_set;
@@ -155,11 +180,12 @@ protected:
   lldb::DebuggerWP m_debugger_wp;
 
 private:
-  DISALLOW_COPY_AND_ASSIGN(SourceManager);
+  SourceManager(const SourceManager &) = delete;
+  const SourceManager &operator=(const SourceManager &) = delete;
 };
 
 bool operator==(const SourceManager::File &lhs, const SourceManager::File &rhs);
 
 } // namespace lldb_private
 
-#endif // liblldb_SourceManager_h_
+#endif // LLDB_CORE_SOURCEMANAGER_H

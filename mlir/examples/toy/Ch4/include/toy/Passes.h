@@ -1,6 +1,6 @@
 //===- Passes.h - Toy Passes Definition -----------------------------------===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -10,8 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef MLIR_TUTORIAL_TOY_PASSES_H
-#define MLIR_TUTORIAL_TOY_PASSES_H
+#ifndef TOY_PASSES_H
+#define TOY_PASSES_H
 
 #include <memory>
 
@@ -20,8 +20,7 @@ class Pass;
 
 namespace toy {
 std::unique_ptr<Pass> createShapeInferencePass();
-std::unique_ptr<Pass> createDeadFunctionEliminationPass();
-} // end namespace toy
-} // end namespace mlir
+} // namespace toy
+} // namespace mlir
 
-#endif // MLIR_TUTORIAL_TOY_PASSES_H
+#endif // TOY_PASSES_H

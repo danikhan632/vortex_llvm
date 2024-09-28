@@ -7,7 +7,7 @@
 //===----------------------------------------------------------------------===//
 // Misc utils implementation for Windows.
 //===----------------------------------------------------------------------===//
-#include "FuzzerDefs.h"
+#include "FuzzerPlatform.h"
 #if LIBFUZZER_WINDOWS
 #include "FuzzerCommand.h"
 #include "FuzzerIO.h"
@@ -60,7 +60,15 @@ static LONG CALLBACK ExceptionHandler(PEXCEPTION_POINTERS ExceptionInfo) {
       if (HandlerOpt->HandleFpe)
         Fuzzer::StaticCrashSignalCallback();
       break;
-    // TODO: handle (Options.HandleXfsz)
+    // This is an undocumented exception code corresponding to a Visual C++
+    // Exception.
+    //
+    // See: https://devblogs.microsoft.com/oldnewthing/20100730-00/?p=13273
+    case 0xE06D7363:
+      if (HandlerOpt->HandleWinExcept)
+        Fuzzer::StaticCrashSignalCallback();
+      break;
+      // TODO: Handle (Options.HandleXfsz)
   }
   return EXCEPTION_CONTINUE_SEARCH;
 }
@@ -115,7 +123,7 @@ static void CrashHandler(int) { Fuzzer::StaticCrashSignalCallback(); }
 void SetSignalHandler(const FuzzingOptions& Options) {
   HandlerOpt = &Options;
 
-  if (Options.UnitTimeoutSec > 0)
+  if (Options.HandleAlrm && Options.UnitTimeoutSec > 0)
     Timer.SetTimer(Options.UnitTimeoutSec / 2 + 1);
 
   if (Options.HandleInt || Options.HandleTerm)
@@ -127,7 +135,7 @@ void SetSignalHandler(const FuzzingOptions& Options) {
     }
 
   if (Options.HandleSegv || Options.HandleBus || Options.HandleIll ||
-      Options.HandleFpe)
+      Options.HandleFpe || Options.HandleWinExcept)
     SetUnhandledExceptionFilter(ExceptionHandler);
 
   if (Options.HandleAbrt)
@@ -152,9 +160,26 @@ FILE *OpenProcessPipe(const char *Command, const char *Mode) {
   return _popen(Command, Mode);
 }
 
+int CloseProcessPipe(FILE *F) {
+  return _pclose(F);
+}
+
 int ExecuteCommand(const Command &Cmd) {
   std::string CmdLine = Cmd.toString();
   return system(CmdLine.c_str());
+}
+
+bool ExecuteCommand(const Command &Cmd, std::string *CmdOutput) {
+  FILE *Pipe = _popen(Cmd.toString().c_str(), "r");
+  if (!Pipe)
+    return false;
+
+  if (CmdOutput) {
+    char TmpBuffer[128];
+    while (fgets(TmpBuffer, sizeof(TmpBuffer), Pipe))
+      CmdOutput->append(TmpBuffer);
+  }
+  return _pclose(Pipe) == 0;
 }
 
 const void *SearchMemory(const void *Data, size_t DataLen, const void *Patt,
@@ -179,7 +204,7 @@ const void *SearchMemory(const void *Data, size_t DataLen, const void *Patt,
 }
 
 std::string DisassembleCmd(const std::string &FileName) {
-  Vector<std::string> command_vector;
+  std::vector<std::string> command_vector;
   command_vector.push_back("dumpbin /summary > nul");
   if (ExecuteCommand(Command(command_vector)) == 0)
     return "dumpbin /disasm " + FileName;
@@ -197,6 +222,20 @@ void DiscardOutput(int Fd) {
     return;
   _dup2(_fileno(Temp), Fd);
   fclose(Temp);
+}
+
+size_t PageSize() {
+  static size_t PageSizeCached = []() -> size_t {
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    return si.dwPageSize;
+  }();
+  return PageSizeCached;
+}
+
+void SetThreadName(std::thread &thread, const std::string &name) {
+  // TODO ?
+  // to UTF-8 then SetThreadDescription ?
 }
 
 } // namespace fuzzer

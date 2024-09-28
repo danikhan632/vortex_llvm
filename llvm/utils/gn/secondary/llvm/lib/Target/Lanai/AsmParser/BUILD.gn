@@ -10,13 +10,12 @@ static_library("AsmParser") {
   output_name = "LLVMLanaiAsmParser"
   deps = [
     ":LanaiGenAsmMatcher",
+    "//llvm/lib/CodeGen",
     "//llvm/lib/MC",
     "//llvm/lib/MC/MCParser",
     "//llvm/lib/Support",
     "//llvm/lib/Target/Lanai/MCTargetDesc",
   ]
   include_dirs = [ ".." ]
-  sources = [
-    "LanaiAsmParser.cpp",
-  ]
+  sources = [ "LanaiAsmParser.cpp" ]
 }

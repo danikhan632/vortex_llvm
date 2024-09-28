@@ -25,7 +25,7 @@
 #include "clang/Lex/ModuleMap.h"
 #include "clang/Lex/Preprocessor.h"
 #include "llvm/ADT/StringSet.h"
-#include "llvm/Support/Host.h"
+#include "llvm/TargetParser/Host.h"
 #include <string>
 #include <vector>
 
@@ -124,7 +124,7 @@ public:
   /// \return True if no errors.
   bool collectUmbrellaHeaders(llvm::StringRef UmbrellaDirName);
 
-  /// Collect headers rferenced from an umbrella file.
+  /// Collect headers referenced from an umbrella file.
   /// \param UmbrellaHeaderName The umbrella file path.
   /// \return True if no errors.
   bool collectUmbrellaHeaderHeaders(llvm::StringRef UmbrellaHeaderName);

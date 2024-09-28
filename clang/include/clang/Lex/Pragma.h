@@ -96,11 +96,10 @@ public:
 class PragmaNamespace : public PragmaHandler {
   /// Handlers - This is a map of the handlers in this namespace with their name
   /// as key.
-  llvm::StringMap<PragmaHandler *> Handlers;
+  llvm::StringMap<std::unique_ptr<PragmaHandler>> Handlers;
 
 public:
   explicit PragmaNamespace(StringRef Name) : PragmaHandler(Name) {}
-  ~PragmaNamespace() override;
 
   /// FindHandler - Check to see if there is already a handler for the
   /// specified name.  If not, return the handler for the null name if it
@@ -123,6 +122,13 @@ public:
 
   PragmaNamespace *getIfNamespace() override { return this; }
 };
+
+/// Destringize a \c _Pragma("") string according to C11 6.10.9.1:
+/// "The string literal is destringized by deleting any encoding prefix,
+/// deleting the leading and trailing double-quotes, replacing each escape
+/// sequence \" by a double-quote, and replacing each escape sequence \\ by a
+/// single backslash."
+void prepare_PragmaString(SmallVectorImpl<char> &StrVal);
 
 } // namespace clang
 

@@ -1,15 +1,13 @@
-; REQUIRES: object-emission
-
 ; RUN: %llc_dwarf -O0 -filetype=obj < %s > %t
 ; RUN: llvm-dwarfdump %t | FileCheck %s
 
 ; Make sure we are generating DWARF version 3 when module flag says so.
-; CHECK: Compile Unit: length = {{.*}} version = 0x0003
+; CHECK: Compile Unit: length = {{.*}}, version = 0x0003
 
 define i32 @main() #0 !dbg !4 {
 entry:
   %retval = alloca i32, align 4
-  store i32 0, i32* %retval
+  store i32 0, ptr %retval
   ret i32 0, !dbg !10
 }
 

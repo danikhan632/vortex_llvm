@@ -1,6 +1,6 @@
 //===- ShapeInferencePass.cpp - Shape Inference ---------------------------===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -11,13 +11,21 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/Operation.h"
+#include "mlir/IR/Types.h"
 #include "mlir/Pass/Pass.h"
+#include "mlir/Support/LLVM.h"
+#include "mlir/Support/TypeID.h"
 #include "toy/Dialect.h"
 #include "toy/Passes.h"
 #include "toy/ShapeInferenceInterface.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
+#include <memory>
 
 #define DEBUG_TYPE "shape-inference"
 
@@ -28,7 +36,7 @@ using namespace toy;
 #include "toy/ShapeInferenceOpInterfaces.cpp.inc"
 
 namespace {
-/// The ShapeInferencePass is a FunctionPass that performs intra-procedural
+/// The ShapeInferencePass is a pass that performs intra-procedural
 /// shape inference.
 ///
 ///    Algorithm:
@@ -44,10 +52,12 @@ namespace {
 ///     d) infer the shape of its output from the argument types.
 ///   3) If the worklist is empty, the algorithm succeeded.
 ///
-class ShapeInferencePass : public mlir::FunctionPass<ShapeInferencePass> {
-public:
-  void runOnFunction() override {
-    auto f = getFunction();
+struct ShapeInferencePass
+    : public mlir::PassWrapper<ShapeInferencePass, OperationPass<toy::FuncOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(ShapeInferencePass)
+
+  void runOnOperation() override {
+    auto f = getOperation();
 
     // Populate the worklist with the operations that need shape inference:
     // these are operations that return a dynamic shape.
@@ -62,7 +72,7 @@ public:
     while (!opWorklist.empty()) {
       // Find the next operation ready for inference, that is an operation
       // with all operands already resolved (non-generic).
-      auto nextop = llvm::find_if(opWorklist, returnsDynamicShape);
+      auto nextop = llvm::find_if(opWorklist, allOperandsInferred);
       if (nextop == opWorklist.end())
         break;
 
@@ -88,15 +98,23 @@ public:
     }
   }
 
+  /// A utility method that returns if the given operation has all of its
+  /// operands inferred.
+  static bool allOperandsInferred(Operation *op) {
+    return llvm::all_of(op->getOperandTypes(), [](Type operandType) {
+      return llvm::isa<RankedTensorType>(operandType);
+    });
+  }
+
   /// A utility method that returns if the given operation has a dynamically
   /// shaped result.
   static bool returnsDynamicShape(Operation *op) {
     return llvm::any_of(op->getResultTypes(), [](Type resultType) {
-      return !resultType.isa<RankedTensorType>();
+      return !llvm::isa<RankedTensorType>(resultType);
     });
   }
 };
-} // end anonymous namespace
+} // namespace
 
 /// Create a Shape Inference pass.
 std::unique_ptr<mlir::Pass> mlir::toy::createShapeInferencePass() {

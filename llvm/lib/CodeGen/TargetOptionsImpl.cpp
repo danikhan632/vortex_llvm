@@ -15,7 +15,6 @@
 #include "llvm/CodeGen/TargetFrameLowering.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/Function.h"
-#include "llvm/IR/Module.h"
 #include "llvm/Target/TargetOptions.h"
 using namespace llvm;
 
@@ -44,4 +43,14 @@ bool TargetOptions::DisableFramePointerElim(const MachineFunction &MF) const {
 /// that the rounding mode of the FPU can change from its default.
 bool TargetOptions::HonorSignDependentRoundingFPMath() const {
   return !UnsafeFPMath && HonorSignDependentRoundingFPMathOption;
+}
+
+/// NOTE: There are targets that still do not support the debug entry values
+/// production and that is being controlled with the SupportsDebugEntryValues.
+/// In addition, SCE debugger does not have the feature implemented, so prefer
+/// not to emit the debug entry values in that case.
+/// The EnableDebugEntryValues can be used for the testing purposes.
+bool TargetOptions::ShouldEmitDebugEntryValues() const {
+  return (SupportsDebugEntryValues && DebuggerTuning != DebuggerKind::SCE) ||
+         EnableDebugEntryValues;
 }

@@ -89,27 +89,27 @@ namespace {
 class StandardDirective : public Directive {
 public:
   StandardDirective(SourceLocation DirectiveLoc, SourceLocation DiagnosticLoc,
-                    bool MatchAnyLine, StringRef Text, unsigned Min,
-                    unsigned Max)
-      : Directive(DirectiveLoc, DiagnosticLoc, MatchAnyLine, Text, Min, Max) {}
+                    bool MatchAnyFileAndLine, bool MatchAnyLine, StringRef Text,
+                    unsigned Min, unsigned Max)
+      : Directive(DirectiveLoc, DiagnosticLoc, MatchAnyFileAndLine,
+                  MatchAnyLine, Text, Min, Max) {}
 
   bool isValid(std::string &Error) override {
     // all strings are considered valid; even empty ones
     return true;
   }
 
-  bool match(StringRef S) override {
-    return S.find(Text) != StringRef::npos;
-  }
+  bool match(StringRef S) override { return S.contains(Text); }
 };
 
 /// RegexDirective - Directive with regular-expression matching.
 class RegexDirective : public Directive {
 public:
   RegexDirective(SourceLocation DirectiveLoc, SourceLocation DiagnosticLoc,
-                 bool MatchAnyLine, StringRef Text, unsigned Min, unsigned Max,
-                 StringRef RegexStr)
-      : Directive(DirectiveLoc, DiagnosticLoc, MatchAnyLine, Text, Min, Max),
+                 bool MatchAnyFileAndLine, bool MatchAnyLine, StringRef Text,
+                 unsigned Min, unsigned Max, StringRef RegexStr)
+      : Directive(DirectiveLoc, DiagnosticLoc, MatchAnyFileAndLine,
+                  MatchAnyLine, Text, Min, Max),
         Regex(RegexStr) {}
 
   bool isValid(std::string &Error) override {
@@ -226,10 +226,10 @@ public:
     P = C;
     while (P < End) {
       StringRef S(P, End - P);
-      if (S.startswith(OpenBrace)) {
+      if (S.starts_with(OpenBrace)) {
         ++Depth;
         P += OpenBrace.size();
-      } else if (S.startswith(CloseBrace)) {
+      } else if (S.starts_with(CloseBrace)) {
         --Depth;
         if (Depth == 0) {
           PEnd = P + CloseBrace.size();
@@ -294,11 +294,13 @@ struct UnattachedDirective {
 // Attach the specified directive to the line of code indicated by
 // \p ExpectedLoc.
 void attachDirective(DiagnosticsEngine &Diags, const UnattachedDirective &UD,
-                     SourceLocation ExpectedLoc, bool MatchAnyLine = false) {
+                     SourceLocation ExpectedLoc,
+                     bool MatchAnyFileAndLine = false,
+                     bool MatchAnyLine = false) {
   // Construct new directive.
-  std::unique_ptr<Directive> D =
-      Directive::create(UD.RegexKind, UD.DirectivePos, ExpectedLoc,
-                        MatchAnyLine, UD.Text, UD.Min, UD.Max);
+  std::unique_ptr<Directive> D = Directive::create(
+      UD.RegexKind, UD.DirectivePos, ExpectedLoc, MatchAnyFileAndLine,
+      MatchAnyLine, UD.Text, UD.Min, UD.Max);
 
   std::string Error;
   if (!D->isValid(Error)) {
@@ -443,7 +445,7 @@ static bool ParseDirective(StringRef S, ExpectedData *ED, SourceManager &SM,
     // others.
 
     // Regex in initial directive token: -re
-    if (DToken.endswith("-re")) {
+    if (DToken.ends_with("-re")) {
       D.RegexKind = true;
       KindStr = "regex";
       DToken = DToken.substr(0, DToken.size()-3);
@@ -452,20 +454,19 @@ static bool ParseDirective(StringRef S, ExpectedData *ED, SourceManager &SM,
     // Type in initial directive token: -{error|warning|note|no-diagnostics}
     bool NoDiag = false;
     StringRef DType;
-    if (DToken.endswith(DType="-error"))
+    if (DToken.ends_with(DType = "-error"))
       D.DL = ED ? &ED->Errors : nullptr;
-    else if (DToken.endswith(DType="-warning"))
+    else if (DToken.ends_with(DType = "-warning"))
       D.DL = ED ? &ED->Warnings : nullptr;
-    else if (DToken.endswith(DType="-remark"))
+    else if (DToken.ends_with(DType = "-remark"))
       D.DL = ED ? &ED->Remarks : nullptr;
-    else if (DToken.endswith(DType="-note"))
+    else if (DToken.ends_with(DType = "-note"))
       D.DL = ED ? &ED->Notes : nullptr;
-    else if (DToken.endswith(DType="-no-diagnostics")) {
+    else if (DToken.ends_with(DType = "-no-diagnostics")) {
       NoDiag = true;
       if (D.RegexKind)
         continue;
-    }
-    else
+    } else
       continue;
     DToken = DToken.substr(0, DToken.size()-DType.size());
 
@@ -498,6 +499,7 @@ static bool ParseDirective(StringRef S, ExpectedData *ED, SourceManager &SM,
     // Next optional token: @
     SourceLocation ExpectedLoc;
     StringRef Marker;
+    bool MatchAnyFileAndLine = false;
     bool MatchAnyLine = false;
     if (!PH.Next("@")) {
       ExpectedLoc = Pos;
@@ -526,26 +528,38 @@ static bool ParseDirective(StringRef S, ExpectedData *ED, SourceManager &SM,
         StringRef Filename(PH.C, PH.P-PH.C);
         PH.Advance();
 
-        // Lookup file via Preprocessor, like a #include.
-        const DirectoryLookup *CurDir;
-        Optional<FileEntryRef> File =
-            PP->LookupFile(Pos, Filename, false, nullptr, nullptr, CurDir,
-                           nullptr, nullptr, nullptr, nullptr, nullptr);
-        if (!File) {
-          Diags.Report(Pos.getLocWithOffset(PH.C-PH.Begin),
-                       diag::err_verify_missing_file) << Filename << KindStr;
-          continue;
-        }
-
-        const FileEntry *FE = &File->getFileEntry();
-        if (SM.translateFile(FE).isInvalid())
-          SM.createFileID(FE, Pos, SrcMgr::C_User);
-
-        if (PH.Next(Line) && Line > 0)
-          ExpectedLoc = SM.translateFileLineCol(FE, Line, 1);
-        else if (PH.Next("*")) {
+        if (Filename == "*") {
+          MatchAnyFileAndLine = true;
+          if (!PH.Next("*")) {
+            Diags.Report(Pos.getLocWithOffset(PH.C - PH.Begin),
+                         diag::err_verify_missing_line)
+                << "'*'";
+            continue;
+          }
           MatchAnyLine = true;
-          ExpectedLoc = SM.translateFileLineCol(FE, 1, 1);
+          ExpectedLoc = SourceLocation();
+        } else {
+          // Lookup file via Preprocessor, like a #include.
+          OptionalFileEntryRef File =
+              PP->LookupFile(Pos, Filename, false, nullptr, nullptr, nullptr,
+                             nullptr, nullptr, nullptr, nullptr, nullptr);
+          if (!File) {
+            Diags.Report(Pos.getLocWithOffset(PH.C - PH.Begin),
+                         diag::err_verify_missing_file)
+                << Filename << KindStr;
+            continue;
+          }
+
+          FileID FID = SM.translateFile(*File);
+          if (FID.isInvalid())
+            FID = SM.createFileID(*File, Pos, SrcMgr::C_User);
+
+          if (PH.Next(Line) && Line > 0)
+            ExpectedLoc = SM.translateLineCol(FID, Line, 1);
+          else if (PH.Next("*")) {
+            MatchAnyLine = true;
+            ExpectedLoc = SM.translateLineCol(FID, 1, 1);
+          }
         }
       } else if (PH.Next("*")) {
         MatchAnyLine = true;
@@ -597,12 +611,19 @@ static bool ParseDirective(StringRef S, ExpectedData *ED, SourceManager &SM,
                    diag::err_verify_missing_start) << KindStr;
       continue;
     }
+    llvm::SmallString<8> CloseBrace("}}");
+    const char *const DelimBegin = PH.C;
     PH.Advance();
+    // Count the number of opening braces for `string` kinds
+    for (; !D.RegexKind && PH.Next("{"); PH.Advance())
+      CloseBrace += '}';
     const char* const ContentBegin = PH.C; // mark content begin
-    // Search for token: }}
-    if (!PH.SearchClosingBrace("{{", "}}")) {
-      Diags.Report(Pos.getLocWithOffset(PH.C-PH.Begin),
-                   diag::err_verify_missing_end) << KindStr;
+    // Search for closing brace
+    StringRef OpenBrace(DelimBegin, ContentBegin - DelimBegin);
+    if (!PH.SearchClosingBrace(OpenBrace, CloseBrace)) {
+      Diags.Report(Pos.getLocWithOffset(PH.C - PH.Begin),
+                   diag::err_verify_missing_end)
+          << KindStr << CloseBrace;
       continue;
     }
     const char* const ContentEnd = PH.P; // mark content end
@@ -631,7 +652,7 @@ static bool ParseDirective(StringRef S, ExpectedData *ED, SourceManager &SM,
     }
 
     if (Marker.empty())
-      attachDirective(Diags, D, ExpectedLoc, MatchAnyLine);
+      attachDirective(Diags, D, ExpectedLoc, MatchAnyFileAndLine, MatchAnyLine);
     else
       Markers.addDirective(Marker, D);
     FoundDirective = true;
@@ -722,12 +743,12 @@ void VerifyDiagnosticConsumer::HandleDiagnostic(
       Loc = SrcManager->getExpansionLoc(Loc);
       FileID FID = SrcManager->getFileID(Loc);
 
-      const FileEntry *FE = SrcManager->getFileEntryForID(FID);
+      auto FE = SrcManager->getFileEntryRefForID(FID);
       if (FE && CurrentPreprocessor && SrcManager->isLoadedFileID(FID)) {
         // If the file is a modules header file it shall not be parsed
         // for expected-* directives.
         HeaderSearch &HS = CurrentPreprocessor->getHeaderSearchInfo();
-        if (HS.findModuleForHeader(FE))
+        if (HS.findModuleForHeader(*FE))
           PS = IsUnparsedNoDirectives;
       }
 
@@ -809,7 +830,7 @@ static bool findDirectives(SourceManager &SM, FileID FID,
     return false;
 
   // Create a lexer to lex all the tokens of the main file in raw mode.
-  const llvm::MemoryBuffer *FromFile = SM.getBuffer(FID);
+  llvm::MemoryBufferRef FromFile = SM.getBufferOrFake(FID);
   Lexer RawLex(FID, FromFile, SM, LangOpts);
 
   // Return comments as tokens, this is how we find expected diagnostics.
@@ -853,16 +874,18 @@ static unsigned PrintUnexpected(DiagnosticsEngine &Diags, SourceManager *SourceM
       OS << "\n  (frontend)";
     else {
       OS << "\n ";
-      if (const FileEntry *File = SourceMgr->getFileEntryForID(
-                                                SourceMgr->getFileID(I->first)))
+      if (OptionalFileEntryRef File =
+              SourceMgr->getFileEntryRefForID(SourceMgr->getFileID(I->first)))
         OS << " File " << File->getName();
       OS << " Line " << SourceMgr->getPresumedLineNumber(I->first);
     }
     OS << ": " << I->second;
   }
 
+  std::string Prefix = *Diags.getDiagnosticOptions().VerifyPrefixes.begin();
+  std::string KindStr = Prefix + "-" + Kind;
   Diags.Report(diag::err_verify_inconsistent_diags).setForceEmit()
-    << Kind << /*Unexpected=*/true << OS.str();
+      << KindStr << /*Unexpected=*/true << OS.str();
   return std::distance(diag_begin, diag_end);
 }
 
@@ -877,7 +900,7 @@ static unsigned PrintExpected(DiagnosticsEngine &Diags,
   SmallString<256> Fmt;
   llvm::raw_svector_ostream OS(Fmt);
   for (const auto *D : DL) {
-    if (D->DiagnosticLoc.isInvalid())
+    if (D->DiagnosticLoc.isInvalid() || D->MatchAnyFileAndLine)
       OS << "\n  File *";
     else
       OS << "\n  File " << SourceMgr.getFilename(D->DiagnosticLoc);
@@ -892,8 +915,10 @@ static unsigned PrintExpected(DiagnosticsEngine &Diags,
     OS << ": " << D->Text;
   }
 
+  std::string Prefix = *Diags.getDiagnosticOptions().VerifyPrefixes.begin();
+  std::string KindStr = Prefix + "-" + Kind;
   Diags.Report(diag::err_verify_inconsistent_diags).setForceEmit()
-    << Kind << /*Unexpected=*/false << OS.str();
+      << KindStr << /*Unexpected=*/false << OS.str();
   return DL.size();
 }
 
@@ -937,7 +962,7 @@ static unsigned CheckLists(DiagnosticsEngine &Diags, SourceManager &SourceMgr,
             continue;
         }
 
-        if (!D.DiagnosticLoc.isInvalid() &&
+        if (!D.DiagnosticLoc.isInvalid() && !D.MatchAnyFileAndLine &&
             !IsFromSameFile(SourceMgr, D.DiagnosticLoc, II->first))
           continue;
 
@@ -1011,12 +1036,12 @@ void VerifyDiagnosticConsumer::UpdateParsedFileStatus(SourceManager &SM,
   if (FID.isInvalid())
     return;
 
-  const FileEntry *FE = SM.getFileEntryForID(FID);
+  OptionalFileEntryRef FE = SM.getFileEntryRefForID(FID);
 
   if (PS == IsParsed) {
     // Move the FileID from the unparsed set to the parsed set.
     UnparsedFiles.erase(FID);
-    ParsedFiles.insert(std::make_pair(FID, FE));
+    ParsedFiles.insert(std::make_pair(FID, FE ? &FE->getFileEntry() : nullptr));
   } else if (!ParsedFiles.count(FID) && !UnparsedFiles.count(FID)) {
     // Add the FileID to the unparsed set if we haven't seen it before.
 
@@ -1057,17 +1082,17 @@ void VerifyDiagnosticConsumer::CheckDiagnostics() {
     // Iterate through list of unparsed files.
     for (const auto &I : UnparsedFiles) {
       const UnparsedFileStatus &Status = I.second;
-      const FileEntry *FE = Status.getFile();
+      OptionalFileEntryRef FE = Status.getFile();
 
       // Skip files that have been parsed via an alias.
-      if (FE && ParsedFileCache.count(FE))
+      if (FE && ParsedFileCache.count(*FE))
         continue;
 
       // Report a fatal error if this file contained directives.
       if (Status.foundDirectives()) {
-        llvm::report_fatal_error(Twine("-verify directives found after rather"
-                                       " than during normal parsing of ",
-                                 StringRef(FE ? FE->getName() : "(unknown)")));
+        llvm::report_fatal_error("-verify directives found after rather"
+                                 " than during normal parsing of " +
+                                 (FE ? FE->getName() : "(unknown)"));
       }
     }
 
@@ -1114,18 +1139,19 @@ void VerifyDiagnosticConsumer::CheckDiagnostics() {
 std::unique_ptr<Directive> Directive::create(bool RegexKind,
                                              SourceLocation DirectiveLoc,
                                              SourceLocation DiagnosticLoc,
+                                             bool MatchAnyFileAndLine,
                                              bool MatchAnyLine, StringRef Text,
                                              unsigned Min, unsigned Max) {
   if (!RegexKind)
     return std::make_unique<StandardDirective>(DirectiveLoc, DiagnosticLoc,
-                                                MatchAnyLine, Text, Min, Max);
+                                               MatchAnyFileAndLine,
+                                               MatchAnyLine, Text, Min, Max);
 
   // Parse the directive into a regular expression.
   std::string RegexStr;
   StringRef S = Text;
   while (!S.empty()) {
-    if (S.startswith("{{")) {
-      S = S.drop_front(2);
+    if (S.consume_front("{{")) {
       size_t RegexMatchLength = S.find("}}");
       assert(RegexMatchLength != StringRef::npos);
       // Append the regex, enclosed in parentheses.
@@ -1143,6 +1169,7 @@ std::unique_ptr<Directive> Directive::create(bool RegexKind,
     }
   }
 
-  return std::make_unique<RegexDirective>(
-      DirectiveLoc, DiagnosticLoc, MatchAnyLine, Text, Min, Max, RegexStr);
+  return std::make_unique<RegexDirective>(DirectiveLoc, DiagnosticLoc,
+                                          MatchAnyFileAndLine, MatchAnyLine,
+                                          Text, Min, Max, RegexStr);
 }

@@ -16,11 +16,11 @@
 # CHECK-NOT: debug_str
 # CHECK-NOT: DW_AT_type {{.*}} =>
 
-# CHECK: Address            Line   Column File   ISA Discriminator Flags
-# CHECK-NEXT:------------------ ------ ------ ------ --- ------------- -------------
-# CHECK-NEXT:0x0000000000000000      1      0      1   0             0  is_stmt
-# CHECK-NEXT:0x0000000000000006      1     12      1   0             0  is_stmt prologue_end
-# CHECK-NEXT:0x0000000000000008      1     12      1   0             0  is_stmt end_sequence
+# CHECK: Address            Line   Column File   ISA Discriminator OpIndex Flags
+# CHECK-NEXT:------------------ ------ ------ ------ --- ------------- ------- -------------
+# CHECK-NEXT:0x0000000000000000      1      0      1   0             0       0  is_stmt
+# CHECK-NEXT:0x0000000000000006      1     12      1   0             0       0  is_stmt prologue_end
+# CHECK-NEXT:0x0000000000000008      1     12      1   0             0       0  is_stmt end_sequence
 
 # CHECK-NOT: {{.*}} contents:
 
@@ -150,10 +150,6 @@ Lset3 = Lfunc_end0-Lfunc_begin0         ## DW_AT_high_pc
 	.byte	0                       ## End Of Children Mark
 	.section	__DWARF,__debug_ranges,regular,debug
 Ldebug_range:
-	.section	__DWARF,__debug_macinfo,regular,debug
-Ldebug_macinfo:
-Lcu_macro_begin0:
-	.byte	0                       ## End Of Macro List Mark
 	.section	__DWARF,__apple_names,regular,debug
 Lnames_begin:
 	.long	1212240712              ## Header Magic

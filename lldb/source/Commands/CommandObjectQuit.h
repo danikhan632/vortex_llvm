@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_CommandObjectQuit_h_
-#define liblldb_CommandObjectQuit_h_
+#ifndef LLDB_SOURCE_COMMANDS_COMMANDOBJECTQUIT_H
+#define LLDB_SOURCE_COMMANDS_COMMANDOBJECTQUIT_H
 
 #include "lldb/Interpreter/CommandObject.h"
 
@@ -22,11 +22,11 @@ public:
   ~CommandObjectQuit() override;
 
 protected:
-  bool DoExecute(Args &args, CommandReturnObject &result) override;
+  void DoExecute(Args &args, CommandReturnObject &result) override;
 
   bool ShouldAskForConfirmation(bool &is_a_detach);
 };
 
 } // namespace lldb_private
 
-#endif // liblldb_CommandObjectQuit_h_
+#endif // LLDB_SOURCE_COMMANDS_COMMANDOBJECTQUIT_H

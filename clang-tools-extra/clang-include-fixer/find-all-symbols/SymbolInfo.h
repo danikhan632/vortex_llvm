@@ -9,7 +9,6 @@
 #ifndef LLVM_CLANG_TOOLS_EXTRA_INCLUDE_FIXER_FIND_ALL_SYMBOLS_SYMBOLINFO_H
 #define LLVM_CLANG_TOOLS_EXTRA_INCLUDE_FIXER_FIND_ALL_SYMBOLS_SYMBOLINFO_H
 
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/YAMLTraits.h"
 #include "llvm/Support/raw_ostream.h"
@@ -74,7 +73,7 @@ public:
   SymbolInfo(llvm::StringRef Name, SymbolKind Type, llvm::StringRef FilePath,
              const std::vector<Context> &Contexts);
 
-  void SetFilePath(llvm::StringRef Path) { FilePath = Path; }
+  void SetFilePath(llvm::StringRef Path) { FilePath = std::string(Path); }
 
   /// Get symbol name.
   llvm::StringRef getName() const { return Name; }

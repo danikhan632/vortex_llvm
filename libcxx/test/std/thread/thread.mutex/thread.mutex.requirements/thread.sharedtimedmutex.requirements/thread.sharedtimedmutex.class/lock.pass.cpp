@@ -6,10 +6,10 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// UNSUPPORTED: libcpp-has-no-threads
-// UNSUPPORTED: c++98, c++03, c++11
+// UNSUPPORTED: no-threads
+// UNSUPPORTED: c++03, c++11
 
-// FLAKY_TEST.
+// ALLOW_RETRIES: 3
 
 // <shared_mutex>
 
@@ -17,11 +17,14 @@
 
 // void lock();
 
+#include <atomic>
+#include <cassert>
+#include <chrono>
+#include <cstdlib>
 #include <shared_mutex>
 #include <thread>
-#include <cstdlib>
-#include <cassert>
 
+#include "make_test_thread.h"
 #include "test_macros.h"
 
 std::shared_timed_mutex m;
@@ -32,36 +35,32 @@ typedef Clock::duration duration;
 typedef std::chrono::milliseconds ms;
 typedef std::chrono::nanoseconds ns;
 
+std::atomic<bool> ready(false);
+time_point start;
 
 ms WaitTime = ms(250);
 
-// Thread sanitizer causes more overhead and will sometimes cause this test
-// to fail. To prevent this we give Thread sanitizer more time to complete the
-// test.
-#if !TEST_HAS_FEATURE(thread_sanitizer)
-ms Tolerance = ms(50);
-#else
-ms Tolerance = ms(100);
-#endif
-
-
 void f()
 {
-    time_point t0 = Clock::now();
-    m.lock();
-    time_point t1 = Clock::now();
-    m.unlock();
-    ns d = t1 - t0 - ms(250);
-    assert(d < ms(50));  // within 50ms
+  ready.store(true);
+  m.lock();
+  time_point t0 = start;
+  time_point t1 = Clock::now();
+  m.unlock();
+  assert(t0.time_since_epoch() > ms(0));
+  assert(t1 - t0 >= WaitTime);
 }
 
 int main(int, char**)
 {
-    m.lock();
-    std::thread t(f);
-    std::this_thread::sleep_for(ms(250));
-    m.unlock();
-    t.join();
+  m.lock();
+  std::thread t = support::make_test_thread(f);
+  while (!ready)
+    std::this_thread::yield();
+  start = Clock::now();
+  std::this_thread::sleep_for(WaitTime);
+  m.unlock();
+  t.join();
 
   return 0;
 }

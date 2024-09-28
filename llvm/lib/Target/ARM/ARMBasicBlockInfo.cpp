@@ -16,7 +16,6 @@
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/Support/Debug.h"
-#include <vector>
 
 #define DEBUG_TYPE "arm-bb-utils"
 
@@ -49,7 +48,7 @@ void ARMBasicBlockUtils::computeBlockSize(MachineBasicBlock *MBB) {
   BasicBlockInfo &BBI = BBInfo[MBB->getNumber()];
   BBI.Size = 0;
   BBI.Unalign = 0;
-  BBI.PostAlign = Align::None();
+  BBI.PostAlign = Align(1);
 
   for (MachineInstr &I : *MBB) {
     BBI.Size += TII->getInstSizeInBytes(I);

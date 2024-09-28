@@ -1,5 +1,5 @@
-;RUN: llc < %s -march=amdgcn -mcpu=verde -amdgpu-atomic-optimizations=false -verify-machineinstrs | FileCheck %s -check-prefix=CHECK -check-prefix=SICI
-;RUN: llc < %s -march=amdgcn -mcpu=tonga -amdgpu-atomic-optimizations=false -verify-machineinstrs | FileCheck %s -check-prefix=CHECK -check-prefix=VI
+;RUN: llc < %s -mtriple=amdgcn -mcpu=verde -amdgpu-atomic-optimizer-strategy=None -verify-machineinstrs | FileCheck %s -check-prefix=CHECK -check-prefix=SICI
+;RUN: llc < %s -mtriple=amdgcn -mcpu=tonga -amdgpu-atomic-optimizer-strategy=None -verify-machineinstrs | FileCheck %s -check-prefix=CHECK -check-prefix=VI
 
 ;CHECK-LABEL: {{^}}test1:
 ;CHECK-NOT: s_waitcnt
@@ -11,6 +11,7 @@
 ;CHECK: buffer_atomic_swap v0, v2, s[0:3], 0 offen glc
 ;CHECK: s_waitcnt vmcnt(0)
 ;CHECK: buffer_atomic_swap v0, v[1:2], s[0:3], 0 idxen offen glc
+;SICI: v_mov_b32_e32 v1, 0x2000
 ;CHECK: s_waitcnt vmcnt(0)
 ;CHECK: buffer_atomic_swap v0, v2, s[0:3], 0 offen offset:42 glc
 ;CHECK-DAG: s_waitcnt vmcnt(0)

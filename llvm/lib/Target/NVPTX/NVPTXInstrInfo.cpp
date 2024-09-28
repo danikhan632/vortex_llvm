@@ -27,7 +27,7 @@ using namespace llvm;
 // Pin the vtable to this file.
 void NVPTXInstrInfo::anchor() {}
 
-NVPTXInstrInfo::NVPTXInstrInfo() : NVPTXGenInstrInfo(), RegInfo() {}
+NVPTXInstrInfo::NVPTXInstrInfo() : RegInfo() {}
 
 void NVPTXInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                  MachineBasicBlock::iterator I,
@@ -51,11 +51,6 @@ void NVPTXInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   } else if (DestRC == &NVPTX::Int64RegsRegClass) {
     Op = (SrcRC == &NVPTX::Int64RegsRegClass ? NVPTX::IMOV64rr
                                              : NVPTX::BITCONVERT_64_F2I);
-  } else if (DestRC == &NVPTX::Float16RegsRegClass) {
-    Op = (SrcRC == &NVPTX::Float16RegsRegClass ? NVPTX::FMOV16rr
-                                               : NVPTX::BITCONVERT_16_I2F);
-  } else if (DestRC == &NVPTX::Float16x2RegsRegClass) {
-    Op = NVPTX::IMOV32rr;
   } else if (DestRC == &NVPTX::Float32RegsRegClass) {
     Op = (SrcRC == &NVPTX::Float32RegsRegClass ? NVPTX::FMOV32rr
                                                : NVPTX::BITCONVERT_32_I2F);
@@ -69,7 +64,7 @@ void NVPTXInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
       .addReg(SrcReg, getKillRegState(KillSrc));
 }
 
-/// AnalyzeBranch - Analyze the branching code at the end of MBB, returning
+/// analyzeBranch - Analyze the branching code at the end of MBB, returning
 /// true if it cannot be understood (e.g. it's a switch dispatch or isn't
 /// implemented for a target).  Upon success, this returns false and returns
 /// with the following information in various cases:
@@ -195,13 +190,12 @@ unsigned NVPTXInstrInfo::insertBranch(MachineBasicBlock &MBB,
     if (Cond.empty()) // Unconditional branch
       BuildMI(&MBB, DL, get(NVPTX::GOTO)).addMBB(TBB);
     else // Conditional branch
-      BuildMI(&MBB, DL, get(NVPTX::CBranch)).addReg(Cond[0].getReg())
-          .addMBB(TBB);
+      BuildMI(&MBB, DL, get(NVPTX::CBranch)).add(Cond[0]).addMBB(TBB);
     return 1;
   }
 
   // Two-way Conditional Branch.
-  BuildMI(&MBB, DL, get(NVPTX::CBranch)).addReg(Cond[0].getReg()).addMBB(TBB);
+  BuildMI(&MBB, DL, get(NVPTX::CBranch)).add(Cond[0]).addMBB(TBB);
   BuildMI(&MBB, DL, get(NVPTX::GOTO)).addMBB(FBB);
   return 2;
 }

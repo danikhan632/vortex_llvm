@@ -85,11 +85,6 @@ enum CleanupKind : unsigned {
 
   NormalAndEHCleanup = EHCleanup | NormalCleanup,
 
-  InactiveCleanup = 0x4,
-  InactiveEHCleanup = EHCleanup | InactiveCleanup,
-  InactiveNormalCleanup = NormalCleanup | InactiveCleanup,
-  InactiveNormalAndEHCleanup = NormalAndEHCleanup | InactiveCleanup,
-
   LifetimeMarker = 0x8,
   NormalEHLifetimeMarker = LifetimeMarker | NormalAndEHCleanup,
 };
@@ -153,19 +148,28 @@ public:
   public:
     Cleanup(const Cleanup &) = default;
     Cleanup(Cleanup &&) {}
+
+    // The copy and move assignment operator is defined as deleted pending
+    // further motivation.
+    Cleanup &operator=(const Cleanup &) = delete;
+    Cleanup &operator=(Cleanup &&) = delete;
+
     Cleanup() = default;
+
+    virtual bool isRedundantBeforeReturn() { return false; }
 
     /// Generation flags.
     class Flags {
       enum {
-        F_IsForEH             = 0x1,
+        F_IsForEH = 0x1,
         F_IsNormalCleanupKind = 0x2,
-        F_IsEHCleanupKind     = 0x4
+        F_IsEHCleanupKind = 0x4,
+        F_HasExitSwitch = 0x8,
       };
-      unsigned flags;
+      unsigned flags = 0;
 
     public:
-      Flags() : flags(0) {}
+      Flags() = default;
 
       /// isForEH - true if the current emission is for an EH cleanup.
       bool isForEHCleanup() const { return flags & F_IsForEH; }
@@ -179,8 +183,10 @@ public:
       /// cleanup.
       bool isEHCleanupKind() const { return flags & F_IsEHCleanupKind; }
       void setIsEHCleanupKind() { flags |= F_IsEHCleanupKind; }
-    };
 
+      bool hasExitSwitch() const { return flags & F_HasExitSwitch; }
+      void setHasExitSwitch() { flags |= F_HasExitSwitch; }
+    };
 
     /// Emit the cleanup.  For normal cleanups, this is run in the
     /// same EH context as when the cleanup was pushed, i.e. the
@@ -238,6 +244,9 @@ private:
   /// The innermost EH scope on the stack.
   stable_iterator InnermostEHScope;
 
+  /// The CGF this Stack belong to
+  CodeGenFunction* CGF;
+
   /// The current set of branch fixups.  A branch fixup is a jump to
   /// an as-yet unemitted label, i.e. a label for which we don't yet
   /// know the EH stack depth.  Whenever we pop a cleanup, we have
@@ -263,10 +272,14 @@ private:
   void *pushCleanup(CleanupKind K, size_t DataSize);
 
 public:
-  EHScopeStack() : StartOfBuffer(nullptr), EndOfBuffer(nullptr),
-                   StartOfData(nullptr), InnermostNormalCleanup(stable_end()),
-                   InnermostEHScope(stable_end()) {}
+  EHScopeStack()
+    : StartOfBuffer(nullptr), EndOfBuffer(nullptr), StartOfData(nullptr),
+      InnermostNormalCleanup(stable_end()), InnermostEHScope(stable_end()),
+      CGF(nullptr) {}
   ~EHScopeStack() { delete[] StartOfBuffer; }
+
+  EHScopeStack(const EHScopeStack &) = delete;
+  EHScopeStack &operator=(const EHScopeStack &) = delete;
 
   /// Push a lazily-created cleanup on the stack.
   template <class T, class... As> void pushCleanup(CleanupKind Kind, As... A) {
@@ -312,6 +325,8 @@ public:
     void *Buffer = pushCleanup(Kind, Size);
     std::memcpy(Buffer, Cleanup, Size);
   }
+
+  void setCGF(CodeGenFunction *inCGF) { CGF = inCGF; }
 
   /// Pops a cleanup scope off the stack.  This is private to CGCleanup.cpp.
   void popCleanup();

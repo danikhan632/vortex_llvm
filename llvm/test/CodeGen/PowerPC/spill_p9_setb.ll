@@ -17,7 +17,7 @@
 define void @p9_setb_spill() {
 ; CHECK-P9-LABEL: p9_setb_spill:
 ; CHECK-P9:       # %bb.1: # %if.then
-; CHECK-P9-DAG:    crnor 4*cr[[CREG:.*]]+lt, eq, eq
+; CHECK-P9-DAG:    crnot 4*cr[[CREG:.*]]+lt, eq
 ; CHECK-P9-DAG:    setb [[REG1:.*]], cr[[CREG]]
 ; CHECK-P9-DAG:    stw [[REG1]]
 ; CHECK-P9:        blr
@@ -25,7 +25,7 @@ define void @p9_setb_spill() {
 ;
 ; CHECK-P8-LABEL: p9_setb_spill:
 ; CHECK-P8:       # %bb.1: # %if.then
-; CHECK-P8-DAG:    crnor 4*cr[[CREG2:.*]]+lt, eq, eq
+; CHECK-P8-DAG:    crnot 4*cr[[CREG2:.*]]+lt, eq
 ; CHECK-P8-DAG:    mfocrf [[REG2:.*]],
 ; CHECK-P8-DAG:    rlwinm [[REG2]], [[REG2]]
 ; CHECK-P8-DAG:    stw [[REG2]]
@@ -35,7 +35,7 @@ entry:
   br i1 undef, label %if.end, label %if.then
 
 if.then:                                          ; preds = %entry
-  %call = tail call signext i32 bitcast (i32 (...)* @fn_call to i32 ()*)()
+  %call = tail call signext i32 @fn_call()
   %cmp1 = icmp ne i32 %call, 0
   br label %if.end
 

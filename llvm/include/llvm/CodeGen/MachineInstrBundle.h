@@ -238,8 +238,15 @@ struct VirtRegInfo {
 ///            each operand referring to Reg.
 /// @returns A filled-in RegInfo struct.
 VirtRegInfo AnalyzeVirtRegInBundle(
-    MachineInstr &MI, unsigned Reg,
+    MachineInstr &MI, Register Reg,
     SmallVectorImpl<std::pair<MachineInstr *, unsigned>> *Ops = nullptr);
+
+/// Return a pair of lane masks (reads, writes) indicating which lanes this
+/// instruction uses with Reg.
+std::pair<LaneBitmask, LaneBitmask>
+AnalyzeVirtRegLanesInBundle(const MachineInstr &MI, Register Reg,
+                            const MachineRegisterInfo &MRI,
+                            const TargetRegisterInfo &TRI);
 
 /// Information about how a physical register Reg is used by a set of
 /// operands.
@@ -281,7 +288,7 @@ struct PhysRegInfo {
 ///
 /// @param Reg The physical register to analyze.
 /// @returns A filled-in PhysRegInfo struct.
-PhysRegInfo AnalyzePhysRegInBundle(const MachineInstr &MI, unsigned Reg,
+PhysRegInfo AnalyzePhysRegInBundle(const MachineInstr &MI, Register Reg,
                                    const TargetRegisterInfo *TRI);
 
 } // End llvm namespace

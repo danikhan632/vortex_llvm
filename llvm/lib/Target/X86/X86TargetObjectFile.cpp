@@ -7,17 +7,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "X86TargetObjectFile.h"
-#include "llvm/ADT/StringExtras.h"
-#include "llvm/BinaryFormat/COFF.h"
 #include "llvm/BinaryFormat/Dwarf.h"
-#include "llvm/CodeGen/TargetLowering.h"
-#include "llvm/IR/Mangler.h"
-#include "llvm/IR/Operator.h"
-#include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
-#include "llvm/MC/MCSectionCOFF.h"
-#include "llvm/MC/MCSectionELF.h"
 #include "llvm/MC/MCValue.h"
+#include "llvm/Target/TargetMachine.h"
 
 using namespace llvm;
 using namespace dwarf;
@@ -64,29 +57,12 @@ const MCExpr *X86ELFTargetObjectFile::getDebugThreadLocalSymbol(
   return MCSymbolRefExpr::create(Sym, MCSymbolRefExpr::VK_DTPOFF, getContext());
 }
 
-void
-X86FreeBSDTargetObjectFile::Initialize(MCContext &Ctx,
-                                       const TargetMachine &TM) {
-  TargetLoweringObjectFileELF::Initialize(Ctx, TM);
-  InitializeELF(TM.Options.UseInitArray);
-}
-
-void
-X86FuchsiaTargetObjectFile::Initialize(MCContext &Ctx,
-                                       const TargetMachine &TM) {
-  TargetLoweringObjectFileELF::Initialize(Ctx, TM);
-  InitializeELF(TM.Options.UseInitArray);
-}
-
-void
-X86LinuxNaClTargetObjectFile::Initialize(MCContext &Ctx,
-                                         const TargetMachine &TM) {
-  TargetLoweringObjectFileELF::Initialize(Ctx, TM);
-  InitializeELF(TM.Options.UseInitArray);
-}
-
-void X86SolarisTargetObjectFile::Initialize(MCContext &Ctx,
-                                            const TargetMachine &TM) {
-  TargetLoweringObjectFileELF::Initialize(Ctx, TM);
-  InitializeELF(TM.Options.UseInitArray);
+const MCExpr *X86_64ELFTargetObjectFile::getIndirectSymViaGOTPCRel(
+    const GlobalValue *GV, const MCSymbol *Sym, const MCValue &MV,
+    int64_t Offset, MachineModuleInfo *MMI, MCStreamer &Streamer) const {
+  int64_t FinalOffset = Offset + MV.getConstant();
+  const MCExpr *Res =
+      MCSymbolRefExpr::create(Sym, MCSymbolRefExpr::VK_GOTPCREL, getContext());
+  const MCExpr *Off = MCConstantExpr::create(FinalOffset, getContext());
+  return MCBinaryExpr::createAdd(Res, Off, getContext());
 }

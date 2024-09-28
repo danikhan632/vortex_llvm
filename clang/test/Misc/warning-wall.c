@@ -3,6 +3,9 @@ RUN: FileCheck --input-file=%t %s
 
      CHECK:-Wall
 CHECK-NEXT:  -Wmost
+CHECK-NEXT:    -Warray-parameter
+CHECK-NEXT:    -Wbool-operation
+CHECK-NEXT:    -Wbitwise-instead-of-logical
 CHECK-NEXT:    -Wchar-subscripts
 CHECK-NEXT:    -Wcomment
 CHECK-NEXT:    -Wdelete-non-virtual-dtor
@@ -15,7 +18,13 @@ CHECK-NEXT:      -Wnonnull
 CHECK-NEXT:      -Wformat-security
 CHECK-NEXT:      -Wformat-y2k
 CHECK-NEXT:      -Wformat-invalid-specifier
+CHECK-NEXT:      -Wformat-insufficient-args
+CHECK-NEXT:      -Wformat-overflow
+CHECK-NEXT:      -Wformat-overflow-non-kprintf
+CHECK-NEXT:      -Wformat-truncation
+CHECK-NEXT:      -Wformat-truncation-non-kprintf
 CHECK-NEXT:    -Wfor-loop-analysis
+CHECK-NEXT:    -Wframe-address
 CHECK-NEXT:    -Wimplicit
 CHECK-NEXT:      -Wimplicit-function-declaration
 CHECK-NEXT:      -Wimplicit-int
@@ -50,10 +59,12 @@ CHECK-NEXT:      -Wtautological-overlap-compare
 CHECK-NEXT:      -Wtautological-bitwise-compare
 CHECK-NEXT:      -Wtautological-undefined-compare
 CHECK-NEXT:      -Wtautological-objc-bool-compare
+CHECK-NEXT:      -Wtautological-negation-compare
 CHECK-NEXT:    -Wtrigraphs
 CHECK-NEXT:    -Wuninitialized
 CHECK-NEXT:      -Wsometimes-uninitialized
 CHECK-NEXT:      -Wstatic-self-init
+CHECK-NEXT:      -Wuninitialized-const-reference
 CHECK-NEXT:    -Wunknown-pragmas
 CHECK-NEXT:    -Wunused
 CHECK-NEXT:      -Wunused-argument
@@ -70,6 +81,7 @@ CHECK-NEXT:        -Wunevaluated-expression
 CHECK-NEXT:          -Wpotentially-evaluated-expression
 CHECK-NEXT:      -Wunused-variable
 CHECK-NEXT:        -Wunused-const-variable
+CHECK-NEXT:      -Wunused-but-set-variable
 CHECK-NEXT:      -Wunused-property-ivar
 CHECK-NEXT:    -Wvolatile-register-var
 CHECK-NEXT:    -Wobjc-missing-super-calls
@@ -92,6 +104,8 @@ CHECK-NEXT:    -Wdangling-else
 CHECK-NEXT:  -Wswitch
 CHECK-NEXT:  -Wswitch-bool
 CHECK-NEXT:  -Wmisleading-indentation
-
+CHECK-NEXT:  -Wpacked-non-pod
+CHECK-NEXT:  -Wvla-cxx-extension
+CHECK-NEXT:    -Wvla-extension-static-assert
 
 CHECK-NOT:-W

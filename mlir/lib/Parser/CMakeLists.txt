@@ -1,10 +1,11 @@
-add_llvm_library(MLIRParser
-  Lexer.cpp
+add_mlir_library(MLIRParser
   Parser.cpp
-  Token.cpp
 
   ADDITIONAL_HEADER_DIRS
   ${MLIR_MAIN_INCLUDE_DIR}/mlir/Parser
+
+  LINK_LIBS PUBLIC
+  MLIRAsmParser
+  MLIRBytecodeReader
+  MLIRIR
   )
-add_dependencies(MLIRParser MLIRIR MLIRAnalysis)
-target_link_libraries(MLIRParser MLIRIR MLIRAnalysis)

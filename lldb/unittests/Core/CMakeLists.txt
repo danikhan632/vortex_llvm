@@ -1,16 +1,28 @@
 add_lldb_unittest(LLDBCoreTests
+  CommunicationTest.cpp
+  DiagnosticEventTest.cpp
+  DumpDataExtractorTest.cpp
+  DumpRegisterInfoTest.cpp
+  FileSpecListTest.cpp
+  FormatEntityTest.cpp
   MangledTest.cpp
+  ModuleSpecTest.cpp
   RichManglingContextTest.cpp
-  StreamCallbackTest.cpp
+  SourceLocationSpecTest.cpp
+  SourceManagerTest.cpp
   UniqueCStringMapTest.cpp
 
   LINK_LIBS
     lldbCore
     lldbHost
-    lldbSymbol
     lldbPluginObjectFileELF
+    lldbPluginObjectFileMachO
+    lldbPluginObjectFilePECOFF
+    lldbPluginPlatformMacOSX
     lldbPluginSymbolFileSymtab
+    lldbSymbol
     lldbUtilityHelpers
+    lldbHostHelpers
     LLVMTestingSupport
   LINK_COMPONENTS
     Support

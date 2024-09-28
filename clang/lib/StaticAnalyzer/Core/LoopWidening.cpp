@@ -35,6 +35,8 @@ static const Expr *getLoopCondition(const Stmt *LoopStmt) {
     return cast<WhileStmt>(LoopStmt)->getCond();
   case Stmt::DoStmtClass:
     return cast<DoStmt>(LoopStmt)->getCond();
+  case Stmt::CXXForRangeStmtClass:
+    return cast<CXXForRangeStmt>(LoopStmt)->getCond();
   }
 }
 
@@ -45,8 +47,7 @@ ProgramStateRef getWidenedLoopState(ProgramStateRef PrevState,
                                     const LocationContext *LCtx,
                                     unsigned BlockCount, const Stmt *LoopStmt) {
 
-  assert(isa<ForStmt>(LoopStmt) || isa<WhileStmt>(LoopStmt) ||
-         isa<DoStmt>(LoopStmt));
+  assert((isa<ForStmt, WhileStmt, DoStmt, CXXForRangeStmt>(LoopStmt)));
 
   // Invalidate values in the current state.
   // TODO Make this more conservative by only invalidating values that might
@@ -67,8 +68,10 @@ ProgramStateRef getWidenedLoopState(ProgramStateRef PrevState,
   }
 
   // References should not be invalidated.
-  auto Matches = match(findAll(stmt(hasDescendant(varDecl(hasType(referenceType())).bind(MatchRef)))),
-                       *LCtx->getDecl()->getBody(), ASTCtx);
+  auto Matches = match(
+      findAll(stmt(hasDescendant(
+          varDecl(hasType(hasCanonicalType(referenceType()))).bind(MatchRef)))),
+      *LCtx->getDecl()->getBody(), ASTCtx);
   for (BoundNodes Match : Matches) {
     const VarDecl *VD = Match.getNodeAs<VarDecl>(MatchRef);
     assert(VD);
@@ -83,7 +86,7 @@ ProgramStateRef getWidenedLoopState(ProgramStateRef PrevState,
   // pointer should remain unchanged.  Ignore static methods, since they do not
   // have 'this' pointers.
   const CXXMethodDecl *CXXMD = dyn_cast<CXXMethodDecl>(STC->getDecl());
-  if (CXXMD && !CXXMD->isStatic()) {
+  if (CXXMD && CXXMD->isImplicitObjectMemberFunction()) {
     const CXXThisRegion *ThisR =
         MRMgr.getCXXThisRegion(CXXMD->getThisType(), STC);
     ITraits.setTrait(ThisR,

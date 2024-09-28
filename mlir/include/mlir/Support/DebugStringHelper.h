@@ -1,6 +1,6 @@
 //===- DebugStringHelper.h - helpers to generate debug strings --*- C++ -*-===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -12,8 +12,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef MLIR_DEBUGSTRINGHELPER_H_
-#define MLIR_DEBUGSTRINGHELPER_H_
+#ifndef MLIR_SUPPORT_DEBUGSTRINGHELPER_H
+#define MLIR_SUPPORT_DEBUGSTRINGHELPER_H
 
 #include <string>
 
@@ -24,10 +24,11 @@
 namespace mlir {
 
 // Simple helper function that returns a string as printed from a op.
-template <typename T> static std::string debugString(T &op) {
-  std::string instr_str;
-  llvm::raw_string_ostream os(instr_str);
-  op.print(os);
+template <typename T>
+static std::string debugString(T &&op) {
+  std::string instrStr;
+  llvm::raw_string_ostream os(instrStr);
+  os << op;
   return os.str();
 }
 
@@ -39,4 +40,4 @@ inline std::ostream &operator<<(std::ostream &out, const llvm::Twine &twine) {
   return out;
 }
 
-#endif // MLIR_DEBUGSTRINGHELPER_H_
+#endif // MLIR_SUPPORT_DEBUGSTRINGHELPER_H

@@ -1,12 +1,25 @@
-; RUN: llc < %s -march=avr | FileCheck %s
+; RUN: llc < %s -march=avr -mattr=avr3 | FileCheck %s
+; RUN: llc < %s -march=avr -mattr=avr2 | FileCheck --check-prefix=AVR2 %s
 
 ; CHECK-LABEL: relax_to_jmp:
 ; CHECK: cpi     r{{[0-9]+}}, 0
-; CHECK: brne    [[BB1:LBB[0-9]+_[0-9]+]]
-; CHECK: jmp     [[BB2:LBB[0-9]+_[0-9]+]]
+; CHECK: brne    [[BB1:.LBB[0-9]+_[0-9]+]]
+; CHECK: jmp     [[BB2:.LBB[0-9]+_[0-9]+]]
 ; CHECK: [[BB1]]:
 ; CHECK: nop
 ; CHECK: [[BB2]]:
+
+;; A `RJMP` is generated instead of expected `JMP` for AVR2,
+;; and it is up to the linker to report 'out of range' or
+;; 'exceed flash maximum size'.
+; AVR2-LABEL: relax_to_jmp:
+; AVR2: cpi     r{{[0-9]+}}, 0
+; AVR2: brne    [[BB1:.LBB[0-9]+_[0-9]+]]
+; AVR2: rjmp    [[BB2:.LBB[0-9]+_[0-9]+]]
+; AVR2: [[BB1]]:
+; AVR2: nop
+; AVR2: [[BB2]]:
+
 define i8 @relax_to_jmp(i1 %a) {
 entry-block:
   br i1 %a, label %hello, label %finished
@@ -2069,12 +2082,24 @@ finished:
 }
 
 ; CHECK-LABEL: relax_to_jmp_backwards:
-; CHECK: [[BB1:LBB[0-9]+_[0-9]+]]
+; CHECK: [[BB1:.LBB[0-9]+_[0-9]+]]
 ; CHECK: nop
 ; CHECK: cpi     r{{[0-9]+}}, 0
-; CHECK: breq    [[BB2:LBB[0-9]+_[0-9]+]]
+; CHECK: breq    [[BB2:.LBB[0-9]+_[0-9]+]]
 ; CHECK: jmp     [[BB1]]
 ; CHECK: [[BB2]]:
+
+;; A `RJMP` is generated instead of expected `JMP` for AVR2,
+;; and it is up to the linker to report 'out of range' or
+;; 'exceed flash maximum size'.
+; AVR2-LABEL: relax_to_jmp_backwards:
+; AVR2: [[BB1:.LBB[0-9]+_[0-9]+]]
+; AVR2: nop
+; AVR2: cpi     r{{[0-9]+}}, 0
+; AVR2: breq    [[BB2:.LBB[0-9]+_[0-9]+]]
+; AVR2: rjmp    [[BB1]]
+; AVR2: [[BB2]]:
+
 define i8 @relax_to_jmp_backwards(i1 %a) {
 entry-block:
   br label %hello

@@ -113,7 +113,7 @@ let Predicates = [FeatureVector] in {
   // Load count to block boundary.
   let Defs = [CC] in
     def LCBB : InstRXE<0xE727, (outs GR32:$R1),
-                               (ins bdxaddr12only:$XBD2, imm32zx4:$M3),
+                               (ins (bdxaddr12only $B2, $D2, $X2):$XBD2, imm32zx4:$M3),
                        "lcbb\t$R1, $XBD2, $M3",
                        [(set GR32:$R1, (int_s390_lcbb bdxaddr12only:$XBD2,
                                                       imm32zx4_timm:$M3))]>;
@@ -177,9 +177,13 @@ let Predicates = [FeatureVector] in {
 
 let Predicates = [FeatureVectorPackedDecimal] in {
   // Load rightmost with length.  The number of loaded bytes is only known
-  // at run time.
-  def VLRL : BinaryVSI<"vlrl", 0xE635, int_s390_vlrl, 0>;
+  // at run time.  Note that while the instruction will accept immediate
+  // lengths larger that 15 at runtime, those will always result in a trap,
+  // so we never emit them here.
+  def VLRL : BinaryVSI<"vlrl", 0xE635, null_frag, 0>;
   def VLRLR : BinaryVRSd<"vlrlr", 0xE637, int_s390_vlrl, 0>;
+  def : Pat<(int_s390_vlrl imm32zx4:$len, bdaddr12only:$addr),
+            (VLRL bdaddr12only:$addr, imm32zx4:$len)>;
 }
 
 // Use replicating loads if we're inserting a single element into an
@@ -243,9 +247,13 @@ let Predicates = [FeatureVector] in {
 
 let Predicates = [FeatureVectorPackedDecimal] in {
   // Store rightmost with length.  The number of stored bytes is only known
-  // at run time.
-  def VSTRL : StoreLengthVSI<"vstrl", 0xE63D, int_s390_vstrl, 0>;
+  // at run time.  Note that while the instruction will accept immediate
+  // lengths larger that 15 at runtime, those will always result in a trap,
+  // so we never emit them here.
+  def VSTRL : StoreLengthVSI<"vstrl", 0xE63D, null_frag, 0>;
   def VSTRLR : StoreLengthVRSd<"vstrlr", 0xE63F, int_s390_vstrl, 0>;
+  def : Pat<(int_s390_vstrl VR128:$val, imm32zx4:$len, bdaddr12only:$addr),
+            (VSTRL VR128:$val, bdaddr12only:$addr, imm32zx4:$len)>;
 }
 
 //===----------------------------------------------------------------------===//
@@ -258,7 +266,7 @@ let Predicates = [FeatureVectorEnhancements2] in {
   def VLBRH : UnaryVRX<"vlbrh", 0xE606, z_loadbswap, v128h, 16, 1>;
   def VLBRF : UnaryVRX<"vlbrf", 0xE606, z_loadbswap, v128f, 16, 2>;
   def VLBRG : UnaryVRX<"vlbrg", 0xE606, z_loadbswap, v128g, 16, 3>;
-  def VLBRQ : UnaryVRX<"vlbrq", 0xE606, null_frag, v128q, 16, 4>;
+  def VLBRQ : UnaryVRX<"vlbrq", 0xE606, z_loadbswap, v128q, 16, 4>;
 
   // Load elements reversed.
   def VLER  : UnaryVRXGeneric<"vler", 0xE607>;
@@ -299,7 +307,7 @@ let Predicates = [FeatureVectorEnhancements2] in {
   def VSTBRH : StoreVRX<"vstbrh", 0xE60E, z_storebswap, v128h, 16, 1>;
   def VSTBRF : StoreVRX<"vstbrf", 0xE60E, z_storebswap, v128f, 16, 2>;
   def VSTBRG : StoreVRX<"vstbrg", 0xE60E, z_storebswap, v128g, 16, 3>;
-  def VSTBRQ : StoreVRX<"vstbrq", 0xE60E, null_frag, v128q, 16, 4>;
+  def VSTBRQ : StoreVRX<"vstbrq", 0xE60E, z_storebswap, v128q, 16, 4>;
 
   // Store elements reversed.
   def VSTER  : StoreVRXGeneric<"vster", 0xE60F>;
@@ -463,49 +471,56 @@ defm : GenericVectorOps<v2f64, v2i64>;
 //===----------------------------------------------------------------------===//
 
 let Predicates = [FeatureVector] in {
-  // Add.
-  def VA  : BinaryVRRcGeneric<"va", 0xE7F3>;
-  def VAB : BinaryVRRc<"vab", 0xE7F3, add, v128b, v128b, 0>;
-  def VAH : BinaryVRRc<"vah", 0xE7F3, add, v128h, v128h, 1>;
-  def VAF : BinaryVRRc<"vaf", 0xE7F3, add, v128f, v128f, 2>;
-  def VAG : BinaryVRRc<"vag", 0xE7F3, add, v128g, v128g, 3>;
-  def VAQ : BinaryVRRc<"vaq", 0xE7F3, int_s390_vaq, v128q, v128q, 4>;
+  let isCommutable = 1 in {
+    // Add.
+    def VA  : BinaryVRRcGeneric<"va", 0xE7F3>;
+    def VAB : BinaryVRRc<"vab", 0xE7F3, add, v128b, v128b, 0>;
+    def VAH : BinaryVRRc<"vah", 0xE7F3, add, v128h, v128h, 1>;
+    def VAF : BinaryVRRc<"vaf", 0xE7F3, add, v128f, v128f, 2>;
+    def VAG : BinaryVRRc<"vag", 0xE7F3, add, v128g, v128g, 3>;
+    def VAQ : BinaryVRRc<"vaq", 0xE7F3, add, v128q, v128q, 4>;
+  }
 
-  // Add compute carry.
-  def VACC  : BinaryVRRcGeneric<"vacc", 0xE7F1>;
-  def VACCB : BinaryVRRc<"vaccb", 0xE7F1, int_s390_vaccb, v128b, v128b, 0>;
-  def VACCH : BinaryVRRc<"vacch", 0xE7F1, int_s390_vacch, v128h, v128h, 1>;
-  def VACCF : BinaryVRRc<"vaccf", 0xE7F1, int_s390_vaccf, v128f, v128f, 2>;
-  def VACCG : BinaryVRRc<"vaccg", 0xE7F1, int_s390_vaccg, v128g, v128g, 3>;
-  def VACCQ : BinaryVRRc<"vaccq", 0xE7F1, int_s390_vaccq, v128q, v128q, 4>;
+  let isCommutable = 1 in {
+    // Add compute carry.
+    def VACC  : BinaryVRRcGeneric<"vacc", 0xE7F1>;
+    def VACCB : BinaryVRRc<"vaccb", 0xE7F1, z_vacc, v128b, v128b, 0>;
+    def VACCH : BinaryVRRc<"vacch", 0xE7F1, z_vacc, v128h, v128h, 1>;
+    def VACCF : BinaryVRRc<"vaccf", 0xE7F1, z_vacc, v128f, v128f, 2>;
+    def VACCG : BinaryVRRc<"vaccg", 0xE7F1, z_vacc, v128g, v128g, 3>;
+    def VACCQ : BinaryVRRc<"vaccq", 0xE7F1, z_vacc, v128q, v128q, 4>;
 
-  // Add with carry.
-  def VAC  : TernaryVRRdGeneric<"vac", 0xE7BB>;
-  def VACQ : TernaryVRRd<"vacq", 0xE7BB, int_s390_vacq, v128q, v128q, 4>;
+    // Add with carry.
+    def VAC  : TernaryVRRdGeneric<"vac", 0xE7BB>;
+    def VACQ : TernaryVRRd<"vacq", 0xE7BB, z_vac, v128q, v128q, 4>;
 
-  // Add with carry compute carry.
-  def VACCC  : TernaryVRRdGeneric<"vaccc", 0xE7B9>;
-  def VACCCQ : TernaryVRRd<"vacccq", 0xE7B9, int_s390_vacccq, v128q, v128q, 4>;
+    // Add with carry compute carry.
+    def VACCC  : TernaryVRRdGeneric<"vaccc", 0xE7B9>;
+    def VACCCQ : TernaryVRRd<"vacccq", 0xE7B9, z_vaccc, v128q, v128q, 4>;
+  }
 
   // And.
-  def VN : BinaryVRRc<"vn", 0xE768, null_frag, v128any, v128any>;
+  let isCommutable = 1 in
+    def VN : BinaryVRRc<"vn", 0xE768, null_frag, v128any, v128any>;
 
   // And with complement.
   def VNC : BinaryVRRc<"vnc", 0xE769, null_frag, v128any, v128any>;
 
-  // Average.
-  def VAVG  : BinaryVRRcGeneric<"vavg", 0xE7F2>;
-  def VAVGB : BinaryVRRc<"vavgb", 0xE7F2, int_s390_vavgb, v128b, v128b, 0>;
-  def VAVGH : BinaryVRRc<"vavgh", 0xE7F2, int_s390_vavgh, v128h, v128h, 1>;
-  def VAVGF : BinaryVRRc<"vavgf", 0xE7F2, int_s390_vavgf, v128f, v128f, 2>;
-  def VAVGG : BinaryVRRc<"vavgg", 0xE7F2, int_s390_vavgg, v128g, v128g, 3>;
+  let isCommutable = 1 in {
+    // Average.
+    def VAVG  : BinaryVRRcGeneric<"vavg", 0xE7F2>;
+    def VAVGB : BinaryVRRc<"vavgb", 0xE7F2, int_s390_vavgb, v128b, v128b, 0>;
+    def VAVGH : BinaryVRRc<"vavgh", 0xE7F2, int_s390_vavgh, v128h, v128h, 1>;
+    def VAVGF : BinaryVRRc<"vavgf", 0xE7F2, int_s390_vavgf, v128f, v128f, 2>;
+    def VAVGG : BinaryVRRc<"vavgg", 0xE7F2, int_s390_vavgg, v128g, v128g, 3>;
 
-  // Average logical.
-  def VAVGL  : BinaryVRRcGeneric<"vavgl", 0xE7F0>;
-  def VAVGLB : BinaryVRRc<"vavglb", 0xE7F0, int_s390_vavglb, v128b, v128b, 0>;
-  def VAVGLH : BinaryVRRc<"vavglh", 0xE7F0, int_s390_vavglh, v128h, v128h, 1>;
-  def VAVGLF : BinaryVRRc<"vavglf", 0xE7F0, int_s390_vavglf, v128f, v128f, 2>;
-  def VAVGLG : BinaryVRRc<"vavglg", 0xE7F0, int_s390_vavglg, v128g, v128g, 3>;
+    // Average logical.
+    def VAVGL  : BinaryVRRcGeneric<"vavgl", 0xE7F0>;
+    def VAVGLB : BinaryVRRc<"vavglb", 0xE7F0, int_s390_vavglb, v128b, v128b, 0>;
+    def VAVGLH : BinaryVRRc<"vavglh", 0xE7F0, int_s390_vavglh, v128h, v128h, 1>;
+    def VAVGLF : BinaryVRRc<"vavglf", 0xE7F0, int_s390_vavglf, v128f, v128f, 2>;
+    def VAVGLG : BinaryVRRc<"vavglg", 0xE7F0, int_s390_vavglg, v128g, v128g, 3>;
+  }
 
   // Checksum.
   def VCKSM : BinaryVRRc<"vcksm", 0xE766, int_s390_vcksm, v128f, v128f>;
@@ -524,12 +539,14 @@ let Predicates = [FeatureVector] in {
   def VCTZF : UnaryVRRa<"vctzf", 0xE752, cttz, v128f, v128f, 2>;
   def VCTZG : UnaryVRRa<"vctzg", 0xE752, cttz, v128g, v128g, 3>;
 
-  // Not exclusive or.
-  let Predicates = [FeatureVectorEnhancements1] in
-    def VNX : BinaryVRRc<"vnx", 0xE76C, null_frag, v128any, v128any>;
+  let isCommutable = 1 in {
+    // Not exclusive or.
+    let Predicates = [FeatureVectorEnhancements1] in
+      def VNX : BinaryVRRc<"vnx", 0xE76C, null_frag, v128any, v128any>;
 
-  // Exclusive or.
-  def VX : BinaryVRRc<"vx", 0xE76D, null_frag, v128any, v128any>;
+    // Exclusive or.
+    def VX : BinaryVRRc<"vx", 0xE76D, null_frag, v128any, v128any>;
+  }
 
   // Galois field multiply sum.
   def VGFM  : BinaryVRRcGeneric<"vgfm", 0xE7B4>;
@@ -554,140 +571,150 @@ let Predicates = [FeatureVector] in {
 
   // Load positive.
   def VLP  : UnaryVRRaGeneric<"vlp", 0xE7DF>;
-  def VLPB : UnaryVRRa<"vlpb", 0xE7DF, z_viabs8,  v128b, v128b, 0>;
-  def VLPH : UnaryVRRa<"vlph", 0xE7DF, z_viabs16, v128h, v128h, 1>;
-  def VLPF : UnaryVRRa<"vlpf", 0xE7DF, z_viabs32, v128f, v128f, 2>;
-  def VLPG : UnaryVRRa<"vlpg", 0xE7DF, z_viabs64, v128g, v128g, 3>;
+  def VLPB : UnaryVRRa<"vlpb", 0xE7DF, abs, v128b, v128b, 0>;
+  def VLPH : UnaryVRRa<"vlph", 0xE7DF, abs, v128h, v128h, 1>;
+  def VLPF : UnaryVRRa<"vlpf", 0xE7DF, abs, v128f, v128f, 2>;
+  def VLPG : UnaryVRRa<"vlpg", 0xE7DF, abs, v128g, v128g, 3>;
 
-  // Maximum.
-  def VMX  : BinaryVRRcGeneric<"vmx", 0xE7FF>;
-  def VMXB : BinaryVRRc<"vmxb", 0xE7FF, null_frag, v128b, v128b, 0>;
-  def VMXH : BinaryVRRc<"vmxh", 0xE7FF, null_frag, v128h, v128h, 1>;
-  def VMXF : BinaryVRRc<"vmxf", 0xE7FF, null_frag, v128f, v128f, 2>;
-  def VMXG : BinaryVRRc<"vmxg", 0xE7FF, null_frag, v128g, v128g, 3>;
+  let isCommutable = 1 in {
+    // Maximum.
+    def VMX  : BinaryVRRcGeneric<"vmx", 0xE7FF>;
+    def VMXB : BinaryVRRc<"vmxb", 0xE7FF, null_frag, v128b, v128b, 0>;
+    def VMXH : BinaryVRRc<"vmxh", 0xE7FF, null_frag, v128h, v128h, 1>;
+    def VMXF : BinaryVRRc<"vmxf", 0xE7FF, null_frag, v128f, v128f, 2>;
+    def VMXG : BinaryVRRc<"vmxg", 0xE7FF, null_frag, v128g, v128g, 3>;
 
-  // Maximum logical.
-  def VMXL  : BinaryVRRcGeneric<"vmxl", 0xE7FD>;
-  def VMXLB : BinaryVRRc<"vmxlb", 0xE7FD, null_frag, v128b, v128b, 0>;
-  def VMXLH : BinaryVRRc<"vmxlh", 0xE7FD, null_frag, v128h, v128h, 1>;
-  def VMXLF : BinaryVRRc<"vmxlf", 0xE7FD, null_frag, v128f, v128f, 2>;
-  def VMXLG : BinaryVRRc<"vmxlg", 0xE7FD, null_frag, v128g, v128g, 3>;
+    // Maximum logical.
+    def VMXL  : BinaryVRRcGeneric<"vmxl", 0xE7FD>;
+    def VMXLB : BinaryVRRc<"vmxlb", 0xE7FD, null_frag, v128b, v128b, 0>;
+    def VMXLH : BinaryVRRc<"vmxlh", 0xE7FD, null_frag, v128h, v128h, 1>;
+    def VMXLF : BinaryVRRc<"vmxlf", 0xE7FD, null_frag, v128f, v128f, 2>;
+    def VMXLG : BinaryVRRc<"vmxlg", 0xE7FD, null_frag, v128g, v128g, 3>;
+  }
 
-  // Minimum.
-  def VMN  : BinaryVRRcGeneric<"vmn", 0xE7FE>;
-  def VMNB : BinaryVRRc<"vmnb", 0xE7FE, null_frag, v128b, v128b, 0>;
-  def VMNH : BinaryVRRc<"vmnh", 0xE7FE, null_frag, v128h, v128h, 1>;
-  def VMNF : BinaryVRRc<"vmnf", 0xE7FE, null_frag, v128f, v128f, 2>;
-  def VMNG : BinaryVRRc<"vmng", 0xE7FE, null_frag, v128g, v128g, 3>;
+  let isCommutable = 1 in {
+    // Minimum.
+    def VMN  : BinaryVRRcGeneric<"vmn", 0xE7FE>;
+    def VMNB : BinaryVRRc<"vmnb", 0xE7FE, null_frag, v128b, v128b, 0>;
+    def VMNH : BinaryVRRc<"vmnh", 0xE7FE, null_frag, v128h, v128h, 1>;
+    def VMNF : BinaryVRRc<"vmnf", 0xE7FE, null_frag, v128f, v128f, 2>;
+    def VMNG : BinaryVRRc<"vmng", 0xE7FE, null_frag, v128g, v128g, 3>;
 
-  // Minimum logical.
-  def VMNL  : BinaryVRRcGeneric<"vmnl", 0xE7FC>;
-  def VMNLB : BinaryVRRc<"vmnlb", 0xE7FC, null_frag, v128b, v128b, 0>;
-  def VMNLH : BinaryVRRc<"vmnlh", 0xE7FC, null_frag, v128h, v128h, 1>;
-  def VMNLF : BinaryVRRc<"vmnlf", 0xE7FC, null_frag, v128f, v128f, 2>;
-  def VMNLG : BinaryVRRc<"vmnlg", 0xE7FC, null_frag, v128g, v128g, 3>;
+    // Minimum logical.
+    def VMNL  : BinaryVRRcGeneric<"vmnl", 0xE7FC>;
+    def VMNLB : BinaryVRRc<"vmnlb", 0xE7FC, null_frag, v128b, v128b, 0>;
+    def VMNLH : BinaryVRRc<"vmnlh", 0xE7FC, null_frag, v128h, v128h, 1>;
+    def VMNLF : BinaryVRRc<"vmnlf", 0xE7FC, null_frag, v128f, v128f, 2>;
+    def VMNLG : BinaryVRRc<"vmnlg", 0xE7FC, null_frag, v128g, v128g, 3>;
+  }
 
-  // Multiply and add low.
-  def VMAL   : TernaryVRRdGeneric<"vmal", 0xE7AA>;
-  def VMALB  : TernaryVRRd<"vmalb",  0xE7AA, z_muladd, v128b, v128b, 0>;
-  def VMALHW : TernaryVRRd<"vmalhw", 0xE7AA, z_muladd, v128h, v128h, 1>;
-  def VMALF  : TernaryVRRd<"vmalf",  0xE7AA, z_muladd, v128f, v128f, 2>;
+  let isCommutable = 1 in {
+    // Multiply and add low.
+    def VMAL   : TernaryVRRdGeneric<"vmal", 0xE7AA>;
+    def VMALB  : TernaryVRRd<"vmalb",  0xE7AA, z_muladd, v128b, v128b, 0>;
+    def VMALHW : TernaryVRRd<"vmalhw", 0xE7AA, z_muladd, v128h, v128h, 1>;
+    def VMALF  : TernaryVRRd<"vmalf",  0xE7AA, z_muladd, v128f, v128f, 2>;
 
-  // Multiply and add high.
-  def VMAH  : TernaryVRRdGeneric<"vmah", 0xE7AB>;
-  def VMAHB : TernaryVRRd<"vmahb", 0xE7AB, int_s390_vmahb, v128b, v128b, 0>;
-  def VMAHH : TernaryVRRd<"vmahh", 0xE7AB, int_s390_vmahh, v128h, v128h, 1>;
-  def VMAHF : TernaryVRRd<"vmahf", 0xE7AB, int_s390_vmahf, v128f, v128f, 2>;
+    // Multiply and add high.
+    def VMAH  : TernaryVRRdGeneric<"vmah", 0xE7AB>;
+    def VMAHB : TernaryVRRd<"vmahb", 0xE7AB, int_s390_vmahb, v128b, v128b, 0>;
+    def VMAHH : TernaryVRRd<"vmahh", 0xE7AB, int_s390_vmahh, v128h, v128h, 1>;
+    def VMAHF : TernaryVRRd<"vmahf", 0xE7AB, int_s390_vmahf, v128f, v128f, 2>;
 
-  // Multiply and add logical high.
-  def VMALH  : TernaryVRRdGeneric<"vmalh", 0xE7A9>;
-  def VMALHB : TernaryVRRd<"vmalhb", 0xE7A9, int_s390_vmalhb, v128b, v128b, 0>;
-  def VMALHH : TernaryVRRd<"vmalhh", 0xE7A9, int_s390_vmalhh, v128h, v128h, 1>;
-  def VMALHF : TernaryVRRd<"vmalhf", 0xE7A9, int_s390_vmalhf, v128f, v128f, 2>;
+    // Multiply and add logical high.
+    def VMALH  : TernaryVRRdGeneric<"vmalh", 0xE7A9>;
+    def VMALHB : TernaryVRRd<"vmalhb", 0xE7A9, int_s390_vmalhb, v128b, v128b, 0>;
+    def VMALHH : TernaryVRRd<"vmalhh", 0xE7A9, int_s390_vmalhh, v128h, v128h, 1>;
+    def VMALHF : TernaryVRRd<"vmalhf", 0xE7A9, int_s390_vmalhf, v128f, v128f, 2>;
 
-  // Multiply and add even.
-  def VMAE  : TernaryVRRdGeneric<"vmae", 0xE7AE>;
-  def VMAEB : TernaryVRRd<"vmaeb", 0xE7AE, int_s390_vmaeb, v128h, v128b, 0>;
-  def VMAEH : TernaryVRRd<"vmaeh", 0xE7AE, int_s390_vmaeh, v128f, v128h, 1>;
-  def VMAEF : TernaryVRRd<"vmaef", 0xE7AE, int_s390_vmaef, v128g, v128f, 2>;
+    // Multiply and add even.
+    def VMAE  : TernaryVRRdGeneric<"vmae", 0xE7AE>;
+    def VMAEB : TernaryVRRd<"vmaeb", 0xE7AE, int_s390_vmaeb, v128h, v128b, 0>;
+    def VMAEH : TernaryVRRd<"vmaeh", 0xE7AE, int_s390_vmaeh, v128f, v128h, 1>;
+    def VMAEF : TernaryVRRd<"vmaef", 0xE7AE, int_s390_vmaef, v128g, v128f, 2>;
 
-  // Multiply and add logical even.
-  def VMALE  : TernaryVRRdGeneric<"vmale", 0xE7AC>;
-  def VMALEB : TernaryVRRd<"vmaleb", 0xE7AC, int_s390_vmaleb, v128h, v128b, 0>;
-  def VMALEH : TernaryVRRd<"vmaleh", 0xE7AC, int_s390_vmaleh, v128f, v128h, 1>;
-  def VMALEF : TernaryVRRd<"vmalef", 0xE7AC, int_s390_vmalef, v128g, v128f, 2>;
+    // Multiply and add logical even.
+    def VMALE  : TernaryVRRdGeneric<"vmale", 0xE7AC>;
+    def VMALEB : TernaryVRRd<"vmaleb", 0xE7AC, int_s390_vmaleb, v128h, v128b, 0>;
+    def VMALEH : TernaryVRRd<"vmaleh", 0xE7AC, int_s390_vmaleh, v128f, v128h, 1>;
+    def VMALEF : TernaryVRRd<"vmalef", 0xE7AC, int_s390_vmalef, v128g, v128f, 2>;
 
-  // Multiply and add odd.
-  def VMAO  : TernaryVRRdGeneric<"vmao", 0xE7AF>;
-  def VMAOB : TernaryVRRd<"vmaob", 0xE7AF, int_s390_vmaob, v128h, v128b, 0>;
-  def VMAOH : TernaryVRRd<"vmaoh", 0xE7AF, int_s390_vmaoh, v128f, v128h, 1>;
-  def VMAOF : TernaryVRRd<"vmaof", 0xE7AF, int_s390_vmaof, v128g, v128f, 2>;
+    // Multiply and add odd.
+    def VMAO  : TernaryVRRdGeneric<"vmao", 0xE7AF>;
+    def VMAOB : TernaryVRRd<"vmaob", 0xE7AF, int_s390_vmaob, v128h, v128b, 0>;
+    def VMAOH : TernaryVRRd<"vmaoh", 0xE7AF, int_s390_vmaoh, v128f, v128h, 1>;
+    def VMAOF : TernaryVRRd<"vmaof", 0xE7AF, int_s390_vmaof, v128g, v128f, 2>;
 
-  // Multiply and add logical odd.
-  def VMALO  : TernaryVRRdGeneric<"vmalo", 0xE7AD>;
-  def VMALOB : TernaryVRRd<"vmalob", 0xE7AD, int_s390_vmalob, v128h, v128b, 0>;
-  def VMALOH : TernaryVRRd<"vmaloh", 0xE7AD, int_s390_vmaloh, v128f, v128h, 1>;
-  def VMALOF : TernaryVRRd<"vmalof", 0xE7AD, int_s390_vmalof, v128g, v128f, 2>;
+    // Multiply and add logical odd.
+    def VMALO  : TernaryVRRdGeneric<"vmalo", 0xE7AD>;
+    def VMALOB : TernaryVRRd<"vmalob", 0xE7AD, int_s390_vmalob, v128h, v128b, 0>;
+    def VMALOH : TernaryVRRd<"vmaloh", 0xE7AD, int_s390_vmaloh, v128f, v128h, 1>;
+    def VMALOF : TernaryVRRd<"vmalof", 0xE7AD, int_s390_vmalof, v128g, v128f, 2>;
+  }
 
-  // Multiply high.
-  def VMH  : BinaryVRRcGeneric<"vmh", 0xE7A3>;
-  def VMHB : BinaryVRRc<"vmhb", 0xE7A3, int_s390_vmhb, v128b, v128b, 0>;
-  def VMHH : BinaryVRRc<"vmhh", 0xE7A3, int_s390_vmhh, v128h, v128h, 1>;
-  def VMHF : BinaryVRRc<"vmhf", 0xE7A3, int_s390_vmhf, v128f, v128f, 2>;
+  let isCommutable = 1 in {
+    // Multiply high.
+    def VMH  : BinaryVRRcGeneric<"vmh", 0xE7A3>;
+    def VMHB : BinaryVRRc<"vmhb", 0xE7A3, int_s390_vmhb, v128b, v128b, 0>;
+    def VMHH : BinaryVRRc<"vmhh", 0xE7A3, int_s390_vmhh, v128h, v128h, 1>;
+    def VMHF : BinaryVRRc<"vmhf", 0xE7A3, int_s390_vmhf, v128f, v128f, 2>;
 
-  // Multiply logical high.
-  def VMLH  : BinaryVRRcGeneric<"vmlh", 0xE7A1>;
-  def VMLHB : BinaryVRRc<"vmlhb", 0xE7A1, int_s390_vmlhb, v128b, v128b, 0>;
-  def VMLHH : BinaryVRRc<"vmlhh", 0xE7A1, int_s390_vmlhh, v128h, v128h, 1>;
-  def VMLHF : BinaryVRRc<"vmlhf", 0xE7A1, int_s390_vmlhf, v128f, v128f, 2>;
+    // Multiply logical high.
+    def VMLH  : BinaryVRRcGeneric<"vmlh", 0xE7A1>;
+    def VMLHB : BinaryVRRc<"vmlhb", 0xE7A1, int_s390_vmlhb, v128b, v128b, 0>;
+    def VMLHH : BinaryVRRc<"vmlhh", 0xE7A1, int_s390_vmlhh, v128h, v128h, 1>;
+    def VMLHF : BinaryVRRc<"vmlhf", 0xE7A1, int_s390_vmlhf, v128f, v128f, 2>;
 
-  // Multiply low.
-  def VML   : BinaryVRRcGeneric<"vml", 0xE7A2>;
-  def VMLB  : BinaryVRRc<"vmlb",  0xE7A2, mul, v128b, v128b, 0>;
-  def VMLHW : BinaryVRRc<"vmlhw", 0xE7A2, mul, v128h, v128h, 1>;
-  def VMLF  : BinaryVRRc<"vmlf",  0xE7A2, mul, v128f, v128f, 2>;
+    // Multiply low.
+    def VML   : BinaryVRRcGeneric<"vml", 0xE7A2>;
+    def VMLB  : BinaryVRRc<"vmlb",  0xE7A2, mul, v128b, v128b, 0>;
+    def VMLHW : BinaryVRRc<"vmlhw", 0xE7A2, mul, v128h, v128h, 1>;
+    def VMLF  : BinaryVRRc<"vmlf",  0xE7A2, mul, v128f, v128f, 2>;
 
-  // Multiply even.
-  def VME  : BinaryVRRcGeneric<"vme", 0xE7A6>;
-  def VMEB : BinaryVRRc<"vmeb", 0xE7A6, int_s390_vmeb, v128h, v128b, 0>;
-  def VMEH : BinaryVRRc<"vmeh", 0xE7A6, int_s390_vmeh, v128f, v128h, 1>;
-  def VMEF : BinaryVRRc<"vmef", 0xE7A6, int_s390_vmef, v128g, v128f, 2>;
+    // Multiply even.
+    def VME  : BinaryVRRcGeneric<"vme", 0xE7A6>;
+    def VMEB : BinaryVRRc<"vmeb", 0xE7A6, int_s390_vmeb, v128h, v128b, 0>;
+    def VMEH : BinaryVRRc<"vmeh", 0xE7A6, int_s390_vmeh, v128f, v128h, 1>;
+    def VMEF : BinaryVRRc<"vmef", 0xE7A6, int_s390_vmef, v128g, v128f, 2>;
 
-  // Multiply logical even.
-  def VMLE  : BinaryVRRcGeneric<"vmle", 0xE7A4>;
-  def VMLEB : BinaryVRRc<"vmleb", 0xE7A4, int_s390_vmleb, v128h, v128b, 0>;
-  def VMLEH : BinaryVRRc<"vmleh", 0xE7A4, int_s390_vmleh, v128f, v128h, 1>;
-  def VMLEF : BinaryVRRc<"vmlef", 0xE7A4, int_s390_vmlef, v128g, v128f, 2>;
+    // Multiply logical even.
+    def VMLE  : BinaryVRRcGeneric<"vmle", 0xE7A4>;
+    def VMLEB : BinaryVRRc<"vmleb", 0xE7A4, int_s390_vmleb, v128h, v128b, 0>;
+    def VMLEH : BinaryVRRc<"vmleh", 0xE7A4, int_s390_vmleh, v128f, v128h, 1>;
+    def VMLEF : BinaryVRRc<"vmlef", 0xE7A4, int_s390_vmlef, v128g, v128f, 2>;
 
-  // Multiply odd.
-  def VMO  : BinaryVRRcGeneric<"vmo", 0xE7A7>;
-  def VMOB : BinaryVRRc<"vmob", 0xE7A7, int_s390_vmob, v128h, v128b, 0>;
-  def VMOH : BinaryVRRc<"vmoh", 0xE7A7, int_s390_vmoh, v128f, v128h, 1>;
-  def VMOF : BinaryVRRc<"vmof", 0xE7A7, int_s390_vmof, v128g, v128f, 2>;
+    // Multiply odd.
+    def VMO  : BinaryVRRcGeneric<"vmo", 0xE7A7>;
+    def VMOB : BinaryVRRc<"vmob", 0xE7A7, int_s390_vmob, v128h, v128b, 0>;
+    def VMOH : BinaryVRRc<"vmoh", 0xE7A7, int_s390_vmoh, v128f, v128h, 1>;
+    def VMOF : BinaryVRRc<"vmof", 0xE7A7, int_s390_vmof, v128g, v128f, 2>;
 
-  // Multiply logical odd.
-  def VMLO  : BinaryVRRcGeneric<"vmlo", 0xE7A5>;
-  def VMLOB : BinaryVRRc<"vmlob", 0xE7A5, int_s390_vmlob, v128h, v128b, 0>;
-  def VMLOH : BinaryVRRc<"vmloh", 0xE7A5, int_s390_vmloh, v128f, v128h, 1>;
-  def VMLOF : BinaryVRRc<"vmlof", 0xE7A5, int_s390_vmlof, v128g, v128f, 2>;
+    // Multiply logical odd.
+    def VMLO  : BinaryVRRcGeneric<"vmlo", 0xE7A5>;
+    def VMLOB : BinaryVRRc<"vmlob", 0xE7A5, int_s390_vmlob, v128h, v128b, 0>;
+    def VMLOH : BinaryVRRc<"vmloh", 0xE7A5, int_s390_vmloh, v128f, v128h, 1>;
+    def VMLOF : BinaryVRRc<"vmlof", 0xE7A5, int_s390_vmlof, v128g, v128f, 2>;
+  }
 
   // Multiply sum logical.
-  let Predicates = [FeatureVectorEnhancements1] in {
+  let Predicates = [FeatureVectorEnhancements1], isCommutable = 1 in {
     def VMSL  : QuaternaryVRRdGeneric<"vmsl", 0xE7B8>;
     def VMSLG : QuaternaryVRRd<"vmslg", 0xE7B8, int_s390_vmslg,
                                v128q, v128g, v128g, v128q, 3>;
   }
 
   // Nand.
-  let Predicates = [FeatureVectorEnhancements1] in
+  let Predicates = [FeatureVectorEnhancements1], isCommutable = 1 in
     def VNN : BinaryVRRc<"vnn", 0xE76E, null_frag, v128any, v128any>;
 
   // Nor.
-  def VNO : BinaryVRRc<"vno", 0xE76B, null_frag, v128any, v128any>;
+  let isCommutable = 1 in
+    def VNO : BinaryVRRc<"vno", 0xE76B, null_frag, v128any, v128any>;
   def : InstAlias<"vnot\t$V1, $V2", (VNO VR128:$V1, VR128:$V2, VR128:$V2), 0>;
 
   // Or.
-  def VO : BinaryVRRc<"vo", 0xE76A, null_frag, v128any, v128any>;
+  let isCommutable = 1 in
+    def VO : BinaryVRRc<"vo", 0xE76A, null_frag, v128any, v128any>;
 
   // Or with complement.
   let Predicates = [FeatureVectorEnhancements1] in
@@ -705,21 +732,17 @@ let Predicates = [FeatureVector] in {
 
   // Element rotate left logical (with vector shift amount).
   def VERLLV  : BinaryVRRcGeneric<"verllv", 0xE773>;
-  def VERLLVB : BinaryVRRc<"verllvb", 0xE773, int_s390_verllvb,
-                           v128b, v128b, 0>;
-  def VERLLVH : BinaryVRRc<"verllvh", 0xE773, int_s390_verllvh,
-                           v128h, v128h, 1>;
-  def VERLLVF : BinaryVRRc<"verllvf", 0xE773, int_s390_verllvf,
-                           v128f, v128f, 2>;
-  def VERLLVG : BinaryVRRc<"verllvg", 0xE773, int_s390_verllvg,
-                           v128g, v128g, 3>;
+  def VERLLVB : BinaryVRRc<"verllvb", 0xE773, rotl, v128b, v128b, 0>;
+  def VERLLVH : BinaryVRRc<"verllvh", 0xE773, rotl, v128h, v128h, 1>;
+  def VERLLVF : BinaryVRRc<"verllvf", 0xE773, rotl, v128f, v128f, 2>;
+  def VERLLVG : BinaryVRRc<"verllvg", 0xE773, rotl, v128g, v128g, 3>;
 
   // Element rotate left logical (with scalar shift amount).
   def VERLL  : BinaryVRSaGeneric<"verll", 0xE733>;
-  def VERLLB : BinaryVRSa<"verllb", 0xE733, int_s390_verllb, v128b, v128b, 0>;
-  def VERLLH : BinaryVRSa<"verllh", 0xE733, int_s390_verllh, v128h, v128h, 1>;
-  def VERLLF : BinaryVRSa<"verllf", 0xE733, int_s390_verllf, v128f, v128f, 2>;
-  def VERLLG : BinaryVRSa<"verllg", 0xE733, int_s390_verllg, v128g, v128g, 3>;
+  def VERLLB : BinaryVRSa<"verllb", 0xE733, z_vrotl_by_scalar, v128b, v128b, 0>;
+  def VERLLH : BinaryVRSa<"verllh", 0xE733, z_vrotl_by_scalar, v128h, v128h, 1>;
+  def VERLLF : BinaryVRSa<"verllf", 0xE733, z_vrotl_by_scalar, v128f, v128f, 2>;
+  def VERLLG : BinaryVRSa<"verllg", 0xE733, z_vrotl_by_scalar, v128g, v128g, 3>;
 
   // Element rotate and insert under mask.
   def VERIM  : QuaternaryVRIdGeneric<"verim", 0xE772>;
@@ -807,24 +830,23 @@ let Predicates = [FeatureVector] in {
   def VSH : BinaryVRRc<"vsh", 0xE7F7, sub, v128h, v128h, 1>;
   def VSF : BinaryVRRc<"vsf", 0xE7F7, sub, v128f, v128f, 2>;
   def VSG : BinaryVRRc<"vsg", 0xE7F7, sub, v128g, v128g, 3>;
-  def VSQ : BinaryVRRc<"vsq", 0xE7F7, int_s390_vsq, v128q, v128q, 4>;
+  def VSQ : BinaryVRRc<"vsq", 0xE7F7, sub, v128q, v128q, 4>;
 
   // Subtract compute borrow indication.
   def VSCBI  : BinaryVRRcGeneric<"vscbi", 0xE7F5>;
-  def VSCBIB : BinaryVRRc<"vscbib", 0xE7F5, int_s390_vscbib, v128b, v128b, 0>;
-  def VSCBIH : BinaryVRRc<"vscbih", 0xE7F5, int_s390_vscbih, v128h, v128h, 1>;
-  def VSCBIF : BinaryVRRc<"vscbif", 0xE7F5, int_s390_vscbif, v128f, v128f, 2>;
-  def VSCBIG : BinaryVRRc<"vscbig", 0xE7F5, int_s390_vscbig, v128g, v128g, 3>;
-  def VSCBIQ : BinaryVRRc<"vscbiq", 0xE7F5, int_s390_vscbiq, v128q, v128q, 4>;
+  def VSCBIB : BinaryVRRc<"vscbib", 0xE7F5, z_vscbi, v128b, v128b, 0>;
+  def VSCBIH : BinaryVRRc<"vscbih", 0xE7F5, z_vscbi, v128h, v128h, 1>;
+  def VSCBIF : BinaryVRRc<"vscbif", 0xE7F5, z_vscbi, v128f, v128f, 2>;
+  def VSCBIG : BinaryVRRc<"vscbig", 0xE7F5, z_vscbi, v128g, v128g, 3>;
+  def VSCBIQ : BinaryVRRc<"vscbiq", 0xE7F5, z_vscbi, v128q, v128q, 4>;
 
   // Subtract with borrow indication.
   def VSBI  : TernaryVRRdGeneric<"vsbi", 0xE7BF>;
-  def VSBIQ : TernaryVRRd<"vsbiq", 0xE7BF, int_s390_vsbiq, v128q, v128q, 4>;
+  def VSBIQ : TernaryVRRd<"vsbiq", 0xE7BF, z_vsbi, v128q, v128q, 4>;
 
   // Subtract with borrow compute borrow indication.
   def VSBCBI  : TernaryVRRdGeneric<"vsbcbi", 0xE7BD>;
-  def VSBCBIQ : TernaryVRRd<"vsbcbiq", 0xE7BD, int_s390_vsbcbiq,
-                            v128q, v128q, 4>;
+  def VSBCBIQ : TernaryVRRd<"vsbcbiq", 0xE7BD, z_vsbcbi, v128q, v128q, 4>;
 
   // Sum across doubleword.
   def VSUMG  : BinaryVRRcGeneric<"vsumg", 0xE765>;
@@ -843,34 +865,35 @@ let Predicates = [FeatureVector] in {
 }
 
 // Instantiate the bitwise ops for type TYPE.
-multiclass BitwiseVectorOps<ValueType type> {
+multiclass BitwiseVectorOps<ValueType type, SDPatternOperator not_op> {
   let Predicates = [FeatureVector] in {
     def : Pat<(type (and VR128:$x, VR128:$y)), (VN VR128:$x, VR128:$y)>;
-    def : Pat<(type (and VR128:$x, (z_vnot VR128:$y))),
+    def : Pat<(type (and VR128:$x, (not_op VR128:$y))),
               (VNC VR128:$x, VR128:$y)>;
     def : Pat<(type (or VR128:$x, VR128:$y)), (VO VR128:$x, VR128:$y)>;
     def : Pat<(type (xor VR128:$x, VR128:$y)), (VX VR128:$x, VR128:$y)>;
     def : Pat<(type (or (and VR128:$x, VR128:$z),
-                        (and VR128:$y, (z_vnot VR128:$z)))),
+                        (and VR128:$y, (not_op VR128:$z)))),
               (VSEL VR128:$x, VR128:$y, VR128:$z)>;
-    def : Pat<(type (z_vnot (or VR128:$x, VR128:$y))),
+    def : Pat<(type (not_op (or VR128:$x, VR128:$y))),
               (VNO VR128:$x, VR128:$y)>;
-    def : Pat<(type (z_vnot VR128:$x)), (VNO VR128:$x, VR128:$x)>;
+    def : Pat<(type (not_op VR128:$x)), (VNO VR128:$x, VR128:$x)>;
   }
   let Predicates = [FeatureVectorEnhancements1] in {
-    def : Pat<(type (z_vnot (xor VR128:$x, VR128:$y))),
+    def : Pat<(type (not_op (xor VR128:$x, VR128:$y))),
               (VNX VR128:$x, VR128:$y)>;
-    def : Pat<(type (z_vnot (and VR128:$x, VR128:$y))),
+    def : Pat<(type (not_op (and VR128:$x, VR128:$y))),
               (VNN VR128:$x, VR128:$y)>;
-    def : Pat<(type (or VR128:$x, (z_vnot VR128:$y))),
+    def : Pat<(type (or VR128:$x, (not_op VR128:$y))),
               (VOC VR128:$x, VR128:$y)>;
   }
 }
 
-defm : BitwiseVectorOps<v16i8>;
-defm : BitwiseVectorOps<v8i16>;
-defm : BitwiseVectorOps<v4i32>;
-defm : BitwiseVectorOps<v2i64>;
+defm : BitwiseVectorOps<v16i8, z_vnot>;
+defm : BitwiseVectorOps<v8i16, z_vnot>;
+defm : BitwiseVectorOps<v4i32, z_vnot>;
+defm : BitwiseVectorOps<v2i64, z_vnot>;
+defm : BitwiseVectorOps<i128, not>;
 
 // Instantiate additional patterns for absolute-related expressions on
 // type TYPE.  LC is the negate instruction for TYPE and LP is the absolute
@@ -938,6 +961,26 @@ defm : IntegerMinMaxVectorOps<v16i8, z_vicmphl, VMNLB, VMXLB>;
 defm : IntegerMinMaxVectorOps<v8i16, z_vicmphl, VMNLH, VMXLH>;
 defm : IntegerMinMaxVectorOps<v4i32, z_vicmphl, VMNLF, VMXLF>;
 defm : IntegerMinMaxVectorOps<v2i64, z_vicmphl, VMNLG, VMXLG>;
+
+// Instantiate full-vector shifts.
+multiclass FullVectorShiftOps<SDPatternOperator shift,
+                              Instruction sbit, Instruction sbyte> {
+  let Predicates = [FeatureVector] in {
+    def : Pat<(shift (i128 VR128:$x), imm32nobytes:$amt),
+              (sbit VR128:$x, (VREPIB (UIMM8 imm:$amt)))>;
+    def : Pat<(shift (i128 VR128:$x), imm32nobits:$amt),
+              (sbyte VR128:$x, (VREPIB (UIMM8 imm:$amt)))>;
+    def : Pat<(shift (i128 VR128:$x), imm32:$amt),
+              (sbit (sbyte VR128:$x, (VREPIB (UIMM8 imm:$amt))),
+                    (VREPIB (UIMM8 imm:$amt)))>;
+    def : Pat<(shift (i128 VR128:$x), GR32:$amt),
+              (sbit (sbyte VR128:$x, (VREPB (VLVGP32 GR32:$amt, GR32:$amt), 15)),
+                    (VREPB (VLVGP32 GR32:$amt, GR32:$amt), 15))>;
+  }
+}
+defm : FullVectorShiftOps<vshiftop<shl>, VSL, VSLB>;
+defm : FullVectorShiftOps<vshiftop<srl>, VSRL, VSRLB>;
+defm : FullVectorShiftOps<vshiftop<sra>, VSRA, VSRAB>;
 
 //===----------------------------------------------------------------------===//
 // Integer comparison
@@ -1017,13 +1060,15 @@ multiclass VectorRounding<Instruction insn, TypedReg tr> {
 
 let Predicates = [FeatureVector] in {
   // Add.
-  let Uses = [FPC], mayRaiseFPException = 1 in {
+  let Uses = [FPC], mayRaiseFPException = 1, isCommutable = 1 in {
     def VFA   : BinaryVRRcFloatGeneric<"vfa", 0xE7E3>;
     def VFADB : BinaryVRRc<"vfadb", 0xE7E3, any_fadd, v128db, v128db, 3, 0>;
-    def WFADB : BinaryVRRc<"wfadb", 0xE7E3, any_fadd, v64db, v64db, 3, 8>;
+    def WFADB : BinaryVRRc<"wfadb", 0xE7E3, any_fadd, v64db, v64db, 3, 8, 0,
+                           "adbr">;
     let Predicates = [FeatureVectorEnhancements1] in {
       def VFASB : BinaryVRRc<"vfasb", 0xE7E3, any_fadd, v128sb, v128sb, 2, 0>;
-      def WFASB : BinaryVRRc<"wfasb", 0xE7E3, any_fadd, v32sb, v32sb, 2, 8>;
+      def WFASB : BinaryVRRc<"wfasb", 0xE7E3, any_fadd, v32sb, v32sb, 2, 8, 0,
+                             "aebr">;
       def WFAXB : BinaryVRRc<"wfaxb", 0xE7E3, any_fadd, v128xb, v128xb, 4, 8>;
     }
   }
@@ -1104,10 +1149,12 @@ let Predicates = [FeatureVector] in {
   let Uses = [FPC], mayRaiseFPException = 1 in {
     def VFD   : BinaryVRRcFloatGeneric<"vfd", 0xE7E5>;
     def VFDDB : BinaryVRRc<"vfddb", 0xE7E5, any_fdiv, v128db, v128db, 3, 0>;
-    def WFDDB : BinaryVRRc<"wfddb", 0xE7E5, any_fdiv, v64db, v64db, 3, 8>;
+    def WFDDB : BinaryVRRc<"wfddb", 0xE7E5, any_fdiv, v64db, v64db, 3, 8, 0,
+                           "ddbr">;
     let Predicates = [FeatureVectorEnhancements1] in {
       def VFDSB : BinaryVRRc<"vfdsb", 0xE7E5, any_fdiv, v128sb, v128sb, 2, 0>;
-      def WFDSB : BinaryVRRc<"wfdsb", 0xE7E5, any_fdiv, v32sb, v32sb, 2, 8>;
+      def WFDSB : BinaryVRRc<"wfdsb", 0xE7E5, any_fdiv, v32sb, v32sb, 2, 8, 0,
+                             "debr">;
       def WFDXB : BinaryVRRc<"wfdxb", 0xE7E5, any_fdiv, v128xb, v128xb, 4, 8>;
     }
   }
@@ -1135,7 +1182,8 @@ let Predicates = [FeatureVector] in {
   let Uses = [FPC], mayRaiseFPException = 1 in {
     def VLDE  : UnaryVRRaFloatGeneric<"vlde", 0xE7C4>;
     def VLDEB : UnaryVRRa<"vldeb", 0xE7C4, z_any_vextend, v128db, v128sb, 2, 0>;
-    def WLDEB : UnaryVRRa<"wldeb", 0xE7C4, any_fpextend, v64db, v32sb, 2, 8>;
+    def WLDEB : UnaryVRRa<"wldeb", 0xE7C4, any_fpextend, v64db, v32sb, 2, 8, 0,
+                          "ldebr">;
   }
   let Predicates = [FeatureVectorEnhancements1] in {
     let Uses = [FPC], mayRaiseFPException = 1 in {
@@ -1178,7 +1226,7 @@ let Predicates = [FeatureVector] in {
     def : FPMinMax<insn, any_fmaximum, tr, 1>;
   }
   let Predicates = [FeatureVectorEnhancements1] in {
-    let Uses = [FPC], mayRaiseFPException = 1 in {
+    let Uses = [FPC], mayRaiseFPException = 1, isCommutable = 1 in {
       def VFMAX   : TernaryVRRcFloatGeneric<"vfmax", 0xE7EF>;
       def VFMAXDB : TernaryVRRcFloat<"vfmaxdb", 0xE7EF, int_s390_vfmaxdb,
                                      v128db, v128db, 3, 0>;
@@ -1204,7 +1252,7 @@ let Predicates = [FeatureVector] in {
     def : FPMinMax<insn, any_fminimum, tr, 1>;
   }
   let Predicates = [FeatureVectorEnhancements1] in {
-    let Uses = [FPC], mayRaiseFPException = 1 in {
+    let Uses = [FPC], mayRaiseFPException = 1, isCommutable = 1 in {
       def VFMIN   : TernaryVRRcFloatGeneric<"vfmin", 0xE7EE>;
       def VFMINDB : TernaryVRRcFloat<"vfmindb", 0xE7EE, int_s390_vfmindb,
                                      v128db, v128db, 3, 0>;
@@ -1225,43 +1273,49 @@ let Predicates = [FeatureVector] in {
   }
 
   // Multiply.
-  let Uses = [FPC], mayRaiseFPException = 1 in {
+  let Uses = [FPC], mayRaiseFPException = 1, isCommutable = 1 in {
     def VFM   : BinaryVRRcFloatGeneric<"vfm", 0xE7E7>;
     def VFMDB : BinaryVRRc<"vfmdb", 0xE7E7, any_fmul, v128db, v128db, 3, 0>;
-    def WFMDB : BinaryVRRc<"wfmdb", 0xE7E7, any_fmul, v64db, v64db, 3, 8>;
+    def WFMDB : BinaryVRRc<"wfmdb", 0xE7E7, any_fmul, v64db, v64db, 3, 8, 0,
+                           "mdbr">;
     let Predicates = [FeatureVectorEnhancements1] in {
       def VFMSB : BinaryVRRc<"vfmsb", 0xE7E7, any_fmul, v128sb, v128sb, 2, 0>;
-      def WFMSB : BinaryVRRc<"wfmsb", 0xE7E7, any_fmul, v32sb, v32sb, 2, 8>;
+      def WFMSB : BinaryVRRc<"wfmsb", 0xE7E7, any_fmul, v32sb, v32sb, 2, 8, 0,
+                             "meebr">;
       def WFMXB : BinaryVRRc<"wfmxb", 0xE7E7, any_fmul, v128xb, v128xb, 4, 8>;
     }
   }
 
   // Multiply and add.
-  let Uses = [FPC], mayRaiseFPException = 1 in {
+  let Uses = [FPC], mayRaiseFPException = 1, isCommutable = 1 in {
     def VFMA   : TernaryVRReFloatGeneric<"vfma", 0xE78F>;
     def VFMADB : TernaryVRRe<"vfmadb", 0xE78F, any_fma, v128db, v128db, 0, 3>;
-    def WFMADB : TernaryVRRe<"wfmadb", 0xE78F, any_fma, v64db, v64db, 8, 3>;
+    def WFMADB : TernaryVRRe<"wfmadb", 0xE78F, any_fma, v64db, v64db, 8, 3,
+                             "madbr">;
     let Predicates = [FeatureVectorEnhancements1] in {
       def VFMASB : TernaryVRRe<"vfmasb", 0xE78F, any_fma, v128sb, v128sb, 0, 2>;
-      def WFMASB : TernaryVRRe<"wfmasb", 0xE78F, any_fma, v32sb, v32sb, 8, 2>;
+      def WFMASB : TernaryVRRe<"wfmasb", 0xE78F, any_fma, v32sb, v32sb, 8, 2,
+                               "maebr">;
       def WFMAXB : TernaryVRRe<"wfmaxb", 0xE78F, any_fma, v128xb, v128xb, 8, 4>;
     }
   }
 
   // Multiply and subtract.
-  let Uses = [FPC], mayRaiseFPException = 1 in {
+  let Uses = [FPC], mayRaiseFPException = 1, isCommutable = 1 in {
     def VFMS   : TernaryVRReFloatGeneric<"vfms", 0xE78E>;
     def VFMSDB : TernaryVRRe<"vfmsdb", 0xE78E, any_fms, v128db, v128db, 0, 3>;
-    def WFMSDB : TernaryVRRe<"wfmsdb", 0xE78E, any_fms, v64db, v64db, 8, 3>;
+    def WFMSDB : TernaryVRRe<"wfmsdb", 0xE78E, any_fms, v64db, v64db, 8, 3,
+                             "msdbr">;
     let Predicates = [FeatureVectorEnhancements1] in {
       def VFMSSB : TernaryVRRe<"vfmssb", 0xE78E, any_fms, v128sb, v128sb, 0, 2>;
-      def WFMSSB : TernaryVRRe<"wfmssb", 0xE78E, any_fms, v32sb, v32sb, 8, 2>;
+      def WFMSSB : TernaryVRRe<"wfmssb", 0xE78E, any_fms, v32sb, v32sb, 8, 2,
+                               "msebr">;
       def WFMSXB : TernaryVRRe<"wfmsxb", 0xE78E, any_fms, v128xb, v128xb, 8, 4>;
     }
   }
 
   // Negative multiply and add.
-  let Uses = [FPC], mayRaiseFPException = 1,
+  let Uses = [FPC], mayRaiseFPException = 1, isCommutable = 1,
       Predicates = [FeatureVectorEnhancements1] in {
     def VFNMA   : TernaryVRReFloatGeneric<"vfnma", 0xE79F>;
     def VFNMADB : TernaryVRRe<"vfnmadb", 0xE79F, any_fnma, v128db, v128db, 0, 3>;
@@ -1272,7 +1326,7 @@ let Predicates = [FeatureVector] in {
   }
 
   // Negative multiply and subtract.
-  let Uses = [FPC], mayRaiseFPException = 1,
+  let Uses = [FPC], mayRaiseFPException = 1, isCommutable = 1,
       Predicates = [FeatureVectorEnhancements1] in {
     def VFNMS   : TernaryVRReFloatGeneric<"vfnms", 0xE79E>;
     def VFNMSDB : TernaryVRRe<"vfnmsdb", 0xE79E, any_fnms, v128db, v128db, 0, 3>;
@@ -1323,10 +1377,12 @@ let Predicates = [FeatureVector] in {
   let Uses = [FPC], mayRaiseFPException = 1 in {
     def VFSQ   : UnaryVRRaFloatGeneric<"vfsq", 0xE7CE>;
     def VFSQDB : UnaryVRRa<"vfsqdb", 0xE7CE, any_fsqrt, v128db, v128db, 3, 0>;
-    def WFSQDB : UnaryVRRa<"wfsqdb", 0xE7CE, any_fsqrt, v64db, v64db, 3, 8>;
+    def WFSQDB : UnaryVRRa<"wfsqdb", 0xE7CE, any_fsqrt, v64db, v64db, 3, 8, 0,
+                           "sqdbr">;
     let Predicates = [FeatureVectorEnhancements1] in {
       def VFSQSB : UnaryVRRa<"vfsqsb", 0xE7CE, any_fsqrt, v128sb, v128sb, 2, 0>;
-      def WFSQSB : UnaryVRRa<"wfsqsb", 0xE7CE, any_fsqrt, v32sb, v32sb, 2, 8>;
+      def WFSQSB : UnaryVRRa<"wfsqsb", 0xE7CE, any_fsqrt, v32sb, v32sb, 2, 8, 0,
+                             "sqebr">;
       def WFSQXB : UnaryVRRa<"wfsqxb", 0xE7CE, any_fsqrt, v128xb, v128xb, 4, 8>;
     }
   }
@@ -1335,10 +1391,12 @@ let Predicates = [FeatureVector] in {
   let Uses = [FPC], mayRaiseFPException = 1 in {
     def VFS   : BinaryVRRcFloatGeneric<"vfs", 0xE7E2>;
     def VFSDB : BinaryVRRc<"vfsdb", 0xE7E2, any_fsub, v128db, v128db, 3, 0>;
-    def WFSDB : BinaryVRRc<"wfsdb", 0xE7E2, any_fsub, v64db, v64db, 3, 8>;
+    def WFSDB : BinaryVRRc<"wfsdb", 0xE7E2, any_fsub, v64db, v64db, 3, 8, 0,
+                           "sdbr">;
     let Predicates = [FeatureVectorEnhancements1] in {
       def VFSSB : BinaryVRRc<"vfssb", 0xE7E2, any_fsub, v128sb, v128sb, 2, 0>;
-      def WFSSB : BinaryVRRc<"wfssb", 0xE7E2, any_fsub, v32sb, v32sb, 2, 8>;
+      def WFSSB : BinaryVRRc<"wfssb", 0xE7E2, any_fsub, v32sb, v32sb, 2, 8, 0,
+                             "sebr">;
       def WFSXB : BinaryVRRc<"wfsxb", 0xE7E2, any_fsub, v128xb, v128xb, 4, 8>;
     }
   }
@@ -1364,9 +1422,9 @@ let Predicates = [FeatureVector] in {
   // Compare scalar.
   let Uses = [FPC], mayRaiseFPException = 1, Defs = [CC] in {
     def WFC   : CompareVRRaFloatGeneric<"wfc", 0xE7CB>;
-    def WFCDB : CompareVRRa<"wfcdb", 0xE7CB, z_any_fcmp, v64db, 3>;
+    def WFCDB : CompareVRRa<"wfcdb", 0xE7CB, z_any_fcmp, v64db, 3, "cdbr">;
     let Predicates = [FeatureVectorEnhancements1] in {
-      def WFCSB : CompareVRRa<"wfcsb", 0xE7CB, z_any_fcmp, v32sb, 2>;
+      def WFCSB : CompareVRRa<"wfcsb", 0xE7CB, z_any_fcmp, v32sb, 2, "cebr">;
       def WFCXB : CompareVRRa<"wfcxb", 0xE7CB, z_any_fcmp, v128xb, 4>;
     }
   }
@@ -1374,9 +1432,9 @@ let Predicates = [FeatureVector] in {
   // Compare and signal scalar.
   let Uses = [FPC], mayRaiseFPException = 1, Defs = [CC] in {
     def WFK   : CompareVRRaFloatGeneric<"wfk", 0xE7CA>;
-    def WFKDB : CompareVRRa<"wfkdb", 0xE7CA, z_strict_fcmps, v64db, 3>;
+    def WFKDB : CompareVRRa<"wfkdb", 0xE7CA, z_strict_fcmps, v64db, 3, "kdbr">;
     let Predicates = [FeatureVectorEnhancements1] in {
-      def WFKSB : CompareVRRa<"wfksb", 0xE7CA, z_strict_fcmps, v32sb, 2>;
+      def WFKSB : CompareVRRa<"wfksb", 0xE7CA, z_strict_fcmps, v32sb, 2, "kebr">;
       def WFKXB : CompareVRRa<"wfkxb", 0xE7CA, z_strict_fcmps, v128xb, 4>;
     }
   }
@@ -1479,12 +1537,165 @@ let Predicates = [FeatureVector] in {
 }
 
 //===----------------------------------------------------------------------===//
+// Support for 128-bit integer values in vector registers
+//===----------------------------------------------------------------------===//
+
+// Loads and stores.
+let Predicates = [FeatureVector] in {
+  def : Pat<(i128 (load bdxaddr12only:$addr)),
+            (VL bdxaddr12only:$addr)>;
+  def : Pat<(store (i128 VR128:$src), bdxaddr12only:$addr),
+            (VST VR128:$src, bdxaddr12only:$addr)>;
+}
+
+// Full i128 move from GPR pair.
+let Predicates = [FeatureVector] in
+  def : Pat<(i128 (or (zext GR64:$x), (shl (anyext GR64:$y), (i32 64)))),
+            (VLVGP GR64:$y, GR64:$x)>;
+
+// Any-extensions from GPR to i128.
+let Predicates = [FeatureVector] in {
+  def : Pat<(i128 (anyext GR32:$x)), (VLVGP32 GR32:$x, GR32:$x)>;
+  def : Pat<(i128 (anyext GR64:$x)), (VLVGP GR64:$x, GR64:$x)>;
+}
+
+// Any-extending loads into i128.
+let Predicates = [FeatureVector] in {
+  def : Pat<(i128 (extloadi8 bdxaddr12only:$addr)),
+            (VLREPB bdxaddr12only:$addr)>;
+  def : Pat<(i128 (extloadi16 bdxaddr12only:$addr)),
+            (VLREPH bdxaddr12only:$addr)>;
+  def : Pat<(i128 (extloadi32 bdxaddr12only:$addr)),
+            (VLREPF bdxaddr12only:$addr)>;
+  def : Pat<(i128 (extloadi64 bdxaddr12only:$addr)),
+            (VLREPG bdxaddr12only:$addr)>;
+}
+
+// Truncations from i128 to GPR.
+let Predicates = [FeatureVector] in {
+  def : Pat<(i32 (trunc (i128 VR128:$vec))),
+            (EXTRACT_SUBREG (VLGVF VR128:$vec, zero_reg, 3), subreg_l32)>;
+  def : Pat<(i32 (trunc (srl (i128 VR128:$vec), (i32 32)))),
+            (EXTRACT_SUBREG (VLGVF VR128:$vec, zero_reg, 2), subreg_l32)>;
+  def : Pat<(i32 (trunc (srl (i128 VR128:$vec), (i32 64)))),
+            (EXTRACT_SUBREG (VLGVF VR128:$vec, zero_reg, 1), subreg_l32)>;
+  def : Pat<(i32 (trunc (srl (i128 VR128:$vec), (i32 96)))),
+            (EXTRACT_SUBREG (VLGVF VR128:$vec, zero_reg, 0), subreg_l32)>;
+  def : Pat<(i64 (trunc (i128 VR128:$vec))),
+            (VLGVG VR128:$vec, zero_reg, 1)>;
+  def : Pat<(i64 (trunc (srl (i128 VR128:$vec), (i32 64)))),
+            (VLGVG VR128:$vec, zero_reg, 0)>;
+}
+
+// Truncating stores from i128.
+let Predicates = [FeatureVector] in {
+  def : Pat<(truncstorei8 (i128 VR128:$x), bdxaddr12only:$addr),
+            (VSTEB VR128:$x, bdxaddr12only:$addr, 15)>;
+  def : Pat<(truncstorei16 (i128 VR128:$x), bdxaddr12only:$addr),
+            (VSTEH VR128:$x, bdxaddr12only:$addr, 7)>;
+  def : Pat<(truncstorei32 (i128 VR128:$x), bdxaddr12only:$addr),
+            (VSTEF VR128:$x, bdxaddr12only:$addr, 3)>;
+  def : Pat<(truncstorei32 (srl (i128 VR128:$x), (i32 32)), bdxaddr12only:$addr),
+            (VSTEF VR128:$x, bdxaddr12only:$addr, 2)>;
+  def : Pat<(truncstorei32 (srl (i128 VR128:$x), (i32 64)), bdxaddr12only:$addr),
+            (VSTEF VR128:$x, bdxaddr12only:$addr, 1)>;
+  def : Pat<(truncstorei32 (srl (i128 VR128:$x), (i32 96)), bdxaddr12only:$addr),
+            (VSTEF VR128:$x, bdxaddr12only:$addr, 0)>;
+  def : Pat<(truncstorei64 (i128 VR128:$x), bdxaddr12only:$addr),
+            (VSTEG VR128:$x, bdxaddr12only:$addr, 1)>;
+  def : Pat<(truncstorei64 (srl (i128 VR128:$x), (i32 64)), bdxaddr12only:$addr),
+            (VSTEG VR128:$x, bdxaddr12only:$addr, 0)>;
+}
+
+// Zero-extensions from GPR to i128.
+let Predicates = [FeatureVector] in {
+  def : Pat<(i128 (zext8 (anyext GR32:$x))),
+            (VLVGB (VGBM 0), GR32:$x, zero_reg, 15)>;
+  def : Pat<(i128 (zext16 (anyext GR32:$x))),
+            (VLVGH (VGBM 0), GR32:$x, zero_reg, 7)>;
+  def : Pat<(i128 (zext GR32:$x)),
+            (VLVGF (VGBM 0), GR32:$x, zero_reg, 3)>;
+  def : Pat<(i128 (zext GR64:$x)),
+            (VLVGG (VGBM 0), GR64:$x, zero_reg, 1)>;
+}
+
+// Zero-extending loads into i128.
+let Predicates = [FeatureVector] in {
+  def : Pat<(i128 (zextloadi8 bdxaddr12only:$addr)),
+            (VLEB (VGBM 0), bdxaddr12only:$addr, 15)>;
+  def : Pat<(i128 (zextloadi16 bdxaddr12only:$addr)),
+            (VLEH (VGBM 0), bdxaddr12only:$addr, 7)>;
+  def : Pat<(i128 (zextloadi32 bdxaddr12only:$addr)),
+            (VLEF (VGBM 0), bdxaddr12only:$addr, 3)>;
+  def : Pat<(i128 (zextloadi64 bdxaddr12only:$addr)),
+            (VLEG (VGBM 0), bdxaddr12only:$addr, 1)>;
+}
+
+// In-register i128 sign-extensions.
+let Predicates = [FeatureVector] in {
+  def : Pat<(i128 (sext_inreg VR128:$x, i8)),
+            (VSRAB (VREPB VR128:$x, 15), (VREPIB 120))>;
+  def : Pat<(i128 (sext_inreg VR128:$x, i16)),
+            (VSRAB (VREPH VR128:$x, 7), (VREPIB 112))>;
+  def : Pat<(i128 (sext_inreg VR128:$x, i32)),
+            (VSRAB (VREPF VR128:$x, 3), (VREPIB 96))>;
+  def : Pat<(i128 (sext_inreg VR128:$x, i64)),
+            (VSRAB (VREPG VR128:$x, 1), (VREPIB 64))>;
+}
+
+// Sign-extensions from GPR to i128.
+let Predicates = [FeatureVector] in {
+  def : Pat<(i128 (sext_inreg (anyext GR32:$x), i8)),
+            (VLVGP (SRAG (LGBR (INSERT_SUBREG (i64 (IMPLICIT_DEF)),
+                                 GR32:$x, subreg_l32)), zero_reg, 63),
+                   (LGBR (INSERT_SUBREG (i64 (IMPLICIT_DEF)),
+                            GR32:$x, subreg_l32)))>;
+  def : Pat<(i128 (sext_inreg (anyext GR32:$x), i16)),
+            (VLVGP (SRAG (LGHR (INSERT_SUBREG (i64 (IMPLICIT_DEF)),
+                                  GR32:$x, subreg_l32)), zero_reg, 63),
+                   (LGHR (INSERT_SUBREG (i64 (IMPLICIT_DEF)),
+                            GR32:$x, subreg_l32)))>;
+  def : Pat<(i128 (sext GR32:$x)),
+            (VLVGP (SRAG (LGFR GR32:$x), zero_reg, 63), (LGFR GR32:$x))>;
+  def : Pat<(i128 (sext GR64:$x)),
+            (VLVGP (SRAG GR64:$x, zero_reg, 63), GR64:$x)>;
+}
+
+// Sign-extending loads into i128.
+let Predicates = [FeatureVector] in {
+  def : Pat<(i128 (sextloadi8 bdxaddr12only:$addr)),
+            (VSRAB (VLREPB bdxaddr12only:$addr), (VREPIB 120))>;
+  def : Pat<(i128 (sextloadi16 bdxaddr12only:$addr)),
+            (VSRAB (VLREPH bdxaddr12only:$addr), (VREPIB 112))>;
+  def : Pat<(i128 (sextloadi32 bdxaddr12only:$addr)),
+            (VSRAB (VLREPF bdxaddr12only:$addr), (VREPIB 96))>;
+  def : Pat<(i128 (sextloadi64 bdxaddr12only:$addr)),
+            (VSRAB (VLREPG bdxaddr12only:$addr), (VREPIB 64))>;
+}
+
+// i128 comparison pseudo-instructions.
+let Predicates = [FeatureVector], Defs = [CC],
+    usesCustomInserter = 1, hasNoSchedulingInfo = 1 in {
+  def SCmp128Hi : Pseudo<(outs), (ins VR128:$src1, VR128:$src2),
+                         [(set CC, (z_scmp128hi (i128 VR128:$src1),
+                                                (i128 VR128:$src2)))]>;
+  def UCmp128Hi : Pseudo<(outs), (ins VR128:$src1, VR128:$src2),
+                         [(set CC, (z_ucmp128hi (i128 VR128:$src1),
+                                                (i128 VR128:$src2)))]>;
+}
+
+// i128 select pseudo-instructions.
+let Predicates = [FeatureVector] in
+  def Select128 : SelectWrapper<i128, VR128>;
+
+//===----------------------------------------------------------------------===//
 // Conversions
 //===----------------------------------------------------------------------===//
 
 def : Pat<(v16i8 (bitconvert (v8i16 VR128:$src))), (v16i8 VR128:$src)>;
 def : Pat<(v16i8 (bitconvert (v4i32 VR128:$src))), (v16i8 VR128:$src)>;
 def : Pat<(v16i8 (bitconvert (v2i64 VR128:$src))), (v16i8 VR128:$src)>;
+def : Pat<(v16i8 (bitconvert (i128  VR128:$src))), (v16i8 VR128:$src)>;
 def : Pat<(v16i8 (bitconvert (v4f32 VR128:$src))), (v16i8 VR128:$src)>;
 def : Pat<(v16i8 (bitconvert (v2f64 VR128:$src))), (v16i8 VR128:$src)>;
 def : Pat<(v16i8 (bitconvert (f128  VR128:$src))), (v16i8 VR128:$src)>;
@@ -1492,6 +1703,7 @@ def : Pat<(v16i8 (bitconvert (f128  VR128:$src))), (v16i8 VR128:$src)>;
 def : Pat<(v8i16 (bitconvert (v16i8 VR128:$src))), (v8i16 VR128:$src)>;
 def : Pat<(v8i16 (bitconvert (v4i32 VR128:$src))), (v8i16 VR128:$src)>;
 def : Pat<(v8i16 (bitconvert (v2i64 VR128:$src))), (v8i16 VR128:$src)>;
+def : Pat<(v8i16 (bitconvert (i128  VR128:$src))), (v8i16 VR128:$src)>;
 def : Pat<(v8i16 (bitconvert (v4f32 VR128:$src))), (v8i16 VR128:$src)>;
 def : Pat<(v8i16 (bitconvert (v2f64 VR128:$src))), (v8i16 VR128:$src)>;
 def : Pat<(v8i16 (bitconvert (f128  VR128:$src))), (v8i16 VR128:$src)>;
@@ -1499,6 +1711,7 @@ def : Pat<(v8i16 (bitconvert (f128  VR128:$src))), (v8i16 VR128:$src)>;
 def : Pat<(v4i32 (bitconvert (v16i8 VR128:$src))), (v4i32 VR128:$src)>;
 def : Pat<(v4i32 (bitconvert (v8i16 VR128:$src))), (v4i32 VR128:$src)>;
 def : Pat<(v4i32 (bitconvert (v2i64 VR128:$src))), (v4i32 VR128:$src)>;
+def : Pat<(v4i32 (bitconvert (i128  VR128:$src))), (v4i32 VR128:$src)>;
 def : Pat<(v4i32 (bitconvert (v4f32 VR128:$src))), (v4i32 VR128:$src)>;
 def : Pat<(v4i32 (bitconvert (v2f64 VR128:$src))), (v4i32 VR128:$src)>;
 def : Pat<(v4i32 (bitconvert (f128  VR128:$src))), (v4i32 VR128:$src)>;
@@ -1506,6 +1719,7 @@ def : Pat<(v4i32 (bitconvert (f128  VR128:$src))), (v4i32 VR128:$src)>;
 def : Pat<(v2i64 (bitconvert (v16i8 VR128:$src))), (v2i64 VR128:$src)>;
 def : Pat<(v2i64 (bitconvert (v8i16 VR128:$src))), (v2i64 VR128:$src)>;
 def : Pat<(v2i64 (bitconvert (v4i32 VR128:$src))), (v2i64 VR128:$src)>;
+def : Pat<(v2i64 (bitconvert (i128  VR128:$src))), (v2i64 VR128:$src)>;
 def : Pat<(v2i64 (bitconvert (v4f32 VR128:$src))), (v2i64 VR128:$src)>;
 def : Pat<(v2i64 (bitconvert (v2f64 VR128:$src))), (v2i64 VR128:$src)>;
 def : Pat<(v2i64 (bitconvert (f128  VR128:$src))), (v2i64 VR128:$src)>;
@@ -1513,6 +1727,7 @@ def : Pat<(v2i64 (bitconvert (f128  VR128:$src))), (v2i64 VR128:$src)>;
 def : Pat<(v4f32 (bitconvert (v16i8 VR128:$src))), (v4f32 VR128:$src)>;
 def : Pat<(v4f32 (bitconvert (v8i16 VR128:$src))), (v4f32 VR128:$src)>;
 def : Pat<(v4f32 (bitconvert (v4i32 VR128:$src))), (v4f32 VR128:$src)>;
+def : Pat<(v4f32 (bitconvert (i128  VR128:$src))), (v4f32 VR128:$src)>;
 def : Pat<(v4f32 (bitconvert (v2i64 VR128:$src))), (v4f32 VR128:$src)>;
 def : Pat<(v4f32 (bitconvert (v2f64 VR128:$src))), (v4f32 VR128:$src)>;
 def : Pat<(v4f32 (bitconvert (f128  VR128:$src))), (v4f32 VR128:$src)>;
@@ -1520,6 +1735,7 @@ def : Pat<(v4f32 (bitconvert (f128  VR128:$src))), (v4f32 VR128:$src)>;
 def : Pat<(v2f64 (bitconvert (v16i8 VR128:$src))), (v2f64 VR128:$src)>;
 def : Pat<(v2f64 (bitconvert (v8i16 VR128:$src))), (v2f64 VR128:$src)>;
 def : Pat<(v2f64 (bitconvert (v4i32 VR128:$src))), (v2f64 VR128:$src)>;
+def : Pat<(v2f64 (bitconvert (i128  VR128:$src))), (v2f64 VR128:$src)>;
 def : Pat<(v2f64 (bitconvert (v2i64 VR128:$src))), (v2f64 VR128:$src)>;
 def : Pat<(v2f64 (bitconvert (v4f32 VR128:$src))), (v2f64 VR128:$src)>;
 def : Pat<(v2f64 (bitconvert (f128  VR128:$src))), (v2f64 VR128:$src)>;
@@ -1528,8 +1744,17 @@ def : Pat<(f128  (bitconvert (v16i8 VR128:$src))), (f128  VR128:$src)>;
 def : Pat<(f128  (bitconvert (v8i16 VR128:$src))), (f128  VR128:$src)>;
 def : Pat<(f128  (bitconvert (v4i32 VR128:$src))), (f128  VR128:$src)>;
 def : Pat<(f128  (bitconvert (v2i64 VR128:$src))), (f128  VR128:$src)>;
+def : Pat<(f128  (bitconvert (i128  VR128:$src))), (f128  VR128:$src)>;
 def : Pat<(f128  (bitconvert (v4f32 VR128:$src))), (f128  VR128:$src)>;
 def : Pat<(f128  (bitconvert (v2f64 VR128:$src))), (f128  VR128:$src)>;
+
+def : Pat<(i128  (bitconvert (v16i8 VR128:$src))), (i128  VR128:$src)>;
+def : Pat<(i128  (bitconvert (v8i16 VR128:$src))), (i128  VR128:$src)>;
+def : Pat<(i128  (bitconvert (v4i32 VR128:$src))), (i128  VR128:$src)>;
+def : Pat<(i128  (bitconvert (v2i64 VR128:$src))), (i128  VR128:$src)>;
+def : Pat<(i128  (bitconvert (v4f32 VR128:$src))), (i128  VR128:$src)>;
+def : Pat<(i128  (bitconvert (v2f64 VR128:$src))), (i128  VR128:$src)>;
+def : Pat<(i128  (bitconvert (f128  VR128:$src))), (i128  VR128:$src)>;
 
 //===----------------------------------------------------------------------===//
 // Replicating scalars
@@ -1545,7 +1770,7 @@ def : VectorReplicateScalar<v16i8, VREPB, 7>;
 def : VectorReplicateScalar<v8i16, VREPH, 3>;
 def : VectorReplicateScalar<v4i32, VREPF, 1>;
 
-// i64 replications are just a single isntruction.
+// i64 replications are just a single instruction.
 def : Pat<(v2i64 (z_replicate GR64:$scalar)),
           (VLVGP GR64:$scalar, GR64:$scalar)>;
 
@@ -1708,6 +1933,37 @@ let Predicates = [FeatureVectorEnhancements2] in {
 }
 
 //===----------------------------------------------------------------------===//
+// NNP assist instructions
+//===----------------------------------------------------------------------===//
+
+let Predicates = [FeatureVector, FeatureNNPAssist] in {
+  let Uses = [FPC], mayRaiseFPException = 1 in
+    def VCFN : UnaryVRRaFloatGeneric<"vcfn", 0xE65D>;
+  def : Pat<(int_s390_vcfn VR128:$x, imm32zx4_timm:$m),
+            (VCFN VR128:$x, 1, imm32zx4:$m)>;
+
+  let Uses = [FPC], mayRaiseFPException = 1 in
+    def VCLFNL : UnaryVRRaFloatGeneric<"vclfnl", 0xE65E>;
+  def : Pat<(int_s390_vclfnls VR128:$x, imm32zx4_timm:$m),
+            (VCLFNL VR128:$x, 2, imm32zx4:$m)>;
+
+  let Uses = [FPC], mayRaiseFPException = 1 in
+    def VCLFNH : UnaryVRRaFloatGeneric<"vclfnh", 0xE656>;
+  def : Pat<(int_s390_vclfnhs VR128:$x, imm32zx4_timm:$m),
+            (VCLFNH VR128:$x, 2, imm32zx4:$m)>;
+
+  let Uses = [FPC], mayRaiseFPException = 1 in
+    def VCNF : UnaryVRRaFloatGeneric<"vcnf", 0xE655>;
+  def : Pat<(int_s390_vcnf VR128:$x, imm32zx4_timm:$m),
+            (VCNF VR128:$x, imm32zx4:$m, 1)>;
+
+  let Uses = [FPC], mayRaiseFPException = 1 in
+    def VCRNF : BinaryVRRcFloatGeneric<"vcrnf", 0xE675>;
+  def : Pat<(int_s390_vcrnfs VR128:$x, VR128:$y, imm32zx4_timm:$m),
+            (VCRNF VR128:$x, VR128:$y, imm32zx4:$m, 2)>;
+}
+
+//===----------------------------------------------------------------------===//
 // Packed-decimal instructions
 //===----------------------------------------------------------------------===//
 
@@ -1742,5 +1998,28 @@ let Predicates = [FeatureVectorPackedDecimal] in {
 
     def VTP : TestVRRg<"vtp", 0xE65F>;
     def VCP : CompareVRRh<"vcp", 0xE677>;
+  }
+}
+
+let Predicates = [FeatureVectorPackedDecimalEnhancement2] in {
+  def VSCHP : BinaryExtraVRRbGeneric<"vschp", 0xE674>;
+  def VSCHSP : BinaryExtraVRRb<"vschsp", 0xE674, 2>;
+  def VSCHDP : BinaryExtraVRRb<"vschdp", 0xE674, 3>;
+  def VSCHXP : BinaryExtraVRRb<"vschxp", 0xE674, 4>;
+
+  def VSCSHP : BinaryVRRb<"vscshp", 0xE67C, null_frag, v128b, v128b>;
+
+  def VCSPH : TernaryVRRj<"vcsph", 0xE67D>;
+
+  let Defs = [CC] in
+    def VCLZDP : BinaryVRRk<"vclzdp", 0xE651>;
+
+  let Defs = [CC] in
+    def VSRPR : QuaternaryVRIf<"vsrpr", 0xE672>;
+
+  let Defs = [CC] in {
+    def VPKZR : QuaternaryVRIf<"vpkzr", 0xE670>;
+    def VUPKZH : BinaryVRRk<"vupkzh", 0xE654>;
+    def VUPKZL : BinaryVRRk<"vupkzl", 0xE65C>;
   }
 }

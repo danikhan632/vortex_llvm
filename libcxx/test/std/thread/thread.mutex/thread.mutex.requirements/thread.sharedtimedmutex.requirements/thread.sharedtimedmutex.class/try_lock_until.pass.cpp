@@ -6,10 +6,10 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// UNSUPPORTED: libcpp-has-no-threads
-// UNSUPPORTED: c++98, c++03, c++11
+// UNSUPPORTED: no-threads
+// UNSUPPORTED: c++03, c++11
 
-// FLAKY_TEST.
+// ALLOW_RETRIES: 2
 
 // <shared_mutex>
 
@@ -22,7 +22,9 @@
 #include <thread>
 #include <cstdlib>
 #include <cassert>
+#include <chrono>
 
+#include "make_test_thread.h"
 #include "test_macros.h"
 
 std::shared_timed_mutex m;
@@ -39,7 +41,7 @@ ms WaitTime = ms(250);
 // Thread sanitizer causes more overhead and will sometimes cause this test
 // to fail. To prevent this we give Thread sanitizer more time to complete the
 // test.
-#if !defined(TEST_HAS_SANITIZERS)
+#if !defined(TEST_IS_EXECUTED_IN_A_SLOW_ENVIRONMENT)
 ms Tolerance = ms(50);
 #else
 ms Tolerance = ms(50 * 5);
@@ -68,14 +70,14 @@ int main(int, char**)
 {
     {
         m.lock();
-        std::thread t(f1);
+        std::thread t = support::make_test_thread(f1);
         std::this_thread::sleep_for(WaitTime);
         m.unlock();
         t.join();
     }
     {
         m.lock();
-        std::thread t(f2);
+        std::thread t = support::make_test_thread(f2);
         std::this_thread::sleep_for(WaitTime + Tolerance);
         m.unlock();
         t.join();

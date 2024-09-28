@@ -127,12 +127,10 @@ namespace {
       if (UnaryOperator *uop = dyn_cast<UnaryOperator>(e)) {
         assert(uop->getOpcode() == UO_Extension);
         e = rebuild(uop->getSubExpr());
-        return new (S.Context) UnaryOperator(e, uop->getOpcode(),
-                                             uop->getType(),
-                                             uop->getValueKind(),
-                                             uop->getObjectKind(),
-                                             uop->getOperatorLoc(),
-                                             uop->canOverflow());
+        return UnaryOperator::Create(
+            S.Context, e, uop->getOpcode(), uop->getType(), uop->getValueKind(),
+            uop->getObjectKind(), uop->getOperatorLoc(), uop->canOverflow(),
+            S.CurFPFeatureOverrides());
       }
 
       if (GenericSelectionExpr *gse = dyn_cast<GenericSelectionExpr>(e)) {
@@ -154,8 +152,13 @@ namespace {
           assocTypes.push_back(assoc.getTypeSourceInfo());
         }
 
+        if (gse->isExprPredicate())
+          return GenericSelectionExpr::Create(
+              S.Context, gse->getGenericLoc(), gse->getControllingExpr(),
+              assocTypes, assocExprs, gse->getDefaultLoc(), gse->getRParenLoc(),
+              gse->containsUnexpandedParameterPack(), resultIndex);
         return GenericSelectionExpr::Create(
-            S.Context, gse->getGenericLoc(), gse->getControllingExpr(),
+            S.Context, gse->getGenericLoc(), gse->getControllingType(),
             assocTypes, assocExprs, gse->getDefaultLoc(), gse->getRParenLoc(),
             gse->containsUnexpandedParameterPack(), resultIndex);
       }
@@ -167,16 +170,11 @@ namespace {
         Expr *&rebuiltExpr = ce->isConditionTrue() ? LHS : RHS;
         rebuiltExpr = rebuild(rebuiltExpr);
 
-        return new (S.Context) ChooseExpr(ce->getBuiltinLoc(),
-                                          ce->getCond(),
-                                          LHS, RHS,
-                                          rebuiltExpr->getType(),
-                                          rebuiltExpr->getValueKind(),
-                                          rebuiltExpr->getObjectKind(),
-                                          ce->getRParenLoc(),
-                                          ce->isConditionTrue(),
-                                          rebuiltExpr->isTypeDependent(),
-                                          rebuiltExpr->isValueDependent());
+        return new (S.Context)
+            ChooseExpr(ce->getBuiltinLoc(), ce->getCond(), LHS, RHS,
+                       rebuiltExpr->getType(), rebuiltExpr->getValueKind(),
+                       rebuiltExpr->getObjectKind(), ce->getRParenLoc(),
+                       ce->isConditionTrue());
       }
 
       llvm_unreachable("bad expression to rebuild!");
@@ -453,11 +451,11 @@ PseudoOpBuilder::buildAssignmentOperation(Scope *Sc, SourceLocation opcLoc,
   ExprResult result;
   if (opcode == BO_Assign) {
     result = semanticRHS;
-    syntactic = new (S.Context) BinaryOperator(syntacticLHS, capturedRHS,
-                                               opcode, capturedRHS->getType(),
-                                               capturedRHS->getValueKind(),
-                                               OK_Ordinary, opcLoc,
-                                               FPOptions());
+    syntactic = BinaryOperator::Create(S.Context, syntacticLHS, capturedRHS,
+                                       opcode, capturedRHS->getType(),
+                                       capturedRHS->getValueKind(), OK_Ordinary,
+                                       opcLoc, S.CurFPFeatureOverrides());
+
   } else {
     ExprResult opLHS = buildGet();
     if (opLHS.isInvalid()) return ExprError();
@@ -468,14 +466,11 @@ PseudoOpBuilder::buildAssignmentOperation(Scope *Sc, SourceLocation opcLoc,
     result = S.BuildBinOp(Sc, opcLoc, nonCompound, opLHS.get(), semanticRHS);
     if (result.isInvalid()) return ExprError();
 
-    syntactic =
-      new (S.Context) CompoundAssignOperator(syntacticLHS, capturedRHS, opcode,
-                                             result.get()->getType(),
-                                             result.get()->getValueKind(),
-                                             OK_Ordinary,
-                                             opLHS.get()->getType(),
-                                             result.get()->getType(),
-                                             opcLoc, FPOptions());
+    syntactic = CompoundAssignOperator::Create(
+        S.Context, syntacticLHS, capturedRHS, opcode, result.get()->getType(),
+        result.get()->getValueKind(), OK_Ordinary, opcLoc,
+        S.CurFPFeatureOverrides(), opLHS.get()->getType(),
+        result.get()->getType());
   }
 
   // The result of the assignment, if not void, is the value set into
@@ -536,12 +531,14 @@ PseudoOpBuilder::buildIncDecOperation(Scope *Sc, SourceLocation opcLoc,
       (result.get()->isTypeDependent() || CanCaptureValue(result.get())))
     setResultToLastSemantic();
 
-  UnaryOperator *syntactic = new (S.Context) UnaryOperator(
-      syntacticOp, opcode, resultType, VK_LValue, OK_Ordinary, opcLoc,
-      !resultType->isDependentType()
-          ? S.Context.getTypeSize(resultType) >=
-                S.Context.getTypeSize(S.Context.IntTy)
-          : false);
+  UnaryOperator *syntactic =
+      UnaryOperator::Create(S.Context, syntacticOp, opcode, resultType,
+                            VK_LValue, OK_Ordinary, opcLoc,
+                            !resultType->isDependentType()
+                                ? S.Context.getTypeSize(resultType) >=
+                                      S.Context.getTypeSize(S.Context.IntTy)
+                                : false,
+                            S.CurFPFeatureOverrides());
   return complete(syntactic);
 }
 
@@ -590,7 +587,7 @@ bool ObjCPropertyOpBuilder::isWeakProperty() const {
   QualType T;
   if (RefExpr->isExplicitProperty()) {
     const ObjCPropertyDecl *Prop = RefExpr->getExplicitProperty();
-    if (Prop->getPropertyAttributes() & ObjCPropertyDecl::OBJC_PR_weak)
+    if (Prop->getPropertyAttributes() & ObjCPropertyAttribute::kind_weak)
       return true;
 
     T = Prop->getType();
@@ -745,11 +742,11 @@ ExprResult ObjCPropertyOpBuilder::buildGet() {
     assert(InstanceReceiver || RefExpr->isSuperReceiver());
     msg = S.BuildInstanceMessageImplicit(InstanceReceiver, receiverType,
                                          GenericLoc, Getter->getSelector(),
-                                         Getter, None);
+                                         Getter, std::nullopt);
   } else {
     msg = S.BuildClassMessageImplicit(receiverType, RefExpr->isSuperReceiver(),
-                                      GenericLoc, Getter->getSelector(),
-                                      Getter, None);
+                                      GenericLoc, Getter->getSelector(), Getter,
+                                      std::nullopt);
   }
   return msg;
 }
@@ -843,7 +840,7 @@ ExprResult ObjCPropertyOpBuilder::buildRValueOperation(Expr *op) {
 
   // As a special case, if the method returns 'id', try to get
   // a better type from the property.
-  if (RefExpr->isExplicitProperty() && result.get()->isRValue()) {
+  if (RefExpr->isExplicitProperty() && result.get()->isPRValue()) {
     QualType receiverType = RefExpr->getReceiverType(S.Context);
     QualType propType = RefExpr->getExplicitProperty()
                           ->getUsageType(receiverType);
@@ -1198,7 +1195,7 @@ bool ObjCSubscriptOpBuilder::findAtIndexGetter() {
         /*isPropertyAccessor=*/false,
         /*isSynthesizedAccessorStub=*/false,
         /*isImplicitlyDeclared=*/true, /*isDefined=*/false,
-        ObjCMethodDecl::Required, false);
+        ObjCImplementationControl::Required, false);
     ParmVarDecl *Argument = ParmVarDecl::Create(S.Context, AtIndexGetter,
                                                 SourceLocation(), SourceLocation(),
                                                 arrayRef ? &S.Context.Idents.get("index")
@@ -1208,7 +1205,7 @@ bool ObjCSubscriptOpBuilder::findAtIndexGetter() {
                                                 /*TInfo=*/nullptr,
                                                 SC_None,
                                                 nullptr);
-    AtIndexGetter->setMethodParams(S.Context, Argument, None);
+    AtIndexGetter->setMethodParams(S.Context, Argument, std::nullopt);
   }
 
   if (!AtIndexGetter) {
@@ -1304,7 +1301,7 @@ bool ObjCSubscriptOpBuilder::findAtIndexSetter() {
         /*isPropertyAccessor=*/false,
         /*isSynthesizedAccessorStub=*/false,
         /*isImplicitlyDeclared=*/true, /*isDefined=*/false,
-        ObjCMethodDecl::Required, false);
+        ObjCImplementationControl::Required, false);
     SmallVector<ParmVarDecl *, 2> Params;
     ParmVarDecl *object = ParmVarDecl::Create(S.Context, AtIndexSetter,
                                                 SourceLocation(), SourceLocation(),
@@ -1324,7 +1321,7 @@ bool ObjCSubscriptOpBuilder::findAtIndexSetter() {
                                                 SC_None,
                                                 nullptr);
     Params.push_back(key);
-    AtIndexSetter->setMethodParams(S.Context, Params, None);
+    AtIndexSetter->setMethodParams(S.Context, Params, std::nullopt);
   }
 
   if (!AtIndexSetter) {
@@ -1454,7 +1451,8 @@ MSPropertyOpBuilder::getBaseMSProperty(MSPropertySubscriptExpr *E) {
 
 Expr *MSPropertyOpBuilder::rebuildAndCaptureObject(Expr *syntacticBase) {
   InstanceBase = capture(RefExpr->getBaseExpr());
-  llvm::for_each(CallArgs, [this](Expr *&Arg) { Arg = capture(Arg); });
+  for (Expr *&Arg : CallArgs)
+    Arg = capture(Arg);
   syntacticBase = Rebuilder(S, [=](Expr *, unsigned Idx) -> Expr * {
                     switch (Idx) {
                     case 0:
@@ -1561,8 +1559,9 @@ ExprResult Sema::checkPseudoObjectIncDec(Scope *Sc, SourceLocation opcLoc,
                                          UnaryOperatorKind opcode, Expr *op) {
   // Do nothing if the operand is dependent.
   if (op->isTypeDependent())
-    return new (Context) UnaryOperator(op, opcode, Context.DependentTy,
-                                       VK_RValue, OK_Ordinary, opcLoc, false);
+    return UnaryOperator::Create(Context, op, opcode, Context.DependentTy,
+                                 VK_PRValue, OK_Ordinary, opcLoc, false,
+                                 CurFPFeatureOverrides());
 
   assert(UnaryOperator::isIncrementDecrementOp(opcode));
   Expr *opaqueRef = op->IgnoreParens();
@@ -1591,9 +1590,9 @@ ExprResult Sema::checkPseudoObjectAssignment(Scope *S, SourceLocation opcLoc,
                                              Expr *LHS, Expr *RHS) {
   // Do nothing if either argument is dependent.
   if (LHS->isTypeDependent() || RHS->isTypeDependent())
-    return new (Context) BinaryOperator(LHS, RHS, opcode, Context.DependentTy,
-                                        VK_RValue, OK_Ordinary, opcLoc,
-                                        FPOptions());
+    return BinaryOperator::Create(Context, LHS, RHS, opcode,
+                                  Context.DependentTy, VK_PRValue, OK_Ordinary,
+                                  opcLoc, CurFPFeatureOverrides());
 
   // Filter out non-overload placeholder types in the RHS.
   if (RHS->getType()->isNonOverloadPlaceholderType()) {
@@ -1646,28 +1645,30 @@ Expr *Sema::recreateSyntacticForm(PseudoObjectExpr *E) {
   Expr *syntax = E->getSyntacticForm();
   if (UnaryOperator *uop = dyn_cast<UnaryOperator>(syntax)) {
     Expr *op = stripOpaqueValuesFromPseudoObjectRef(*this, uop->getSubExpr());
-    return new (Context) UnaryOperator(
-        op, uop->getOpcode(), uop->getType(), uop->getValueKind(),
-        uop->getObjectKind(), uop->getOperatorLoc(), uop->canOverflow());
+    return UnaryOperator::Create(Context, op, uop->getOpcode(), uop->getType(),
+                                 uop->getValueKind(), uop->getObjectKind(),
+                                 uop->getOperatorLoc(), uop->canOverflow(),
+                                 CurFPFeatureOverrides());
   } else if (CompoundAssignOperator *cop
                = dyn_cast<CompoundAssignOperator>(syntax)) {
     Expr *lhs = stripOpaqueValuesFromPseudoObjectRef(*this, cop->getLHS());
     Expr *rhs = cast<OpaqueValueExpr>(cop->getRHS())->getSourceExpr();
-    return new (Context) CompoundAssignOperator(lhs, rhs, cop->getOpcode(),
-                                                cop->getType(),
-                                                cop->getValueKind(),
-                                                cop->getObjectKind(),
-                                                cop->getComputationLHSType(),
-                                                cop->getComputationResultType(),
-                                                cop->getOperatorLoc(),
-                                                FPOptions());
+    return CompoundAssignOperator::Create(
+        Context, lhs, rhs, cop->getOpcode(), cop->getType(),
+        cop->getValueKind(), cop->getObjectKind(), cop->getOperatorLoc(),
+        CurFPFeatureOverrides(), cop->getComputationLHSType(),
+        cop->getComputationResultType());
+
   } else if (BinaryOperator *bop = dyn_cast<BinaryOperator>(syntax)) {
     Expr *lhs = stripOpaqueValuesFromPseudoObjectRef(*this, bop->getLHS());
     Expr *rhs = cast<OpaqueValueExpr>(bop->getRHS())->getSourceExpr();
-    return new (Context) BinaryOperator(lhs, rhs, bop->getOpcode(),
-                                        bop->getType(), bop->getValueKind(),
-                                        bop->getObjectKind(),
-                                        bop->getOperatorLoc(), FPOptions());
+    return BinaryOperator::Create(Context, lhs, rhs, bop->getOpcode(),
+                                  bop->getType(), bop->getValueKind(),
+                                  bop->getObjectKind(), bop->getOperatorLoc(),
+                                  CurFPFeatureOverrides());
+
+  } else if (isa<CallExpr>(syntax)) {
+    return syntax;
   } else {
     assert(syntax->hasPlaceholderType(BuiltinType::PseudoObject));
     return stripOpaqueValuesFromPseudoObjectRef(*this, syntax);

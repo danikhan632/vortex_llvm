@@ -16,9 +16,8 @@
 #define LLVM_TRANSFORMS_UTILS_UNROLLLOOP_H
 
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
-#include "llvm/Transforms/Utils/ValueMapper.h"
+#include "llvm/Support/InstructionCost.h"
 
 namespace llvm {
 
@@ -33,6 +32,8 @@ class MDNode;
 class ProfileSummaryInfo;
 class OptimizationRemarkEmitter;
 class ScalarEvolution;
+class StringRef;
+class Value;
 
 using NewLoopsMap = SmallDenseMap<const Loop *, Loop *, 4>;
 
@@ -66,81 +67,92 @@ enum class LoopUnrollResult {
 
 struct UnrollLoopOptions {
   unsigned Count;
-  unsigned TripCount;
   bool Force;
-  bool AllowRuntime;
+  bool Runtime;
   bool AllowExpensiveTripCount;
-  bool PreserveCondBr;
-  bool PreserveOnlyFirst;
-  unsigned TripMultiple;
-  unsigned PeelCount;
   bool UnrollRemainder;
   bool ForgetAllSCEV;
 };
 
 LoopUnrollResult UnrollLoop(Loop *L, UnrollLoopOptions ULO, LoopInfo *LI,
                             ScalarEvolution *SE, DominatorTree *DT,
-                            AssumptionCache *AC, OptimizationRemarkEmitter *ORE,
-                            bool PreserveLCSSA, Loop **RemainderLoop = nullptr);
+                            AssumptionCache *AC,
+                            const llvm::TargetTransformInfo *TTI,
+                            OptimizationRemarkEmitter *ORE, bool PreserveLCSSA,
+                            Loop **RemainderLoop = nullptr);
 
-bool UnrollRuntimeLoopRemainder(Loop *L, unsigned Count,
-                                bool AllowExpensiveTripCount,
-                                bool UseEpilogRemainder, bool UnrollRemainder,
-                                bool ForgetAllSCEV, LoopInfo *LI,
-                                ScalarEvolution *SE, DominatorTree *DT,
-                                AssumptionCache *AC, bool PreserveLCSSA,
-                                Loop **ResultLoop = nullptr);
-
-void computePeelCount(Loop *L, unsigned LoopSize,
-                      TargetTransformInfo::UnrollingPreferences &UP,
-                      unsigned &TripCount, ScalarEvolution &SE);
-
-bool canPeel(Loop *L);
-
-bool peelLoop(Loop *L, unsigned PeelCount, LoopInfo *LI, ScalarEvolution *SE,
-              DominatorTree *DT, AssumptionCache *AC, bool PreserveLCSSA);
+bool UnrollRuntimeLoopRemainder(
+    Loop *L, unsigned Count, bool AllowExpensiveTripCount,
+    bool UseEpilogRemainder, bool UnrollRemainder, bool ForgetAllSCEV,
+    LoopInfo *LI, ScalarEvolution *SE, DominatorTree *DT, AssumptionCache *AC,
+    const TargetTransformInfo *TTI, bool PreserveLCSSA,
+    Loop **ResultLoop = nullptr);
 
 LoopUnrollResult UnrollAndJamLoop(Loop *L, unsigned Count, unsigned TripCount,
                                   unsigned TripMultiple, bool UnrollRemainder,
                                   LoopInfo *LI, ScalarEvolution *SE,
                                   DominatorTree *DT, AssumptionCache *AC,
+                                  const TargetTransformInfo *TTI,
                                   OptimizationRemarkEmitter *ORE,
                                   Loop **EpilogueLoop = nullptr);
 
 bool isSafeToUnrollAndJam(Loop *L, ScalarEvolution &SE, DominatorTree &DT,
-                          DependenceInfo &DI);
-
-bool computeUnrollCount(Loop *L, const TargetTransformInfo &TTI,
-                        DominatorTree &DT, LoopInfo *LI, ScalarEvolution &SE,
-                        const SmallPtrSetImpl<const Value *> &EphValues,
-                        OptimizationRemarkEmitter *ORE, unsigned &TripCount,
-                        unsigned MaxTripCount, bool MaxOrZero,
-                        unsigned &TripMultiple, unsigned LoopSize,
-                        TargetTransformInfo::UnrollingPreferences &UP,
-                        bool &UseUpperBound);
-
-void remapInstruction(Instruction *I, ValueToValueMapTy &VMap);
+                          DependenceInfo &DI, LoopInfo &LI);
 
 void simplifyLoopAfterUnroll(Loop *L, bool SimplifyIVs, LoopInfo *LI,
                              ScalarEvolution *SE, DominatorTree *DT,
-                             AssumptionCache *AC);
+                             AssumptionCache *AC,
+                             const TargetTransformInfo *TTI);
 
 MDNode *GetUnrollMetadata(MDNode *LoopID, StringRef Name);
 
 TargetTransformInfo::UnrollingPreferences gatherUnrollingPreferences(
     Loop *L, ScalarEvolution &SE, const TargetTransformInfo &TTI,
-    BlockFrequencyInfo *BFI, ProfileSummaryInfo *PSI, int OptLevel,
-    Optional<unsigned> UserThreshold, Optional<unsigned> UserCount,
-    Optional<bool> UserAllowPartial, Optional<bool> UserRuntime,
-    Optional<bool> UserUpperBound, Optional<bool> UserAllowPeeling,
-    Optional<bool> UserAllowProfileBasedPeeling,
-    Optional<unsigned> UserFullUnrollMaxCount);
+    BlockFrequencyInfo *BFI, ProfileSummaryInfo *PSI,
+    llvm::OptimizationRemarkEmitter &ORE, int OptLevel,
+    std::optional<unsigned> UserThreshold, std::optional<unsigned> UserCount,
+    std::optional<bool> UserAllowPartial, std::optional<bool> UserRuntime,
+    std::optional<bool> UserUpperBound,
+    std::optional<unsigned> UserFullUnrollMaxCount);
 
-unsigned ApproximateLoopSize(const Loop *L, unsigned &NumCalls,
-                             bool &NotDuplicatable, bool &Convergent,
-                             const TargetTransformInfo &TTI,
-                             const SmallPtrSetImpl<const Value *> &EphValues,
-                             unsigned BEInsns);
+/// Produce an estimate of the unrolled cost of the specified loop.  This
+/// is used to a) produce a cost estimate for partial unrolling and b) to
+/// cheaply estimate cost for full unrolling when we don't want to symbolically
+/// evaluate all iterations.
+class UnrollCostEstimator {
+  InstructionCost LoopSize;
+  bool NotDuplicatable;
+
+public:
+  unsigned NumInlineCandidates;
+  bool Convergent;
+
+  UnrollCostEstimator(const Loop *L, const TargetTransformInfo &TTI,
+                      const SmallPtrSetImpl<const Value *> &EphValues,
+                      unsigned BEInsns);
+
+  /// Whether it is legal to unroll this loop.
+  bool canUnroll() const { return LoopSize.isValid() && !NotDuplicatable; }
+
+  uint64_t getRolledLoopSize() const { return *LoopSize.getValue(); }
+
+  /// Returns loop size estimation for unrolled loop, given the unrolling
+  /// configuration specified by UP.
+  uint64_t
+  getUnrolledLoopSize(const TargetTransformInfo::UnrollingPreferences &UP,
+                      unsigned CountOverwrite = 0) const;
+};
+
+bool computeUnrollCount(Loop *L, const TargetTransformInfo &TTI,
+                        DominatorTree &DT, LoopInfo *LI, AssumptionCache *AC,
+                        ScalarEvolution &SE,
+                        const SmallPtrSetImpl<const Value *> &EphValues,
+                        OptimizationRemarkEmitter *ORE, unsigned TripCount,
+                        unsigned MaxTripCount, bool MaxOrZero,
+                        unsigned TripMultiple, const UnrollCostEstimator &UCE,
+                        TargetTransformInfo::UnrollingPreferences &UP,
+                        TargetTransformInfo::PeelingPreferences &PP,
+                        bool &UseUpperBound);
 
 } // end namespace llvm
 

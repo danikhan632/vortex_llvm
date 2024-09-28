@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLDB_SBProcessInfo_h_
-#define LLDB_SBProcessInfo_h_
+#ifndef LLDB_API_SBPROCESSINFO_H
+#define LLDB_API_SBPROCESSINFO_H
 
 #include "lldb/API/SBDefines.h"
 
@@ -50,8 +50,12 @@ public:
 
   lldb::pid_t GetParentProcessID();
 
+  /// Return the target triple (arch-vendor-os) for the described process.
+  const char *GetTriple();
+
 private:
   friend class SBProcess;
+  friend class SBProcessInfoList;
 
   lldb_private::ProcessInstanceInfo &ref();
 
@@ -62,4 +66,4 @@ private:
 
 } // namespace lldb
 
-#endif // LLDB_SBProcessInfo_h_
+#endif // LLDB_API_SBPROCESSINFO_H

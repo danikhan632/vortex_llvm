@@ -15,11 +15,10 @@ namespace doc {
 
 llvm::Expected<std::unique_ptr<Generator>>
 findGeneratorByName(llvm::StringRef Format) {
-  for (auto I = GeneratorRegistry::begin(), E = GeneratorRegistry::end();
-       I != E; ++I) {
-    if (I->getName() != Format)
+  for (const auto &Generator : GeneratorRegistry::entries()) {
+    if (Generator.getName() != Format)
       continue;
-    return I->instantiate();
+    return Generator.instantiate();
   }
   return createStringError(llvm::inconvertibleErrorCode(),
                            "can't find generator: " + Format);
@@ -27,31 +26,17 @@ findGeneratorByName(llvm::StringRef Format) {
 
 // Enum conversion
 
-std::string getAccess(AccessSpecifier AS) {
-  switch (AS) {
-  case AccessSpecifier::AS_public:
-    return "public";
-  case AccessSpecifier::AS_protected:
-    return "protected";
-  case AccessSpecifier::AS_private:
-    return "private";
-  case AccessSpecifier::AS_none:
-    return {};
-  }
-  llvm_unreachable("Unknown AccessSpecifier");
-}
-
 std::string getTagType(TagTypeKind AS) {
   switch (AS) {
-  case TagTypeKind::TTK_Class:
+  case TagTypeKind::Class:
     return "class";
-  case TagTypeKind::TTK_Union:
+  case TagTypeKind::Union:
     return "union";
-  case TagTypeKind::TTK_Interface:
+  case TagTypeKind::Interface:
     return "interface";
-  case TagTypeKind::TTK_Struct:
+  case TagTypeKind::Struct:
     return "struct";
-  case TagTypeKind::TTK_Enum:
+  case TagTypeKind::Enum:
     return "enum";
   }
   llvm_unreachable("Unknown TagTypeKind");
@@ -80,9 +65,9 @@ void Generator::addInfoToIndex(Index &Idx, const doc::Info *Info) {
   for (const auto &R : llvm::reverse(Info->Namespace)) {
     // Look for the current namespace in the children of the index I is
     // pointing.
-    auto It = std::find(I->Children.begin(), I->Children.end(), R.USR);
+    auto It = llvm::find(I->Children, R.USR);
     if (It != I->Children.end()) {
-      // If it is found, just change I to point the namespace refererence found.
+      // If it is found, just change I to point the namespace reference found.
       I = &*It;
     } else {
       // If it is not found a new reference is created
@@ -94,7 +79,7 @@ void Generator::addInfoToIndex(Index &Idx, const doc::Info *Info) {
   // Look for Info in the vector where it is supposed to be; it could already
   // exist if it is a parent namespace of an Info already passed to this
   // function.
-  auto It = std::find(I->Children.begin(), I->Children.end(), Info->USR);
+  auto It = llvm::find(I->Children, Info->USR);
   if (It == I->Children.end()) {
     // If it is not in the vector it is inserted
     I->Children.emplace_back(Info->USR, Info->extractName(), Info->IT,

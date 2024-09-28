@@ -1,4 +1,4 @@
-//===-- ScriptInterpreterNone.cpp -------------------------------*- C++ -*-===//
+//===-- ScriptInterpreterNone.cpp -----------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -9,7 +9,6 @@
 #include "ScriptInterpreterNone.h"
 #include "lldb/Core/Debugger.h"
 #include "lldb/Core/PluginManager.h"
-#include "lldb/Core/StreamFile.h"
 #include "lldb/Utility/Stream.h"
 #include "lldb/Utility/StringList.h"
 
@@ -20,22 +19,26 @@
 using namespace lldb;
 using namespace lldb_private;
 
+LLDB_PLUGIN_DEFINE(ScriptInterpreterNone)
+
 ScriptInterpreterNone::ScriptInterpreterNone(Debugger &debugger)
     : ScriptInterpreter(debugger, eScriptLanguageNone) {}
 
-ScriptInterpreterNone::~ScriptInterpreterNone() {}
+ScriptInterpreterNone::~ScriptInterpreterNone() = default;
+
+static const char *no_interpreter_err_msg =
+    "error: Embedded script interpreter unavailable. LLDB was built without "
+    "scripting language support.\n";
 
 bool ScriptInterpreterNone::ExecuteOneLine(llvm::StringRef command,
                                            CommandReturnObject *,
                                            const ExecuteScriptOptions &) {
-  m_debugger.GetErrorStream().PutCString(
-      "error: there is no embedded script interpreter in this mode.\n");
+  m_debugger.GetErrorStream().PutCString(no_interpreter_err_msg);
   return false;
 }
 
 void ScriptInterpreterNone::ExecuteInterpreterLoop() {
-  m_debugger.GetErrorStream().PutCString(
-      "error: there is no embedded script interpreter in this mode.\n");
+  m_debugger.GetErrorStream().PutCString(no_interpreter_err_msg);
 }
 
 void ScriptInterpreterNone::Initialize() {
@@ -55,17 +58,6 @@ ScriptInterpreterNone::CreateInstance(Debugger &debugger) {
   return std::make_shared<ScriptInterpreterNone>(debugger);
 }
 
-lldb_private::ConstString ScriptInterpreterNone::GetPluginNameStatic() {
-  static ConstString g_name("script-none");
-  return g_name;
-}
-
-const char *ScriptInterpreterNone::GetPluginDescriptionStatic() {
+llvm::StringRef ScriptInterpreterNone::GetPluginDescriptionStatic() {
   return "Null script interpreter";
 }
-
-lldb_private::ConstString ScriptInterpreterNone::GetPluginName() {
-  return GetPluginNameStatic();
-}
-
-uint32_t ScriptInterpreterNone::GetPluginVersion() { return 1; }

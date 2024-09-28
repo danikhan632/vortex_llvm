@@ -11,7 +11,6 @@
 
 #include "MCTargetDesc/MipsABIFlagsSection.h"
 #include "MCTargetDesc/MipsABIInfo.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/MC/MCELFStreamer.h"
 #include "llvm/MC/MCRegisterInfo.h"
@@ -19,7 +18,7 @@
 
 namespace llvm {
 
-struct MipsABIFlagsSection;
+class formatted_raw_ostream;
 
 class MipsTargetStreamer : public MCTargetStreamer {
 public:
@@ -84,12 +83,15 @@ public:
   virtual void emitDirectiveSetDsp();
   virtual void emitDirectiveSetDspr2();
   virtual void emitDirectiveSetNoDsp();
+  virtual void emitDirectiveSetMips3D();
+  virtual void emitDirectiveSetNoMips3D();
   virtual void emitDirectiveSetPop();
   virtual void emitDirectiveSetPush();
   virtual void emitDirectiveSetSoftFloat();
   virtual void emitDirectiveSetHardFloat();
 
   // PIC support
+  virtual void emitDirectiveCpAdd(unsigned RegNo);
   virtual void emitDirectiveCpLoad(unsigned RegNo);
   virtual void emitDirectiveCpLocal(unsigned RegNo);
   virtual bool emitDirectiveCpRestore(int Offset,
@@ -175,12 +177,12 @@ public:
 
   MipsABIFlagsSection &getABIFlagsSection() { return ABIFlagsSection; }
   const MipsABIInfo &getABI() const {
-    assert(ABI.hasValue() && "ABI hasn't been set!");
+    assert(ABI && "ABI hasn't been set!");
     return *ABI;
   }
 
 protected:
-  llvm::Optional<MipsABIInfo> ABI;
+  std::optional<MipsABIInfo> ABI;
   MipsABIFlagsSection ABIFlagsSection;
 
   bool GPRInfoSet;
@@ -263,12 +265,15 @@ public:
   void emitDirectiveSetDsp() override;
   void emitDirectiveSetDspr2() override;
   void emitDirectiveSetNoDsp() override;
+  void emitDirectiveSetMips3D() override;
+  void emitDirectiveSetNoMips3D() override;
   void emitDirectiveSetPop() override;
   void emitDirectiveSetPush() override;
   void emitDirectiveSetSoftFloat() override;
   void emitDirectiveSetHardFloat() override;
 
   // PIC support
+  void emitDirectiveCpAdd(unsigned RegNo) override;
   void emitDirectiveCpLoad(unsigned RegNo) override;
   void emitDirectiveCpLocal(unsigned RegNo) override;
 
@@ -341,6 +346,7 @@ public:
   void emitFMask(unsigned FPUBitmask, int FPUTopSavedRegOff) override;
 
   // PIC support
+  void emitDirectiveCpAdd(unsigned RegNo) override;
   void emitDirectiveCpLoad(unsigned RegNo) override;
   void emitDirectiveCpLocal(unsigned RegNo) override;
   bool emitDirectiveCpRestore(int Offset, function_ref<unsigned()> GetATReg,

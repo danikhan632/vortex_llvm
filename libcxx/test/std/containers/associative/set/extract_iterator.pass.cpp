@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-// UNSUPPORTED: c++98, c++03, c++11, c++14
+// UNSUPPORTED: c++03, c++11, c++14
 
 // <set>
 
@@ -22,7 +22,7 @@
 template <class Container>
 void test(Container& c)
 {
-    size_t sz = c.size();
+    std::size_t sz = c.size();
 
     for (auto first = c.cbegin(); first != c.cend();)
     {

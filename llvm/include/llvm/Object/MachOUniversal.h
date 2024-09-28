@@ -13,17 +13,19 @@
 #ifndef LLVM_OBJECT_MACHOUNIVERSAL_H
 #define LLVM_OBJECT_MACHOUNIVERSAL_H
 
-#include "llvm/ADT/Triple.h"
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/BinaryFormat/MachO.h"
-#include "llvm/Object/Archive.h"
 #include "llvm/Object/Binary.h"
 #include "llvm/Object/MachO.h"
+#include "llvm/TargetParser/Triple.h"
 
 namespace llvm {
 class StringRef;
+class LLVMContext;
 
 namespace object {
+class Archive;
+class IRObjectFile;
 
 class MachOUniversalBinary : public Binary {
   virtual void anchor();
@@ -90,28 +92,19 @@ public:
       else // Parent->getMagic() == MachO::FAT_MAGIC_64
         return Header64.reserved;
     }
+    Triple getTriple() const {
+      return MachOObjectFile::getArchTriple(getCPUType(), getCPUSubType());
+    }
     std::string getArchFlagName() const {
       const char *McpuDefault, *ArchFlag;
-      if (Parent->getMagic() == MachO::FAT_MAGIC) {
-        Triple T =
-            MachOObjectFile::getArchTriple(Header.cputype, Header.cpusubtype,
-                                           &McpuDefault, &ArchFlag);
-      } else { // Parent->getMagic() == MachO::FAT_MAGIC_64
-        Triple T =
-            MachOObjectFile::getArchTriple(Header64.cputype,
-                                           Header64.cpusubtype,
-                                           &McpuDefault, &ArchFlag);
-      }
-      if (ArchFlag) {
-        std::string ArchFlagName(ArchFlag);
-        return ArchFlagName;
-      } else {
-        std::string ArchFlagName("");
-        return ArchFlagName;
-      }
+      MachOObjectFile::getArchTriple(getCPUType(), getCPUSubType(),
+                                     &McpuDefault, &ArchFlag);
+      return ArchFlag ? ArchFlag : std::string();
     }
 
     Expected<std::unique_ptr<MachOObjectFile>> getAsObjectFile() const;
+    Expected<std::unique_ptr<IRObjectFile>>
+    getAsIRObject(LLVMContext &Ctx) const;
 
     Expected<std::unique_ptr<Archive>> getAsArchive() const;
   };
@@ -164,6 +157,9 @@ public:
 
   Expected<std::unique_ptr<MachOObjectFile>>
   getMachOObjectForArch(StringRef ArchName) const;
+
+  Expected<std::unique_ptr<IRObjectFile>>
+  getIRObjectForArch(StringRef ArchName, LLVMContext &Ctx) const;
 
   Expected<std::unique_ptr<Archive>>
   getArchiveForArch(StringRef ArchName) const;

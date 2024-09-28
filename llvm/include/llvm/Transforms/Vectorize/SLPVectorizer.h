@@ -20,21 +20,19 @@
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/MapVector.h"
-#include "llvm/ADT/None.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/IR/PassManager.h"
-#include "llvm/Support/CommandLine.h"
 
 namespace llvm {
 
+class AAResults;
 class AssumptionCache;
 class BasicBlock;
-class CmpInst;
-class DataLayout;
 class DemandedBits;
 class DominatorTree;
 class Function;
+class GetElementPtrInst;
 class InsertElementInst;
 class InsertValueInst;
 class Instruction;
@@ -46,6 +44,7 @@ class StoreInst;
 class TargetLibraryInfo;
 class TargetTransformInfo;
 class Value;
+class WeakTrackingVH;
 
 /// A private "module" namespace for types and utilities used by this pass.
 /// These are implementation details and should not be used by clients.
@@ -55,18 +54,17 @@ class BoUpSLP;
 
 } // end namespace slpvectorizer
 
-extern cl::opt<bool> RunSLPVectorization;
-
 struct SLPVectorizerPass : public PassInfoMixin<SLPVectorizerPass> {
   using StoreList = SmallVector<StoreInst *, 8>;
   using StoreListMap = MapVector<Value *, StoreList>;
   using GEPList = SmallVector<GetElementPtrInst *, 8>;
   using GEPListMap = MapVector<Value *, GEPList>;
+  using InstSetVector = SmallSetVector<Instruction *, 8>;
 
   ScalarEvolution *SE = nullptr;
   TargetTransformInfo *TTI = nullptr;
   TargetLibraryInfo *TLI = nullptr;
-  AliasAnalysis *AA = nullptr;
+  AAResults *AA = nullptr;
   LoopInfo *LI = nullptr;
   DominatorTree *DT = nullptr;
   AssumptionCache *AC = nullptr;
@@ -78,7 +76,7 @@ public:
 
   // Glue for old PM.
   bool runImpl(Function &F, ScalarEvolution *SE_, TargetTransformInfo *TTI_,
-               TargetLibraryInfo *TLI_, AliasAnalysis *AA_, LoopInfo *LI_,
+               TargetLibraryInfo *TLI_, AAResults *AA_, LoopInfo *LI_,
                DominatorTree *DT_, AssumptionCache *AC_, DemandedBits *DB_,
                OptimizationRemarkEmitter *ORE_);
 
@@ -92,18 +90,19 @@ private:
   ///       every time we run into a memory barrier.
   void collectSeedInstructions(BasicBlock *BB);
 
-  /// Try to vectorize a chain that starts at two arithmetic instrs.
-  bool tryToVectorizePair(Value *A, Value *B, slpvectorizer::BoUpSLP &R);
-
   /// Try to vectorize a list of operands.
-  /// \param UserCost Cost of the user operations of \p VL if they may affect
-  /// the cost of the vectorization.
+  /// \param MaxVFOnly Vectorize only using maximal allowed register size.
   /// \returns true if a value was vectorized.
   bool tryToVectorizeList(ArrayRef<Value *> VL, slpvectorizer::BoUpSLP &R,
-                          int UserCost = 0, bool AllowReorder = false);
+                          bool MaxVFOnly = false);
 
   /// Try to vectorize a chain that may start at the operands of \p I.
   bool tryToVectorize(Instruction *I, slpvectorizer::BoUpSLP &R);
+
+  /// Try to vectorize chains that may start at the operands of
+  /// instructions in \p Insts.
+  bool tryToVectorize(ArrayRef<WeakTrackingVH> Insts,
+                      slpvectorizer::BoUpSLP &R);
 
   /// Vectorize the store instructions collected in Stores.
   bool vectorizeStoreChains(slpvectorizer::BoUpSLP &R);
@@ -112,9 +111,23 @@ private:
   /// collected in GEPs.
   bool vectorizeGEPIndices(BasicBlock *BB, slpvectorizer::BoUpSLP &R);
 
-  /// Try to find horizontal reduction or otherwise vectorize a chain of binary
-  /// operators.
-  bool vectorizeRootInstruction(PHINode *P, Value *V, BasicBlock *BB,
+  /// Try to find horizontal reduction or otherwise, collect instructions
+  /// for postponed vectorization attempts.
+  /// \a P if not null designates phi node the reduction is fed into
+  /// (with reduction operators \a Root or one of its operands, in a basic block
+  /// \a BB).
+  /// \returns true if a horizontal reduction was matched and reduced.
+  /// \returns false if \a V is null or not an instruction,
+  /// or a horizontal reduction was not matched or not possible.
+  bool vectorizeHorReduction(PHINode *P, Instruction *Root, BasicBlock *BB,
+                             slpvectorizer::BoUpSLP &R,
+                             TargetTransformInfo *TTI,
+                             SmallVectorImpl<WeakTrackingVH> &PostponedInsts);
+
+  /// Make an attempt to vectorize reduction and then try to vectorize
+  /// postponed binary operations.
+  /// \returns true on any successfull vectorization.
+  bool vectorizeRootInstruction(PHINode *P, Instruction *Root, BasicBlock *BB,
                                 slpvectorizer::BoUpSLP &R,
                                 TargetTransformInfo *TTI);
 
@@ -126,20 +139,22 @@ private:
   bool vectorizeInsertElementInst(InsertElementInst *IEI, BasicBlock *BB,
                                   slpvectorizer::BoUpSLP &R);
 
-  /// Try to vectorize trees that start at compare instructions.
-  bool vectorizeCmpInst(CmpInst *CI, BasicBlock *BB, slpvectorizer::BoUpSLP &R);
+  /// Tries to vectorize \p CmpInts. \Returns true on success.
+  template <typename ItT>
+  bool vectorizeCmpInsts(iterator_range<ItT> CmpInsts, BasicBlock *BB,
+                         slpvectorizer::BoUpSLP &R);
 
-  /// Tries to vectorize constructs started from CmpInst, InsertValueInst or
+  /// Tries to vectorize constructs started from InsertValueInst or
   /// InsertElementInst instructions.
-  bool vectorizeSimpleInstructions(SmallVectorImpl<Instruction *> &Instructions,
-                                   BasicBlock *BB, slpvectorizer::BoUpSLP &R);
+  bool vectorizeInserts(InstSetVector &Instructions, BasicBlock *BB,
+                        slpvectorizer::BoUpSLP &R);
 
   /// Scan the basic block and look for patterns that are likely to start
   /// a vectorization chain.
   bool vectorizeChainsInBlock(BasicBlock *BB, slpvectorizer::BoUpSLP &R);
 
   bool vectorizeStoreChain(ArrayRef<Value *> Chain, slpvectorizer::BoUpSLP &R,
-                           unsigned Idx);
+                           unsigned Idx, unsigned MinVF);
 
   bool vectorizeStores(ArrayRef<StoreInst *> Stores, slpvectorizer::BoUpSLP &R);
 

@@ -8,8 +8,8 @@ struct NotACapability {};
 union __attribute__((capability("mutex"))) MutexUnion { int a; char* b; };
 typedef union { int a; char* b; } __attribute__((capability("mutex"))) MutexUnion2;
 
-// Test an invalid capability name
-struct __attribute__((capability("wrong"))) IncorrectName {}; // expected-warning {{invalid capability name 'wrong'; capability name must be 'mutex' or 'role'}}
+// Test a different capability name
+struct __attribute__((capability("custom"))) CustomName {};
 
 int Test1 __attribute__((capability("test1")));  // expected-error {{'capability' attribute only applies to structs, unions, classes, and typedefs}}
 int Test2 __attribute__((shared_capability("test2"))); // expected-error {{'shared_capability' attribute only applies to structs, unions, classes, and typedefs}}
@@ -17,8 +17,8 @@ int Test3 __attribute__((acquire_capability("test3")));  // expected-warning {{'
 int Test4 __attribute__((try_acquire_capability("test4"))); // expected-error {{'try_acquire_capability' attribute only applies to functions}}
 int Test5 __attribute__((release_capability("test5"))); // expected-warning {{'release_capability' attribute only applies to functions}}
 
-struct __attribute__((capability(12))) Test3 {}; // expected-error {{'capability' attribute requires a string}}
-struct __attribute__((shared_capability(Test2))) Test4 {}; // expected-error {{'shared_capability' attribute requires a string}}
+struct __attribute__((capability(12))) Test3 {}; // expected-error {{expected string literal as argument of 'capability' attribute}}
+struct __attribute__((shared_capability(Test2))) Test4 {}; // expected-error {{expected string literal as argument of 'shared_capability' attribute}}
 
 struct __attribute__((capability)) Test5 {}; // expected-error {{'capability' attribute takes one argument}}
 struct __attribute__((shared_capability("test1", 12))) Test6 {}; // expected-error {{'shared_capability' attribute takes one argument}}

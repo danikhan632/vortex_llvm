@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// UNSUPPORTED: libcpp-has-no-threads
-// UNSUPPORTED: c++98, c++03, c++11, c++14
+// UNSUPPORTED: no-threads
+// UNSUPPORTED: c++03, c++11, c++14
 
 // <shared_mutex>
 
@@ -22,6 +22,7 @@
 int main(int, char**)
 {
     std::shared_mutex m;
+    (void)m;
 
-  return 0;
+    return 0;
 }

@@ -11,7 +11,7 @@
 declare float @llvm.fabs.f32(float %f)
 
 ; Test addition followed by EQ, which could use the CC result of the addition.
-define float @f1(float %a, float %b, float *%dest) #0 {
+define float @f1(float %a, float %b, ptr %dest) #0 {
 ; CHECK-LABEL: f1:
 ; CHECK-DAG: aebr %f0, %f2
 ; CHECK-DAG: lzer [[REG:%f[0-9]+]]
@@ -30,7 +30,7 @@ entry:
   br i1 %cmp, label %exit, label %store
 
 store:
-  store float %b, float *%dest
+  store float %b, ptr %dest
   br label %exit
 
 exit:
@@ -38,7 +38,7 @@ exit:
 }
 
 ; Test the result of LOAD POSITIVE.
-define float @f6(float %dummy, float %a, float *%dest) #0 {
+define float @f6(float %dummy, float %a, ptr %dest) #0 {
 ; CHECK-LABEL: f6:
 ; CHECK-DAG: lpdfr %f0, %f2
 ; CHECK-DAG: lzer [[REG:%f[0-9]+]]
@@ -46,7 +46,7 @@ define float @f6(float %dummy, float %a, float *%dest) #0 {
 ; CHECK-NEXT: bhr %r14
 ; CHECK: br %r14
 entry:
-  %res = call float @llvm.fabs.f32(float %a)
+  %res = call float @llvm.fabs.f32(float %a) #0
   %cmp = call i1 @llvm.experimental.constrained.fcmps.f32(
                                                float %res, float 0.0,
                                                metadata !"ogt",
@@ -54,7 +54,7 @@ entry:
   br i1 %cmp, label %exit, label %store
 
 store:
-  store float %res, float *%dest
+  store float %res, ptr %dest
   br label %exit
 
 exit:
@@ -62,7 +62,7 @@ exit:
 }
 
 ; Test the result of LOAD NEGATIVE.
-define float @f7(float %dummy, float %a, float *%dest) #0 {
+define float @f7(float %dummy, float %a, ptr %dest) #0 {
 ; CHECK-LABEL: f7:
 ; CHECK-DAG: lndfr %f0, %f2
 ; CHECK-DAG: lzer [[REG:%f[0-9]+]]
@@ -70,7 +70,7 @@ define float @f7(float %dummy, float %a, float *%dest) #0 {
 ; CHECK-NEXT: blr %r14
 ; CHECK: br %r14
 entry:
-  %abs = call float @llvm.fabs.f32(float %a)
+  %abs = call float @llvm.fabs.f32(float %a) #0
   %res = fneg float %abs
   %cmp = call i1 @llvm.experimental.constrained.fcmps.f32(
                                                float %res, float 0.0,
@@ -79,7 +79,7 @@ entry:
   br i1 %cmp, label %exit, label %store
 
 store:
-  store float %res, float *%dest
+  store float %res, ptr %dest
   br label %exit
 
 exit:
@@ -87,7 +87,7 @@ exit:
 }
 
 ; Test the result of LOAD COMPLEMENT.
-define float @f8(float %dummy, float %a, float *%dest) #0 {
+define float @f8(float %dummy, float %a, ptr %dest) #0 {
 ; CHECK-LABEL: f8:
 ; CHECK-DAG: lcdfr %f0, %f2
 ; CHECK-DAG: lzer [[REG:%f[0-9]+]]
@@ -103,7 +103,7 @@ entry:
   br i1 %cmp, label %exit, label %store
 
 store:
-  store float %res, float *%dest
+  store float %res, ptr %dest
   br label %exit
 
 exit:
@@ -122,7 +122,7 @@ define float @f12(float %dummy, float %val) #0 {
 ; CHECK-NEXT: blr %r14
 ; CHECK: br %r14
 entry:
-  %ret = call float asm "blah $1", "=f,{f0}"(float %val)
+  %ret = call float asm "blah $1", "=f,{f0}"(float %val) #0
   %cmp = call i1 @llvm.experimental.constrained.fcmps.f32(
                                                float %val, float 0.0,
                                                metadata !"olt",
@@ -130,7 +130,7 @@ entry:
   br i1 %cmp, label %exit, label %store
 
 store:
-  call void asm sideeffect "blah", ""()
+  call void asm sideeffect "blah", ""() #0
   br label %exit
 
 exit:

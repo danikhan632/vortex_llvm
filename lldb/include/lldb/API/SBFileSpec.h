@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLDB_SBFileSpec_h_
-#define LLDB_SBFileSpec_h_
+#ifndef LLDB_API_SBFILESPEC_H
+#define LLDB_API_SBFILESPEC_H
 
 #include "lldb/API/SBDefines.h"
 
@@ -19,8 +19,11 @@ public:
 
   SBFileSpec(const lldb::SBFileSpec &rhs);
 
-  SBFileSpec(const char *path); // Deprecated, use SBFileSpec (const char *path,
-                                // bool resolve)
+  LLDB_DEPRECATED_FIXME(
+      "Use the other constructor to determine if this the file "
+      "spec should be resolved",
+      "SBFileSpec(const char *, bool)")
+  SBFileSpec(const char *path);
 
   SBFileSpec(const char *path, bool resolve);
 
@@ -74,6 +77,7 @@ private:
   friend class SBSourceManager;
   friend class SBTarget;
   friend class SBThread;
+  friend class SBTrace;
 
   SBFileSpec(const lldb_private::FileSpec &fspec);
 
@@ -92,4 +96,4 @@ private:
 
 } // namespace lldb
 
-#endif // LLDB_SBFileSpec_h_
+#endif // LLDB_API_SBFILESPEC_H

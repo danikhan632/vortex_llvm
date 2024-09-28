@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_Block_h_
-#define liblldb_Block_h_
+#ifndef LLDB_SYMBOL_BLOCK_H
+#define LLDB_SYMBOL_BLOCK_H
 
 #include "lldb/Core/AddressRange.h"
 #include "lldb/Symbol/CompilerType.h"
@@ -40,7 +40,7 @@ namespace lldb_private {
 /// blocks.
 class Block : public UserID, public SymbolContextScope {
 public:
-  typedef RangeArray<uint32_t, uint32_t, 1> RangeList;
+  typedef RangeVector<uint32_t, uint32_t, 1> RangeList;
   typedef RangeList::Entry Range;
 
   /// Construct with a User ID \a uid, \a depth.
@@ -338,6 +338,8 @@ public:
 
   Block *FindBlockByID(lldb::user_id_t block_id);
 
+  Block *FindInnermostBlockByOffset(const lldb::addr_t offset);
+
   size_t GetNumRanges() const { return m_ranges.GetSize(); }
 
   bool GetRangeContainingOffset(const lldb::addr_t offset, Range &range);
@@ -376,9 +378,10 @@ protected:
   Block *GetSiblingForChild(const Block *child_block) const;
 
 private:
-  DISALLOW_COPY_AND_ASSIGN(Block);
+  Block(const Block &) = delete;
+  const Block &operator=(const Block &) = delete;
 };
 
 } // namespace lldb_private
 
-#endif // liblldb_Block_h_
+#endif // LLDB_SYMBOL_BLOCK_H

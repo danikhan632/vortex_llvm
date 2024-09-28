@@ -6,7 +6,7 @@
 
 // REQUIRES: stable-runtime
 
-// UNSUPPORTED: android, freebsd, netbsd, ubsan
+// UNSUPPORTED: android, target={{.*(freebsd|netbsd).*}}, ubsan
 
 // Checks that pvalloc overflows are caught. If the allocator is allowed to
 // return null, the errno should be set to ENOMEM.
@@ -35,7 +35,7 @@ int main(int argc, char *argv[]) {
   }
   // CHECK: {{ERROR: .*Sanitizer: pvalloc parameters overflow: size .* rounded up to system page size .* cannot be represented in type size_t}}
   // CHECK: {{#0 .*pvalloc}}
-  // CHECK: {{#1 .*main .*pvalloc-overflow.cpp:}}
+  // CHECK: {{#[12] .*main .*pvalloc-overflow.cpp:}}
   // CHECK: {{SUMMARY: .*Sanitizer: pvalloc-overflow}}
 
   // The NULL pointer is printed differently on different systems, while (long)0

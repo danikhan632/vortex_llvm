@@ -1,4 +1,4 @@
-//===-------------------- Implementation of strcpy -----------------------===//
+//===-- Implementation of strcpy ------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -7,13 +7,18 @@
 //===----------------------------------------------------------------------===//
 
 #include "src/string/strcpy.h"
+#include "src/string/memory_utils/inline_memcpy.h"
+#include "src/string/string_utils.h"
 
 #include "src/__support/common.h"
 
-namespace __llvm_libc {
+namespace LIBC_NAMESPACE {
 
-char *LLVM_LIBC_ENTRYPOINT(strcpy)(char *dest, const char *src) {
-  return reinterpret_cast<char *>(::memcpy(dest, src, ::strlen(src) + 1));
+LLVM_LIBC_FUNCTION(char *, strcpy,
+                   (char *__restrict dest, const char *__restrict src)) {
+  size_t size = internal::string_length(src) + 1;
+  inline_memcpy(dest, src, size);
+  return dest;
 }
 
-} // namespace __llvm_libc
+} // namespace LIBC_NAMESPACE

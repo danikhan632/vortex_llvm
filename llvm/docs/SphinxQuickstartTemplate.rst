@@ -84,7 +84,7 @@ To create a new paragraph, simply insert a blank line.
 Links
 =====
 
-You can format a link `like this <http://llvm.org/>`_. A more `sophisticated syntax`_ allows you to place the ``.. _`link text`: <URL>`` block
+You can format a link `like this <https://llvm.org/>`_. A more `sophisticated syntax`_ allows you to place the ``.. _`link text`: <URL>`` block
 pretty much anywhere else in the document. This is useful when linking to especially long URLs.
 
 .. _`sophisticated syntax`: http://en.wikipedia.org/wiki/LLVM
@@ -165,3 +165,30 @@ without any syntax highlighting like this:
                           ...
 
 
+Generating the documentation
+============================
+
+You can generate the HTML documentation from the sources locally if you want to
+see what they would look like. In addition to the normal
+`build tools <GettingStarted.html>`_
+you need to install `Sphinx`_ and the necessary extensions
+using the following command inside the ``llvm-project`` checkout:
+
+.. code-block:: console
+
+   pip install --user -r ./llvm/docs/requirements.txt
+
+Then run cmake to build the documentation inside the ``llvm-project`` checkout:
+
+.. code-block:: console
+
+   mkdir build
+   cd build
+   cmake -DLLVM_ENABLE_SPHINX=On ../llvm
+   cmake --build . --target docs-llvm-html
+
+In case you already have the Cmake build set up and want to reuse that,
+just set the CMake variable ``LLVM_ENABLE_SPHINX=On``.
+
+After that you find the generated documentation in ``build/docs/html``
+folder.

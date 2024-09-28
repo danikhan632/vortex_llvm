@@ -6,30 +6,43 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SymbolFileDWARF_DWARFCompileUnit_h_
-#define SymbolFileDWARF_DWARFCompileUnit_h_
+#ifndef LLDB_SOURCE_PLUGINS_SYMBOLFILE_DWARF_DWARFCOMPILEUNIT_H
+#define LLDB_SOURCE_PLUGINS_SYMBOLFILE_DWARF_DWARFCOMPILEUNIT_H
 
 #include "DWARFUnit.h"
 #include "llvm/Support/Error.h"
 
+namespace llvm {
+class DWARFAbbreviationDeclarationSet;
+} // namespace llvm
+
+namespace lldb_private::plugin {
+namespace dwarf {
 class DWARFCompileUnit : public DWARFUnit {
 public:
   void BuildAddressRangeTable(DWARFDebugAranges *debug_aranges) override;
 
-  void Dump(lldb_private::Stream *s) const override;
+  void Dump(Stream *s) const override;
 
   static bool classof(const DWARFUnit *unit) { return !unit->IsTypeUnit(); }
+
+  DWARFCompileUnit &GetNonSkeletonUnit();
+
+  DWARFDIE LookupAddress(const dw_addr_t address);
 
 private:
   DWARFCompileUnit(SymbolFileDWARF &dwarf, lldb::user_id_t uid,
                    const DWARFUnitHeader &header,
-                   const DWARFAbbreviationDeclarationSet &abbrevs,
+                   const llvm::DWARFAbbreviationDeclarationSet &abbrevs,
                    DIERef::Section section, bool is_dwo)
       : DWARFUnit(dwarf, uid, header, abbrevs, section, is_dwo) {}
 
-  DISALLOW_COPY_AND_ASSIGN(DWARFCompileUnit);
+  DWARFCompileUnit(const DWARFCompileUnit &) = delete;
+  const DWARFCompileUnit &operator=(const DWARFCompileUnit &) = delete;
 
   friend class DWARFUnit;
 };
+} // namespace dwarf
+} // namespace lldb_private::plugin
 
-#endif // SymbolFileDWARF_DWARFCompileUnit_h_
+#endif // LLDB_SOURCE_PLUGINS_SYMBOLFILE_DWARF_DWARFCOMPILEUNIT_H

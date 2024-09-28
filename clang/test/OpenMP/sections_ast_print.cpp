@@ -18,12 +18,12 @@ T tmain(T argc) {
   static T a;
 // CHECK: static T a;
 #pragma omp parallel
-#pragma omp sections private(argc, b), firstprivate(c, d), lastprivate(d, f) reduction(- : g) nowait allocate(d)
+#pragma omp sections private(argc, b), firstprivate(c, d), lastprivate(d, f) reduction(task, - : g) nowait allocate(d)
   {
     foo();
   }
   // CHECK-NEXT: #pragma omp parallel
-  // CHECK-NEXT: #pragma omp sections private(argc,b) firstprivate(c,d) lastprivate(d,f) reduction(-: g) nowait allocate(d){{$}}
+  // CHECK-NEXT: #pragma omp sections private(argc,b) firstprivate(c,d) lastprivate(d,f) reduction(task, -: g) nowait allocate(d){{$}}
   // CHECK-NEXT: {
   // CHECK-NEXT: foo();
   // CHECK-NEXT: }

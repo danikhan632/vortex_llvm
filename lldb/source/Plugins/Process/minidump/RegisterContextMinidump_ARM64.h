@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_RegisterContextMinidump_ARM64_h_
-#define liblldb_RegisterContextMinidump_ARM64_h_
+#ifndef LLDB_SOURCE_PLUGINS_PROCESS_MINIDUMP_REGISTERCONTEXTMINIDUMP_ARM64_H
+#define LLDB_SOURCE_PLUGINS_PROCESS_MINIDUMP_REGISTERCONTEXTMINIDUMP_ARM64_H
 
 #include "MinidumpTypes.h"
 
@@ -67,16 +67,17 @@ public:
     uint8_t v[32 * 16]; // 32 128-bit floating point registers
   };
 
-protected:
   enum class Flags : uint32_t {
     ARM64_Flag = 0x80000000,
     Integer = ARM64_Flag | 0x00000002,
     FloatingPoint = ARM64_Flag | 0x00000004,
     LLVM_MARK_AS_BITMASK_ENUM(/* LargestValue = */ FloatingPoint)
   };
+
+protected:
   Context m_regs;
 };
 
 } // end namespace minidump
 } // end namespace lldb_private
-#endif // liblldb_RegisterContextMinidump_ARM64_h_
+#endif // LLDB_SOURCE_PLUGINS_PROCESS_MINIDUMP_REGISTERCONTEXTMINIDUMP_ARM64_H

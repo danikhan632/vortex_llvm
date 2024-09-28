@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "*.mlir": "llvm",
+        "*.inc": "cpp"
+    }
+}

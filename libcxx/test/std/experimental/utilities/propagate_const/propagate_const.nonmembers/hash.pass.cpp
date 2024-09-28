@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-// UNSUPPORTED: c++98, c++03, c++11
+// UNSUPPORTED: c++03, c++11
 
 // <propagate_const>
 
@@ -24,7 +24,7 @@ template <> struct hash<X>
 {
   typedef X first_argument_type;
 
-  size_t operator()(const first_argument_type&) const
+  std::size_t operator()(const first_argument_type&) const
   {
     return 99;
   }

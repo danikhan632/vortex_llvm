@@ -8,7 +8,7 @@
 // RUN: ld.lld -shared %tso.o -soname=t.so -o %t.so
 // RUN: ld.lld %t.o %t.so -o %t1
 // RUN: llvm-readobj -r %t1 | FileCheck --check-prefix=RELOC %s
-// RUN: llvm-objdump -d --no-show-raw-insn %t1 | FileCheck --check-prefix=DISASM %s
+// RUN: llvm-objdump --no-print-imm-hex -d --no-show-raw-insn %t1 | FileCheck --check-prefix=DISASM %s
 
 // RELOC:      Relocations [
 // RELOC-NEXT:  Section {{.*}} .rela.dyn {
@@ -17,7 +17,7 @@
 // RELOC-NEXT:  }
 // RELOC-NEXT: ]
 
-// DISASM:      _start:
+// DISASM:      <_start>:
 
 // Table 11.5: GD -> IE Code Transition (LP64)
 // DISASM-NEXT:               movq %fs:0, %rax

@@ -2,12 +2,12 @@
 // RUN: llvm-mc -filetype=obj -triple=x86_64-unknown-linux %s -o %t.o
 // RUN: ld.lld %t.o -o %t1
 // RUN: llvm-readobj -r %t1 | FileCheck --check-prefix=NORELOC %s
-// RUN: llvm-objdump -d --no-show-raw-insn %t1 | FileCheck --check-prefix=DISASM %s
+// RUN: llvm-objdump --no-print-imm-hex -d --no-show-raw-insn %t1 | FileCheck --check-prefix=DISASM %s
 
 // NORELOC:      Relocations [
 // NORELOC-NEXT: ]
 
-// DISASM:      _start:
+// DISASM:      <_start>:
 // DISASM-NEXT:   movq $-8, %rax
 // DISASM-NEXT:   movq $-8, %r15
 // DISASM-NEXT:   leaq -8(%rax), %rax
@@ -34,9 +34,9 @@
 // DISASM-NEXT:   leaq -4(%rax), %rax
 
 // LD to LE:
-// DISASM:     _DTPOFF64_1:
+// DISASM:     <_DTPOFF64_1>:
 // DISASM-NEXT:   clc
-// DISASM:      _DTPOFF64_2:
+// DISASM:      <_DTPOFF64_2>:
 // DISASM-NEXT:   cld
 
 .type tls0,@object

@@ -9,7 +9,8 @@
 #include "flags.h"
 #include "common.h"
 #include "flags_parser.h"
-#include "interface.h"
+
+#include "scudo/interface.h"
 
 namespace scudo {
 
@@ -67,6 +68,9 @@ void initFlags() {
   Parser.parseString(getCompileDefinitionScudoDefaultOptions());
   Parser.parseString(getScudoDefaultOptions());
   Parser.parseString(getEnv("SCUDO_OPTIONS"));
+  if (const char *V = getEnv("SCUDO_ALLOCATION_RING_BUFFER_SIZE")) {
+    Parser.parseStringPair("allocation_ring_buffer_size", V);
+  }
 }
 
 } // namespace scudo

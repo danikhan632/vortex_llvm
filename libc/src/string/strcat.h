@@ -1,4 +1,4 @@
-//===----------------- Implementation header for strcat -------------------===//
+//===-- Implementation header for strcat ------------------------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -11,10 +11,10 @@
 
 #include <string.h>
 
-namespace __llvm_libc {
+namespace LIBC_NAMESPACE {
 
-char *strcat(char *dest, const char *src);
+char *strcat(char *__restrict dest, const char *__restrict src);
 
-} // namespace __llvm_libc
+} // namespace LIBC_NAMESPACE
 
 #endif // LLVM_LIBC_SRC_STRING_STRCAT_H

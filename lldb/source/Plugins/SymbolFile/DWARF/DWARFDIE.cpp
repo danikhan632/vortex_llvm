@@ -1,4 +1,4 @@
-//===-- DWARFDIE.cpp --------------------------------------------*- C++ -*-===//
+//===-- DWARFDIE.cpp ------------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -14,7 +14,11 @@
 #include "DWARFDeclContext.h"
 #include "DWARFUnit.h"
 
+#include "llvm/ADT/iterator.h"
+
 using namespace lldb_private;
+using namespace lldb_private::dwarf;
+using namespace lldb_private::plugin::dwarf;
 
 namespace {
 
@@ -23,7 +27,9 @@ namespace {
 /// convenience, the starting die is included in the sequence as the first
 /// item.
 class ElaboratingDIEIterator
-    : public std::iterator<std::input_iterator_tag, DWARFDIE> {
+    : public llvm::iterator_facade_base<
+          ElaboratingDIEIterator, std::input_iterator_tag, DWARFDIE,
+          std::ptrdiff_t, DWARFDIE *, DWARFDIE *> {
 
   // The operating invariant is: top of m_worklist contains the "current" item
   // and the rest of the list are items yet to be visited. An empty worklist
@@ -32,7 +38,7 @@ class ElaboratingDIEIterator
   // Container sizes are optimized for the case of following DW_AT_specification
   // and DW_AT_abstract_origin just once.
   llvm::SmallVector<DWARFDIE, 2> m_worklist;
-  llvm::SmallSet<lldb::user_id_t, 3> m_seen;
+  llvm::SmallSet<DWARFDebugInfoEntry *, 3> m_seen;
 
   void Next() {
     assert(!m_worklist.empty() && "Incrementing end iterator?");
@@ -44,7 +50,7 @@ class ElaboratingDIEIterator
     // And add back any items that elaborate it.
     for (dw_attr_t attr : {DW_AT_specification, DW_AT_abstract_origin}) {
       if (DWARFDIE d = die.GetReferencedDIE(attr))
-        if (m_seen.insert(die.GetID()).second)
+        if (m_seen.insert(die.GetDIE()).second)
           m_worklist.push_back(d);
     }
   }
@@ -54,17 +60,12 @@ public:
   explicit ElaboratingDIEIterator(DWARFDIE d) : m_worklist(1, d) {}
 
   /// End marker
-  ElaboratingDIEIterator() {}
+  ElaboratingDIEIterator() = default;
 
   const DWARFDIE &operator*() const { return m_worklist.back(); }
   ElaboratingDIEIterator &operator++() {
     Next();
     return *this;
-  }
-  ElaboratingDIEIterator operator++(int) {
-    ElaboratingDIEIterator I = *this;
-    Next();
-    return I;
   }
 
   friend bool operator==(const ElaboratingDIEIterator &a,
@@ -72,10 +73,6 @@ public:
     if (a.m_worklist.empty() || b.m_worklist.empty())
       return a.m_worklist.empty() == b.m_worklist.empty();
     return a.m_worklist.back() == b.m_worklist.back();
-  }
-  friend bool operator!=(const ElaboratingDIEIterator &a,
-                         const ElaboratingDIEIterator &b) {
-    return !(a == b);
   }
 };
 
@@ -140,25 +137,63 @@ DWARFDIE::GetAttributeValueAsReferenceDIE(const dw_attr_t attr) const {
 }
 
 DWARFDIE
-DWARFDIE::LookupDeepestBlock(lldb::addr_t file_addr) const {
-  if (IsValid()) {
-    SymbolFileDWARF *dwarf = GetDWARF();
-    DWARFUnit *cu = GetCU();
-    DWARFDebugInfoEntry *function_die = nullptr;
-    DWARFDebugInfoEntry *block_die = nullptr;
-    if (m_die->LookupAddress(file_addr, cu, &function_die, &block_die)) {
-      if (block_die && block_die != function_die) {
-        if (cu->ContainsDIEOffset(block_die->GetOffset()))
-          return DWARFDIE(cu, block_die);
-        else
-          return DWARFDIE(dwarf->DebugInfo()->GetUnit(DIERef(
-                              cu->GetSymbolFileDWARF().GetDwoNum(),
-                              cu->GetDebugSection(), block_die->GetOffset())),
-                          block_die);
+DWARFDIE::LookupDeepestBlock(lldb::addr_t address) const {
+  if (!IsValid())
+    return DWARFDIE();
+
+  DWARFDIE result;
+  bool check_children = false;
+  bool match_addr_range = false;
+  switch (Tag()) {
+  case DW_TAG_class_type:
+  case DW_TAG_namespace:
+  case DW_TAG_structure_type:
+  case DW_TAG_common_block:
+    check_children = true;
+    break;
+  case DW_TAG_compile_unit:
+  case DW_TAG_module:
+  case DW_TAG_catch_block:
+  case DW_TAG_subprogram:
+  case DW_TAG_try_block:
+  case DW_TAG_partial_unit:
+    match_addr_range = true;
+    break;
+  case DW_TAG_lexical_block:
+  case DW_TAG_inlined_subroutine:
+    check_children = true;
+    match_addr_range = true;
+    break;
+  default:
+    break;
+  }
+
+  if (match_addr_range) {
+    DWARFRangeList ranges =
+        m_die->GetAttributeAddressRanges(m_cu, /*check_hi_lo_pc=*/true);
+    if (ranges.FindEntryThatContains(address)) {
+      check_children = true;
+      switch (Tag()) {
+      default:
+        break;
+
+      case DW_TAG_inlined_subroutine: // Inlined Function
+      case DW_TAG_lexical_block:      // Block { } in code
+        result = *this;
+        break;
       }
+    } else {
+      check_children = false;
     }
   }
-  return DWARFDIE();
+
+  if (check_children) {
+    for (DWARFDIE child : children()) {
+      if (DWARFDIE child_result = child.LookupDeepestBlock(address))
+        return child_result;
+    }
+  }
+  return result;
 }
 
 const char *DWARFDIE::GetMangledName() const {
@@ -171,13 +206,6 @@ const char *DWARFDIE::GetMangledName() const {
 const char *DWARFDIE::GetPubname() const {
   if (IsValid())
     return m_die->GetPubname(m_cu);
-  else
-    return nullptr;
-}
-
-const char *DWARFDIE::GetQualifiedName(std::string &storage) const {
-  if (IsValid())
-    return m_die->GetQualifiedName(m_cu, storage);
   else
     return nullptr;
 }
@@ -280,6 +308,18 @@ void DWARFDIE::AppendTypeName(Stream &s) const {
   case DW_TAG_volatile_type:
     s.PutCString("volatile ");
     break;
+  case DW_TAG_LLVM_ptrauth_type: {
+    unsigned key = GetAttributeValueAsUnsigned(DW_AT_LLVM_ptrauth_key, 0);
+    bool isAddressDiscriminated = GetAttributeValueAsUnsigned(
+        DW_AT_LLVM_ptrauth_address_discriminated, 0);
+    unsigned extraDiscriminator =
+        GetAttributeValueAsUnsigned(DW_AT_LLVM_ptrauth_extra_discriminator, 0);
+    bool isaPointer =
+        GetAttributeValueAsUnsigned(DW_AT_LLVM_ptrauth_isa_pointer, 0);
+    s.Printf("__ptrauth(%d, %d, 0x0%x, %d)", key, isAddressDiscriminated,
+             extraDiscriminator, isaPointer);
+    break;
+  }
   default:
     return;
   }
@@ -333,56 +373,109 @@ std::vector<DWARFDIE> DWARFDIE::GetDeclContextDIEs() const {
   return result;
 }
 
-void DWARFDIE::GetDWARFDeclContext(DWARFDeclContext &dwarf_decl_ctx) const {
-  if (IsValid()) {
-    dwarf_decl_ctx.SetLanguage(GetLanguage());
-    m_die->GetDWARFDeclContext(GetCU(), dwarf_decl_ctx);
-  } else {
-    dwarf_decl_ctx.Clear();
-  }
-}
+static std::vector<lldb_private::CompilerContext>
+GetDeclContextImpl(llvm::SmallSet<lldb::user_id_t, 4> &seen, DWARFDIE die) {
+  std::vector<lldb_private::CompilerContext> context;
+  // Stop if we hit a cycle.
+  if (!die || !seen.insert(die.GetID()).second)
+    return context;
 
-void DWARFDIE::GetDeclContext(
-    llvm::SmallVectorImpl<lldb_private::CompilerContext> &context) const {
-  const dw_tag_t tag = Tag();
-  if (tag == DW_TAG_compile_unit || tag == DW_TAG_partial_unit)
-    return;
-  DWARFDIE parent = GetParent();
-  if (parent)
-    parent.GetDeclContext(context);
-  switch (tag) {
+  // Handle outline member function DIEs by following the specification.
+  if (DWARFDIE spec = die.GetReferencedDIE(DW_AT_specification))
+    return GetDeclContextImpl(seen, spec);
+
+  // Get the parent context chain.
+  context = GetDeclContextImpl(seen, die.GetParent());
+
+  // Add this DIE's contribution at the end of the chain.
+  auto push_ctx = [&](CompilerContextKind kind, llvm::StringRef name) {
+    context.push_back({kind, ConstString(name)});
+  };
+  switch (die.Tag()) {
   case DW_TAG_module:
-    context.push_back({CompilerContextKind::Module, ConstString(GetName())});
+    push_ctx(CompilerContextKind::Module, die.GetName());
     break;
   case DW_TAG_namespace:
-    context.push_back({CompilerContextKind::Namespace, ConstString(GetName())});
+    push_ctx(CompilerContextKind::Namespace, die.GetName());
     break;
   case DW_TAG_structure_type:
-    context.push_back({CompilerContextKind::Struct, ConstString(GetName())});
+    push_ctx(CompilerContextKind::Struct, die.GetName());
     break;
   case DW_TAG_union_type:
-    context.push_back({CompilerContextKind::Union, ConstString(GetName())});
+    push_ctx(CompilerContextKind::Union, die.GetName());
     break;
   case DW_TAG_class_type:
-    context.push_back({CompilerContextKind::Class, ConstString(GetName())});
+    push_ctx(CompilerContextKind::Class, die.GetName());
     break;
   case DW_TAG_enumeration_type:
-    context.push_back({CompilerContextKind::Enum, ConstString(GetName())});
+    push_ctx(CompilerContextKind::Enum, die.GetName());
     break;
   case DW_TAG_subprogram:
-    context.push_back(
-        {CompilerContextKind::Function, ConstString(GetPubname())});
+    push_ctx(CompilerContextKind::Function, die.GetName());
     break;
   case DW_TAG_variable:
-    context.push_back(
-        {CompilerContextKind::Variable, ConstString(GetPubname())});
+    push_ctx(CompilerContextKind::Variable, die.GetPubname());
     break;
   case DW_TAG_typedef:
-    context.push_back({CompilerContextKind::Typedef, ConstString(GetName())});
+    push_ctx(CompilerContextKind::Typedef, die.GetName());
     break;
   default:
     break;
   }
+  return context;
+}
+
+std::vector<lldb_private::CompilerContext> DWARFDIE::GetDeclContext() const {
+  llvm::SmallSet<lldb::user_id_t, 4> seen;
+  return GetDeclContextImpl(seen, *this);
+}
+
+std::vector<lldb_private::CompilerContext>
+DWARFDIE::GetTypeLookupContext() const {
+  std::vector<lldb_private::CompilerContext> context;
+  // If there is no name, then there is no need to look anything up for this
+  // DIE.
+  const char *name = GetName();
+  if (!name || !name[0])
+    return context;
+  const dw_tag_t tag = Tag();
+  if (tag == DW_TAG_compile_unit || tag == DW_TAG_partial_unit)
+    return context;
+  DWARFDIE parent = GetParent();
+  if (parent)
+    context = parent.GetTypeLookupContext();
+  auto push_ctx = [&](CompilerContextKind kind, llvm::StringRef name) {
+    context.push_back({kind, ConstString(name)});
+  };
+  switch (tag) {
+  case DW_TAG_namespace:
+    push_ctx(CompilerContextKind::Namespace, name);
+    break;
+  case DW_TAG_structure_type:
+    push_ctx(CompilerContextKind::Struct, name);
+    break;
+  case DW_TAG_union_type:
+    push_ctx(CompilerContextKind::Union, name);
+    break;
+  case DW_TAG_class_type:
+    push_ctx(CompilerContextKind::Class, name);
+    break;
+  case DW_TAG_enumeration_type:
+    push_ctx(CompilerContextKind::Enum, name);
+    break;
+  case DW_TAG_variable:
+    push_ctx(CompilerContextKind::Variable, GetPubname());
+    break;
+  case DW_TAG_typedef:
+    push_ctx(CompilerContextKind::Typedef, name);
+    break;
+  case DW_TAG_base_type:
+    push_ctx(CompilerContextKind::Builtin, name);
+    break;
+  default:
+    break;
+  }
+  return context;
 }
 
 DWARFDIE
@@ -408,9 +501,10 @@ bool DWARFDIE::IsMethod() const {
 
 bool DWARFDIE::GetDIENamesAndRanges(
     const char *&name, const char *&mangled, DWARFRangeList &ranges,
-    int &decl_file, int &decl_line, int &decl_column, int &call_file,
-    int &call_line, int &call_column,
-    lldb_private::DWARFExpression *frame_base) const {
+    std::optional<int> &decl_file, std::optional<int> &decl_line,
+    std::optional<int> &decl_column, std::optional<int> &call_file,
+    std::optional<int> &call_line, std::optional<int> &call_column,
+    lldb_private::DWARFExpressionList *frame_base) const {
   if (IsValid()) {
     return m_die->GetDIENamesAndRanges(
         GetCU(), name, mangled, ranges, decl_file, decl_line, decl_column,
@@ -419,26 +513,6 @@ bool DWARFDIE::GetDIENamesAndRanges(
     return false;
 }
 
-CompilerDecl DWARFDIE::GetDecl() const {
-  DWARFASTParser *dwarf_ast = GetDWARFParser();
-  if (dwarf_ast)
-    return dwarf_ast->GetDeclForUIDFromDWARF(*this);
-  else
-    return CompilerDecl();
-}
-
-CompilerDeclContext DWARFDIE::GetDeclContext() const {
-  DWARFASTParser *dwarf_ast = GetDWARFParser();
-  if (dwarf_ast)
-    return dwarf_ast->GetDeclContextForUIDFromDWARF(*this);
-  else
-    return CompilerDeclContext();
-}
-
-CompilerDeclContext DWARFDIE::GetContainingDeclContext() const {
-  DWARFASTParser *dwarf_ast = GetDWARFParser();
-  if (dwarf_ast)
-    return dwarf_ast->GetDeclContextContainingUIDFromDWARF(*this);
-  else
-    return CompilerDeclContext();
+llvm::iterator_range<DWARFDIE::child_iterator> DWARFDIE::children() const {
+  return llvm::make_range(child_iterator(*this), child_iterator());
 }

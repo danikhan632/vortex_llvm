@@ -21,6 +21,7 @@
 #include "LlvmState.h"
 #include "MCInstrDescView.h"
 #include "RegisterAliasing.h"
+#include "llvm/ADT/CombinationGenerator.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/Support/Error.h"
 #include <cstdlib>
@@ -34,11 +35,13 @@ std::vector<CodeTemplate> getSingleton(CodeTemplate &&CT);
 
 // Generates code templates that has a self-dependency.
 Expected<std::vector<CodeTemplate>>
-generateSelfAliasingCodeTemplates(const Instruction &Instr);
+generateSelfAliasingCodeTemplates(InstructionTemplate Variant,
+                                  const BitVector &ForbiddenRegisters);
 
 // Generates code templates without assignment constraints.
 Expected<std::vector<CodeTemplate>>
-generateUnconstrainedCodeTemplates(const Instruction &Instr, StringRef Msg);
+generateUnconstrainedCodeTemplates(const InstructionTemplate &Variant,
+                                   StringRef Msg);
 
 // A class representing failures that happened during Benchmark, they are used
 // to report informations to the user.
@@ -59,9 +62,9 @@ public:
   virtual ~SnippetGenerator();
 
   // Calls generateCodeTemplate and expands it into one or more BenchmarkCode.
-  Expected<std::vector<BenchmarkCode>>
-  generateConfigurations(const Instruction &Instr,
-                         const BitVector &ExtraForbiddenRegs) const;
+  Error generateConfigurations(const InstructionTemplate &Variant,
+                               std::vector<BenchmarkCode> &Benchmarks,
+                               const BitVector &ExtraForbiddenRegs) const;
 
   // Given a snippet, computes which registers the setup code needs to define.
   std::vector<RegisterValue> computeRegisterInitialValues(
@@ -74,7 +77,7 @@ protected:
 private:
   // API to be implemented by subclasses.
   virtual Expected<std::vector<CodeTemplate>>
-  generateCodeTemplates(const Instruction &Instr,
+  generateCodeTemplates(InstructionTemplate Variant,
                         const BitVector &ForbiddenRegisters) const = 0;
 };
 
@@ -90,6 +93,9 @@ size_t randomIndex(size_t Max);
 // Precondition: Vector must have at least one bit set.
 size_t randomBit(const BitVector &Vector);
 
+// Picks a first bit that is common to these two vectors.
+std::optional<int> getFirstCommonBit(const BitVector &A, const BitVector &B);
+
 // Picks a random configuration, then selects a random def and a random use from
 // it and finally set the selected values in the provided InstructionInstances.
 void setRandomAliasing(const AliasingConfigurations &AliasingConfigurations,
@@ -97,9 +103,12 @@ void setRandomAliasing(const AliasingConfigurations &AliasingConfigurations,
 
 // Assigns a Random Value to all Variables in IT that are still Invalid.
 // Do not use any of the registers in `ForbiddenRegs`.
-void randomizeUnsetVariables(const ExegesisTarget &Target,
-                             const BitVector &ForbiddenRegs,
-                             InstructionTemplate &IT);
+Error randomizeUnsetVariables(const LLVMState &State,
+                              const BitVector &ForbiddenRegs,
+                              InstructionTemplate &IT);
+
+// Sanity check generated instruction.
+Error validateGeneratedInstruction(const LLVMState &State, const MCInst &Inst);
 
 } // namespace exegesis
 } // namespace llvm

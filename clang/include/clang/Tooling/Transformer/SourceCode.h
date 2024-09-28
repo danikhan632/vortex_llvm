@@ -10,19 +10,21 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CLANG_TOOLING_TRANSFORMER_SOURCE_CODE_H
-#define LLVM_CLANG_TOOLING_TRANSFORMER_SOURCE_CODE_H
+#ifndef LLVM_CLANG_TOOLING_TRANSFORMER_SOURCECODE_H
+#define LLVM_CLANG_TOOLING_TRANSFORMER_SOURCECODE_H
 
 #include "clang/AST/ASTContext.h"
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Basic/TokenKinds.h"
+#include <optional>
 
 namespace clang {
 namespace tooling {
 
-/// Extends \p Range to include the token \p Next, if it immediately follows the
-/// end of the range. Otherwise, returns \p Range unchanged.
-CharSourceRange maybeExtendRange(CharSourceRange Range, tok::TokenKind Next,
+/// Extends \p Range to include the token \p Terminator, if it immediately
+/// follows the end of the range. Otherwise, returns \p Range unchanged.
+CharSourceRange maybeExtendRange(CharSourceRange Range,
+                                 tok::TokenKind Terminator,
                                  ASTContext &Context);
 
 /// Returns the source range spanning the node, extended to include \p Next, if
@@ -34,6 +36,17 @@ CharSourceRange getExtendedRange(const T &Node, tok::TokenKind Next,
   return maybeExtendRange(CharSourceRange::getTokenRange(Node.getSourceRange()),
                           Next, Context);
 }
+
+/// Returns the logical source range of the node extended to include associated
+/// comments and whitespace before and after the node, and associated
+/// terminators. The returned range consists of file locations, if valid file
+/// locations can be found for the associated content; otherwise, an invalid
+/// range is returned.
+///
+/// Note that parsing comments is disabled by default. In order to select a
+/// range containing associated comments, you may need to invoke the tool with
+/// `-fparse-all-comments`.
+CharSourceRange getAssociatedRange(const Decl &D, ASTContext &Context);
 
 /// Returns the source-code text in the specified range.
 StringRef getText(CharSourceRange Range, const ASTContext &Context);
@@ -73,18 +86,60 @@ StringRef getExtendedText(const T &Node, tok::TokenKind Next,
   return getText(getExtendedRange(Node, Next, Context), Context);
 }
 
-// Attempts to resolve the given range to one that can be edited by a rewrite;
-// generally, one that starts and ends within a particular file. It supports
-// a limited set of cases involving source locations in macro expansions.
-llvm::Optional<CharSourceRange>
-getRangeForEdit(const CharSourceRange &EditRange, const SourceManager &SM,
-                const LangOptions &LangOpts);
+/// Determines whether \p Range is one that can be edited by a rewrite;
+/// generally, one that starts and ends within a particular file.
+llvm::Error validateEditRange(const CharSourceRange &Range,
+                              const SourceManager &SM);
 
-inline llvm::Optional<CharSourceRange>
-getRangeForEdit(const CharSourceRange &EditRange, const ASTContext &Context) {
-  return getRangeForEdit(EditRange, Context.getSourceManager(),
-                         Context.getLangOpts());
+/// Determines whether \p Range is one that can be read from. If
+/// `AllowSystemHeaders` is false, a range that falls within a system header
+/// fails validation.
+llvm::Error validateRange(const CharSourceRange &Range, const SourceManager &SM,
+                          bool AllowSystemHeaders);
+
+/// Attempts to resolve the given range to one that can be edited by a rewrite;
+/// generally, one that starts and ends within a particular file. If a value is
+/// returned, it satisfies \c validateEditRange.
+///
+/// If \c IncludeMacroExpansion is true, a limited set of cases involving source
+/// locations in macro expansions is supported. For example, if we're looking to
+/// rewrite the int literal 3 to 6, and we have the following definition:
+///    #define DO_NOTHING(x) x
+/// then
+///    foo(DO_NOTHING(3))
+/// will be rewritten to
+///    foo(6)
+std::optional<CharSourceRange>
+getFileRangeForEdit(const CharSourceRange &EditRange, const SourceManager &SM,
+                    const LangOptions &LangOpts,
+                    bool IncludeMacroExpansion = true);
+inline std::optional<CharSourceRange>
+getFileRangeForEdit(const CharSourceRange &EditRange, const ASTContext &Context,
+                    bool IncludeMacroExpansion = true) {
+  return getFileRangeForEdit(EditRange, Context.getSourceManager(),
+                             Context.getLangOpts(), IncludeMacroExpansion);
 }
+
+/// Attempts to resolve the given range to one that starts and ends in a
+/// particular file.
+///
+/// If \c IncludeMacroExpansion is true, a limited set of cases involving source
+/// locations in macro expansions is supported. For example, if we're looking to
+/// get the range of the int literal 3, and we have the following definition:
+///    #define DO_NOTHING(x) x
+///    foo(DO_NOTHING(3))
+/// the returned range will hold the source text `DO_NOTHING(3)`.
+std::optional<CharSourceRange> getFileRange(const CharSourceRange &EditRange,
+                                            const SourceManager &SM,
+                                            const LangOptions &LangOpts,
+                                            bool IncludeMacroExpansion);
+inline std::optional<CharSourceRange>
+getFileRange(const CharSourceRange &EditRange, const ASTContext &Context,
+             bool IncludeMacroExpansion) {
+  return getFileRange(EditRange, Context.getSourceManager(),
+                      Context.getLangOpts(), IncludeMacroExpansion);
+}
+
 } // namespace tooling
 } // namespace clang
-#endif // LLVM_CLANG_TOOLING_TRANSFORMER_SOURCE_CODE_H
+#endif // LLVM_CLANG_TOOLING_TRANSFORMER_SOURCECODE_H

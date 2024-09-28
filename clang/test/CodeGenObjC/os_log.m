@@ -1,83 +1,125 @@
-// RUN: %clang_cc1 %s -emit-llvm -o - -triple x86_64-darwin-apple -fobjc-arc -O2 -fno-experimental-new-pass-manager | FileCheck %s --check-prefixes=CHECK,CHECK-LEGACY
-// RUN: %clang_cc1 %s -emit-llvm -o - -triple x86_64-darwin-apple -fobjc-arc -O2 -fexperimental-new-pass-manager | FileCheck %s --check-prefixes=CHECK,CHECK-NEWPM
-// RUN: %clang_cc1 %s -emit-llvm -o - -triple x86_64-darwin-apple -fobjc-arc -O0 | FileCheck %s -check-prefix=CHECK-O0
+// RUN: %clang_cc1 %s -emit-llvm -o - -triple x86_64-darwin-apple -fobjc-arc -O2 -disable-llvm-passes | FileCheck %s --check-prefixes=CHECK,CHECK-O2
+// RUN: %clang_cc1 %s -emit-llvm -o - -triple x86_64-darwin-apple -fobjc-arc -O0 | FileCheck %s --check-prefixes=CHECK,CHECK-O0
+// RUN: %clang_cc1 %s -emit-llvm -o - -triple x86_64-darwin-apple -O2 -disable-llvm-passes | FileCheck %s --check-prefix=CHECK-MRR
 
 // Make sure we emit clang.arc.use before calling objc_release as part of the
 // cleanup. This way we make sure the object will not be released until the
 // end of the full expression.
 
-// rdar://problem/24528966
+@interface C
+- (id)m0;
++ (id)m1;
+@end
+
+C *c;
 
 @class NSString;
-extern __attribute__((visibility("default"))) NSString *GenString();
+extern __attribute__((visibility("default"))) NSString *GenString(void);
+void os_log_pack_send(void *);
 
-// Behavior of __builtin_os_log differs between platforms, so only test on X86
-#ifdef __x86_64__
-// CHECK-LABEL: define i8* @test_builtin_os_log
-// CHECK-O0-LABEL: define i8* @test_builtin_os_log
-// CHECK: (i8* returned %[[BUF:.*]])
-// CHECK-O0: (i8* %[[BUF:.*]])
-void *test_builtin_os_log(void *buf) {
-  return __builtin_os_log_format(buf, "capabilities: %@", GenString());
+// CHECK-LABEL: define{{.*}} void @test_builtin_os_log1(
+// CHECK: alloca ptr, align 8
+// CHECK: %[[A_ADDR:.*]] = alloca ptr, align 8
+// CHECK: %[[OS_LOG_ARG:.*]] = alloca ptr, align 8
+// CHECK-O2: %[[V0:.*]] = call ptr @llvm.objc.retain(
+// CHECK-O2: store ptr %[[V0]], ptr %[[A_ADDR]], align 8,
+// CHECK-O0: call void @llvm.objc.storeStrong(ptr %[[A_ADDR]], ptr %{{.*}})
+// CHECK-O2: %[[V3:.*]] = call ptr @GenString() [ "clang.arc.attachedcall"(ptr @llvm.objc.retainAutoreleasedReturnValue) ]
+// CHECK-O0: %[[CALL:.*]] = call ptr @GenString()
+// CHECK-O0: %[[V3:.*]] = notail call ptr @llvm.objc.retainAutoreleasedReturnValue(ptr %[[CALL]])
+// CHECK: %[[V6:.*]] = call ptr @llvm.objc.retain(ptr %[[V3]])
+// CHECK: store ptr %[[V6]], ptr %[[OS_LOG_ARG]],
+// CHECK: %[[V8:.*]] = ptrtoint ptr %[[V6]] to i64
+// CHECK: %[[V9:.*]] = load ptr, ptr %[[A_ADDR]], align 8
+// CHECK: %[[V10:.*]] = ptrtoint ptr %[[V9]] to i64
+// CHECK: call void @__os_log_helper_1_2_2_8_64_8_64(ptr noundef %{{.*}}, i64 noundef %[[V8]], i64 noundef %[[V10]])
+// CHECK: call void @llvm.objc.release(ptr %[[V3]])
+// CHECK: call void @os_log_pack_send(ptr noundef %{{.*}})
+// CHECK-O2: call void (...) @llvm.objc.clang.arc.use(ptr %[[V6]])
+// CHECK-O2: %[[V13:.*]] = load ptr, ptr %[[OS_LOG_ARG]], align 8
+// CHECK-O2: call void @llvm.objc.release(ptr %[[V13]])
+// CHECK-O2: %[[V15:.*]] = load ptr, ptr %[[A_ADDR]], align 8
+// CHECK-O2: call void @llvm.objc.release(ptr %[[V15]])
+// CHECK-O0: call void @llvm.objc.storeStrong(ptr %[[OS_LOG_ARG]], ptr null)
+// CHECK-O0: call void @llvm.objc.storeStrong(ptr %[[A_ADDR]], ptr null)
 
-  // CHECK: %[[CALL:.*]] = tail call %[[TY0:.*]]* (...) @GenString()
-  // CHECK: %[[V0:.*]] = bitcast %[[TY0]]* %[[CALL]] to i8*
-  // CHECK: %[[V1:.*]] = notail call i8* @llvm.objc.retainAutoreleasedReturnValue(i8* %[[V0]])
-  // CHECK-LEGACY: %[[V2:.*]] = ptrtoint %[[TY0]]* %[[CALL]] to i64
-  // CHECK-NEWPM: %[[V2:.*]] = ptrtoint i8* %[[V1]] to i64
-  // CHECK: store i8 2, i8* %[[BUF]], align 1
-  // CHECK: %[[NUMARGS_I:.*]] = getelementptr i8, i8* %[[BUF]], i64 1
-  // CHECK: store i8 1, i8* %[[NUMARGS_I]], align 1
-  // CHECK: %[[ARGDESCRIPTOR_I:.*]] = getelementptr i8, i8* %[[BUF]], i64 2
-  // CHECK: store i8 64, i8* %[[ARGDESCRIPTOR_I]], align 1
-  // CHECK: %[[ARGSIZE_I:.*]] = getelementptr i8, i8* %[[BUF]], i64 3
-  // CHECK: store i8 8, i8* %[[ARGSIZE_I]], align 1
-  // CHECK: %[[ARGDATA_I:.*]] = getelementptr i8, i8* %[[BUF]], i64 4
-  // CHECK: %[[ARGDATACAST_I:.*]] = bitcast i8* %[[ARGDATA_I]] to i64*
-  // CHECK: store i64 %[[V2]], i64* %[[ARGDATACAST_I]], align 1
-  // CHECK-LEGACY: tail call void (...) @llvm.objc.clang.arc.use(%[[TY0]]* %[[CALL]])
-  // CHECK-LEGACY: tail call void @llvm.objc.release(i8* %[[V0]])
-  // CHECK-NEWPM: tail call void (...) @llvm.objc.clang.arc.use(i8* %[[V1]])
-  // CHECK-NEWPM: tail call void @llvm.objc.release(i8* %[[V1]])
-  // CHECK: ret i8* %[[BUF]]
+// CHECK-MRR-LABEL: define{{.*}} void @test_builtin_os_log1(
+// CHECK-MRR-NOT: call {{.*}} @llvm.objc
+// CHECK-MRR: ret void
 
-  // clang.arc.use is used and removed in IR optimizations. At O0, we should not
-  // emit clang.arc.use, since it will not be removed and we will have a link
-  // error.
-  // CHECK-O0: %[[BUF_ADDR:.*]] = alloca i8*, align 8
-  // CHECK-O0: store i8* %[[BUF]], i8** %[[BUF_ADDR]], align 8
-  // CHECK-O0: %[[V0:.*]] = load i8*, i8** %[[BUF_ADDR]], align 8
-  // CHECK-O0: %[[CALL:.*]] = call %[[TY0:.*]]* (...) @GenString()
-  // CHECK-O0: %[[V1:.*]] = bitcast %[[TY0]]* %[[CALL]] to i8*
-  // CHECK-O0: %[[V2:.*]] = notail call i8* @llvm.objc.retainAutoreleasedReturnValue(i8* %[[V1]])
-  // CHECK-O0: %[[V3:.*]] = bitcast i8* %[[V2]] to %[[TY0]]*
-  // CHECK-O0: %[[V4:.*]] = ptrtoint %[[TY0]]* %[[V3]] to i64
-  // CHECK-O0: call void @__os_log_helper_1_2_1_8_64(i8* %[[V0]], i64 %[[V4]])
-  // CHECK-O0: %[[V5:.*]] = bitcast %[[TY0]]* %[[V3]] to i8*
-  // CHECK-O0-NOT: call void (...) @llvm.objc.clang.arc.use({{.*}}
-  // CHECK-O0: call void @llvm.objc.release(i8* %[[V5]])
-  // CHECK-O0: ret i8* %[[V0]]
+void test_builtin_os_log1(void *buf, id a) {
+  __builtin_os_log_format(buf, "capabilities: %@ %@", GenString(), a);
+  os_log_pack_send(buf);
 }
 
-// CHECK-O0-LABEL: define linkonce_odr hidden void @__os_log_helper_1_2_1_8_64
-// CHECK-O0: (i8* %[[BUFFER:.*]], i64 %[[ARG0:.*]])
+// CHECK: define{{.*}} void @test_builtin_os_log2(
+// CHECK-NOT: @llvm.objc.retain(
 
-// CHECK-O0: %[[BUFFER_ADDR:.*]] = alloca i8*, align 8
-// CHECK-O0: %[[ARG0_ADDR:.*]] = alloca i64, align 8
-// CHECK-O0: store i8* %[[BUFFER]], i8** %[[BUFFER_ADDR]], align 8
-// CHECK-O0: store i64 %[[ARG0]], i64* %[[ARG0_ADDR]], align 8
-// CHECK-O0: %[[BUF:.*]] = load i8*, i8** %[[BUFFER_ADDR]], align 8
-// CHECK-O0: %[[SUMMARY:.*]] = getelementptr i8, i8* %[[BUF]], i64 0
-// CHECK-O0: store i8 2, i8* %[[SUMMARY]], align 1
-// CHECK-O0: %[[NUMARGS:.*]] = getelementptr i8, i8* %[[BUF]], i64 1
-// CHECK-O0: store i8 1, i8* %[[NUMARGS]], align 1
-// CHECK-O0: %[[ARGDESCRIPTOR:.*]] = getelementptr i8, i8* %[[BUF]], i64 2
-// CHECK-O0: store i8 64, i8* %[[ARGDESCRIPTOR]], align 1
-// CHECK-O0: %[[ARGSIZE:.*]] = getelementptr i8, i8* %[[BUF]], i64 3
-// CHECK-O0: store i8 8, i8* %[[ARGSIZE]], align 1
-// CHECK-O0: %[[ARGDATA:.*]] = getelementptr i8, i8* %[[BUF]], i64 4
-// CHECK-O0: %[[ARGDATACAST:.*]] = bitcast i8* %[[ARGDATA]] to i64*
-// CHECK-O0: %[[V0:.*]] = load i64, i64* %[[ARG0_ADDR]], align 8
-// CHECK-O0: store i64 %[[V0]], i64* %[[ARGDATACAST]], align 1
+void test_builtin_os_log2(void *buf, id __unsafe_unretained a) {
+  __builtin_os_log_format(buf, "capabilities: %@", a);
+  os_log_pack_send(buf);
+}
 
-#endif
+// CHECK-LABEL: define{{.*}} void @test_builtin_os_log3(
+// CHECK: alloca ptr, align 8
+// CHECK: %[[OS_LOG_ARG:.*]] = alloca ptr, align 8
+// CHECK-O2: %[[V2:.*]] = call ptr @GenString() [ "clang.arc.attachedcall"(ptr @llvm.objc.retainAutoreleasedReturnValue) ]
+// CHECK-O0: %[[CALL:.*]] = call ptr @GenString()
+// CHECK-O0: %[[V2:.*]] = notail call ptr @llvm.objc.retainAutoreleasedReturnValue(ptr %[[CALL]])
+// CHECK: %[[V5:.*]] = call ptr @llvm.objc.retain(ptr %[[V2]])
+// CHECK: store ptr %[[V5]], ptr %[[OS_LOG_ARG]], align 8
+// CHECK: %[[V6:.*]] = ptrtoint ptr %[[V5]] to i64
+// CHECK: call void @__os_log_helper_1_2_1_8_64(ptr noundef %{{.*}}, i64 noundef %[[V6]])
+// CHECK: call void @llvm.objc.release(ptr %[[V2]])
+// CHECK: call void @os_log_pack_send(ptr noundef %{{.*}})
+// CHECK-O2: call void (...) @llvm.objc.clang.arc.use(ptr %[[V5]])
+// CHECK-O2: %[[V9:.*]] = load ptr, ptr %[[OS_LOG_ARG]], align 8
+// CHECK-O2: call void @llvm.objc.release(ptr %[[V9]])
+// CHECK-O0: call void @llvm.objc.storeStrong(ptr %[[OS_LOG_ARG]], ptr null)
+
+void test_builtin_os_log3(void *buf) {
+  __builtin_os_log_format(buf, "capabilities: %@", (id)GenString());
+  os_log_pack_send(buf);
+}
+
+// CHECK-LABEL: define{{.*}} void @test_builtin_os_log4(
+// CHECK: alloca ptr, align 8
+// CHECK: %[[OS_LOG_ARG:.*]] = alloca ptr, align 8
+// CHECK: %[[OS_LOG_ARG2:.*]] = alloca ptr, align 8
+// CHECK-O2: %[[V4:.*]] = call {{.*}} @objc_msgSend{{.*}} [ "clang.arc.attachedcall"(ptr @llvm.objc.retainAutoreleasedReturnValue) ]
+// CHECK-O0: %[[CALL:.*]] = call {{.*}} @objc_msgSend
+// CHECK-O0: %[[V4:.*]] = notail call ptr @llvm.objc.retainAutoreleasedReturnValue(ptr %[[CALL]])
+// CHECK: %[[V5:.*]] = call ptr @llvm.objc.retain(ptr %[[V4]])
+// CHECK: store ptr %[[V5]], ptr %[[OS_LOG_ARG]], align 8
+// CHECK: %[[V6:.*]] = ptrtoint ptr %[[V5]] to i64
+// CHECK-O2: %[[V10:.*]] = call {{.*}} @objc_msgSend{{.*}} [ "clang.arc.attachedcall"(ptr @llvm.objc.retainAutoreleasedReturnValue) ]
+// CHECK-O0: %[[CALL1:.*]] = call {{.*}} @objc_msgSend
+// CHECK-O0: %[[V10:.*]] = notail call ptr @llvm.objc.retainAutoreleasedReturnValue(ptr %[[CALL1]])
+// CHECK: %[[V11:.*]] = call ptr @llvm.objc.retain(ptr %[[V10]])
+// CHECK: store ptr %[[V11]], ptr %[[OS_LOG_ARG2]], align 8
+// CHECK: %[[V12:.*]] = ptrtoint ptr %[[V11]] to i64
+// CHECK: call void @__os_log_helper_1_2_2_8_64_8_64(ptr noundef %{{.*}}, i64 noundef %[[V6]], i64 noundef %[[V12]])
+// CHECK: call void @llvm.objc.release(ptr %[[V10]])
+// CHECK: call void @llvm.objc.release(ptr %[[V4]])
+// CHECK: call void @os_log_pack_send(ptr noundef %{{.*}})
+// CHECK-O2: call void (...) @llvm.objc.clang.arc.use(ptr %[[V11]])
+// CHECK-O2: %[[V14:.*]] = load ptr, ptr %[[OS_LOG_ARG2]], align 8
+// CHECK-O2: call void @llvm.objc.release(ptr %[[V14]])
+// CHECK-O2: call void (...) @llvm.objc.clang.arc.use(ptr %[[V5]])
+// CHECK-O2: %[[V15:.*]] = load ptr, ptr %[[OS_LOG_ARG]], align 8
+// CHECK-O2: call void @llvm.objc.release(ptr %[[V15]])
+
+void test_builtin_os_log4(void *buf) {
+  __builtin_os_log_format(buf, "capabilities: %@ %@", [c m0], [C m1]);
+  os_log_pack_send(buf);
+}
+
+// FIXME: Lifetime of GenString's return should be extended in this case too.
+// CHECK-LABEL: define{{.*}} void @test_builtin_os_log5(
+// CHECK: call void @os_log_pack_send(
+// CHECK-NOT: call void @llvm.objc.release(
+
+void test_builtin_os_log5(void *buf) {
+  __builtin_os_log_format(buf, "capabilities: %@", (0, GenString()));
+  os_log_pack_send(buf);
+}

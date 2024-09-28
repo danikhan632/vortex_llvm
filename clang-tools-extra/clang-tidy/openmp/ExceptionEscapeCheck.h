@@ -9,21 +9,22 @@
 #ifndef LLVM_CLANG_TOOLS_EXTRA_CLANG_TIDY_OPENMP_EXCEPTIONESCAPECHECK_H
 #define LLVM_CLANG_TOOLS_EXTRA_CLANG_TIDY_OPENMP_EXCEPTIONESCAPECHECK_H
 
-#include "../ClangTidy.h"
+#include "../ClangTidyCheck.h"
 #include "../utils/ExceptionAnalyzer.h"
 
-namespace clang {
-namespace tidy {
-namespace openmp {
+namespace clang::tidy::openmp {
 
 /// Analyzes OpenMP Structured Blocks and checks that no exception escapes
 /// out of the Structured Block it was thrown in.
 ///
 /// For the user-facing documentation see:
-/// http://clang.llvm.org/extra/clang-tidy/checks/openmp-exception-escape.html
+/// http://clang.llvm.org/extra/clang-tidy/checks/openmp/exception-escape.html
 class ExceptionEscapeCheck : public ClangTidyCheck {
 public:
   ExceptionEscapeCheck(StringRef Name, ClangTidyContext *Context);
+  bool isLanguageVersionSupported(const LangOptions &LangOpts) const override {
+    return LangOpts.OpenMP && LangOpts.CPlusPlus && LangOpts.CXXExceptions;
+  }
   void storeOptions(ClangTidyOptions::OptionMap &Opts) override;
   void registerMatchers(ast_matchers::MatchFinder *Finder) override;
   void check(const ast_matchers::MatchFinder::MatchResult &Result) override;
@@ -34,8 +35,6 @@ private:
   utils::ExceptionAnalyzer Tracer;
 };
 
-} // namespace openmp
-} // namespace tidy
-} // namespace clang
+} // namespace clang::tidy::openmp
 
 #endif // LLVM_CLANG_TOOLS_EXTRA_CLANG_TIDY_OPENMP_EXCEPTIONESCAPECHECK_H

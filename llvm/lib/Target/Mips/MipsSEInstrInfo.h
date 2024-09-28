@@ -48,19 +48,21 @@ public:
 
   void storeRegToStack(MachineBasicBlock &MBB,
                        MachineBasicBlock::iterator MI,
-                       unsigned SrcReg, bool isKill, int FrameIndex,
+                       Register SrcReg, bool isKill, int FrameIndex,
                        const TargetRegisterClass *RC,
                        const TargetRegisterInfo *TRI,
                        int64_t Offset) const override;
 
   void loadRegFromStack(MachineBasicBlock &MBB,
                         MachineBasicBlock::iterator MI,
-                        unsigned DestReg, int FrameIndex,
+                        Register DestReg, int FrameIndex,
                         const TargetRegisterClass *RC,
                         const TargetRegisterInfo *TRI,
                         int64_t Offset) const override;
 
   bool expandPostRAPseudo(MachineInstr &MI) const override;
+
+  bool isBranchWithImm(unsigned Opc) const override;
 
   unsigned getOppositeBranchOpc(unsigned Opc) const override;
 
@@ -79,7 +81,7 @@ protected:
   /// If the specific machine instruction is a instruction that moves/copies
   /// value from one register to another register return destination and source
   /// registers as machine operands.
-  Optional<DestSourcePair>
+  std::optional<DestSourcePair>
   isCopyInstrImpl(const MachineInstr &MI) const override;
 
 private:

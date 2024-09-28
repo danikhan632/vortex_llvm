@@ -76,8 +76,7 @@ bool IndexingContext::handleReference(const NamedDecl *D, SourceLocation Loc,
                                       const DeclContext *DC,
                                       SymbolRoleSet Roles,
                                       ArrayRef<SymbolRelation> Relations,
-                                      const Expr *RefE,
-                                      const Decl *RefD) {
+                                      const Expr *RefE) {
   if (!shouldIndexFunctionLocalSymbols() && isFunctionLocalSymbol(D))
     return true;
 
@@ -86,9 +85,8 @@ bool IndexingContext::handleReference(const NamedDecl *D, SourceLocation Loc,
        isa<TemplateTemplateParmDecl>(D))) {
     return true;
   }
-
   return handleDeclOccurrence(D, Loc, /*IsRef=*/true, Parent, Roles, Relations,
-                              RefE, RefD, DC);
+                              RefE, nullptr, DC);
 }
 
 static void reportModuleReferences(const Module *Mod,
@@ -169,6 +167,10 @@ bool IndexingContext::isTemplateImplicitInstantiation(const Decl *D) {
   }
   switch (TKind) {
     case TSK_Undeclared:
+      // Instantiation maybe not happen yet when we see a SpecializationDecl,
+      // e.g. when the type doesn't need to be complete, we still treat it as an
+      // instantiation as we'd like to keep the canonicalized result consistent.
+      return isa<ClassTemplateSpecializationDecl>(D);
     case TSK_ExplicitSpecialization:
       return false;
     case TSK_ImplicitInstantiation:
@@ -206,7 +208,12 @@ getDeclContextForTemplateInstationPattern(const Decl *D) {
 static const Decl *adjustTemplateImplicitInstantiation(const Decl *D) {
   if (const ClassTemplateSpecializationDecl *
       SD = dyn_cast<ClassTemplateSpecializationDecl>(D)) {
-    return SD->getTemplateInstantiationPattern();
+    const auto *Template = SD->getTemplateInstantiationPattern();
+    if (Template)
+      return Template;
+    // Fallback to primary template if no instantiation is available yet (e.g.
+    // the type doesn't need to be complete).
+    return SD->getSpecializedTemplate()->getTemplatedDecl();
   } else if (const FunctionDecl *FD = dyn_cast<FunctionDecl>(D)) {
     return FD->getTemplateInstantiationPattern();
   } else if (auto *VD = dyn_cast<VarDecl>(D)) {
@@ -250,12 +257,9 @@ static bool isDeclADefinition(const Decl *D, const DeclContext *ContainerDC, AST
   if (auto MD = dyn_cast<ObjCMethodDecl>(D))
     return MD->isThisDeclarationADefinition() || isa<ObjCImplDecl>(ContainerDC);
 
-  if (isa<TypedefNameDecl>(D) ||
-      isa<EnumConstantDecl>(D) ||
-      isa<FieldDecl>(D) ||
-      isa<MSPropertyDecl>(D) ||
-      isa<ObjCImplDecl>(D) ||
-      isa<ObjCPropertyImplDecl>(D))
+  if (isa<TypedefNameDecl>(D) || isa<EnumConstantDecl>(D) ||
+      isa<FieldDecl>(D) || isa<MSPropertyDecl>(D) || isa<ObjCImplDecl>(D) ||
+      isa<ObjCPropertyImplDecl>(D) || isa<ConceptDecl>(D))
     return true;
 
   return false;
@@ -448,6 +452,8 @@ bool IndexingContext::handleDeclOccurrence(const Decl *D, SourceLocation Loc,
 void IndexingContext::handleMacroDefined(const IdentifierInfo &Name,
                                          SourceLocation Loc,
                                          const MacroInfo &MI) {
+  if (!shouldIndexMacroOccurrence(/*IsRef=*/false, Loc))
+    return;
   SymbolRoleSet Roles = (unsigned)SymbolRole::Definition;
   DataConsumer.handleMacroOccurrence(&Name, &MI, Roles, Loc);
 }
@@ -455,6 +461,8 @@ void IndexingContext::handleMacroDefined(const IdentifierInfo &Name,
 void IndexingContext::handleMacroUndefined(const IdentifierInfo &Name,
                                            SourceLocation Loc,
                                            const MacroInfo &MI) {
+  if (!shouldIndexMacroOccurrence(/*IsRef=*/false, Loc))
+    return;
   SymbolRoleSet Roles = (unsigned)SymbolRole::Undefinition;
   DataConsumer.handleMacroOccurrence(&Name, &MI, Roles, Loc);
 }
@@ -462,6 +470,37 @@ void IndexingContext::handleMacroUndefined(const IdentifierInfo &Name,
 void IndexingContext::handleMacroReference(const IdentifierInfo &Name,
                                            SourceLocation Loc,
                                            const MacroInfo &MI) {
+  if (!shouldIndexMacroOccurrence(/*IsRef=*/true, Loc))
+    return;
   SymbolRoleSet Roles = (unsigned)SymbolRole::Reference;
   DataConsumer.handleMacroOccurrence(&Name, &MI, Roles, Loc);
+}
+
+bool IndexingContext::shouldIndexMacroOccurrence(bool IsRef,
+                                                 SourceLocation Loc) {
+  if (!IndexOpts.IndexMacros)
+    return false;
+
+  switch (IndexOpts.SystemSymbolFilter) {
+  case IndexingOptions::SystemSymbolFilterKind::None:
+    break;
+  case IndexingOptions::SystemSymbolFilterKind::DeclarationsOnly:
+    if (!IsRef)
+      return true;
+    break;
+  case IndexingOptions::SystemSymbolFilterKind::All:
+    return true;
+  }
+
+  SourceManager &SM = Ctx->getSourceManager();
+  FileID FID = SM.getFileID(SM.getFileLoc(Loc));
+  if (FID.isInvalid())
+    return false;
+
+  bool Invalid = false;
+  const SrcMgr::SLocEntry &SEntry = SM.getSLocEntry(FID, &Invalid);
+  if (Invalid || !SEntry.isFile())
+    return false;
+
+  return SEntry.getFile().getFileCharacteristic() == SrcMgr::C_User;
 }

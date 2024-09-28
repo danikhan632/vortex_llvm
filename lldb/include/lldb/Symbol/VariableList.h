@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_VariableList_h_
-#define liblldb_VariableList_h_
+#ifndef LLDB_SYMBOL_VARIABLELIST_H
+#define LLDB_SYMBOL_VARIABLELIST_H
 
 #include "lldb/Symbol/SymbolContext.h"
 #include "lldb/Symbol/Variable.h"
@@ -75,14 +75,19 @@ public:
   const_iterator begin() const { return m_variables.begin(); }
   const_iterator end() const { return m_variables.end(); }
 
+  llvm::ArrayRef<lldb::VariableSP> toArrayRef() {
+    return llvm::ArrayRef(m_variables);
+  }
+
 protected:
   collection m_variables;
 
 private:
   // For VariableList only
-  DISALLOW_COPY_AND_ASSIGN(VariableList);
+  VariableList(const VariableList &) = delete;
+  const VariableList &operator=(const VariableList &) = delete;
 };
 
 } // namespace lldb_private
 
-#endif // liblldb_VariableList_h_
+#endif // LLDB_SYMBOL_VARIABLELIST_H

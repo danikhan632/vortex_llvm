@@ -3,12 +3,12 @@
 ; RUN: llc -O3 -mtriple=powerpc64le-linux-gnu -mcpu=pwr9 < %s | FileCheck --check-prefix=PC64LE9 %s
 ; RUN: llc -O3 -mtriple=powerpc64-linux-gnu < %s | FileCheck --check-prefix=PC64 %s
 
-define ppc_fp128 @test_fadd_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second) nounwind {
+define ppc_fp128 @test_fadd_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second) #0 {
 ; PC64LE-LABEL: test_fadd_ppc_fp128:
 ; PC64LE:       # %bb.0: # %entry
 ; PC64LE-NEXT:    mflr 0
-; PC64LE-NEXT:    std 0, 16(1)
 ; PC64LE-NEXT:    stdu 1, -32(1)
+; PC64LE-NEXT:    std 0, 48(1)
 ; PC64LE-NEXT:    bl __gcc_qadd
 ; PC64LE-NEXT:    nop
 ; PC64LE-NEXT:    addi 1, 1, 32
@@ -19,8 +19,8 @@ define ppc_fp128 @test_fadd_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second) nounw
 ; PC64LE9-LABEL: test_fadd_ppc_fp128:
 ; PC64LE9:       # %bb.0: # %entry
 ; PC64LE9-NEXT:    mflr 0
-; PC64LE9-NEXT:    std 0, 16(1)
 ; PC64LE9-NEXT:    stdu 1, -32(1)
+; PC64LE9-NEXT:    std 0, 48(1)
 ; PC64LE9-NEXT:    bl __gcc_qadd
 ; PC64LE9-NEXT:    nop
 ; PC64LE9-NEXT:    addi 1, 1, 32
@@ -31,8 +31,8 @@ define ppc_fp128 @test_fadd_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second) nounw
 ; PC64-LABEL: test_fadd_ppc_fp128:
 ; PC64:       # %bb.0: # %entry
 ; PC64-NEXT:    mflr 0
-; PC64-NEXT:    std 0, 16(1)
 ; PC64-NEXT:    stdu 1, -112(1)
+; PC64-NEXT:    std 0, 128(1)
 ; PC64-NEXT:    bl __gcc_qadd
 ; PC64-NEXT:    nop
 ; PC64-NEXT:    addi 1, 1, 112
@@ -44,16 +44,16 @@ entry:
                     ppc_fp128 %first,
                     ppc_fp128 %second,
                     metadata !"round.dynamic",
-                    metadata !"fpexcept.strict")
+                    metadata !"fpexcept.strict") #1
   ret ppc_fp128 %add
 }
 
-define ppc_fp128 @test_fsub_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second) nounwind {
+define ppc_fp128 @test_fsub_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second) #0 {
 ; PC64LE-LABEL: test_fsub_ppc_fp128:
 ; PC64LE:       # %bb.0: # %entry
 ; PC64LE-NEXT:    mflr 0
-; PC64LE-NEXT:    std 0, 16(1)
 ; PC64LE-NEXT:    stdu 1, -32(1)
+; PC64LE-NEXT:    std 0, 48(1)
 ; PC64LE-NEXT:    bl __gcc_qsub
 ; PC64LE-NEXT:    nop
 ; PC64LE-NEXT:    addi 1, 1, 32
@@ -64,8 +64,8 @@ define ppc_fp128 @test_fsub_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second) nounw
 ; PC64LE9-LABEL: test_fsub_ppc_fp128:
 ; PC64LE9:       # %bb.0: # %entry
 ; PC64LE9-NEXT:    mflr 0
-; PC64LE9-NEXT:    std 0, 16(1)
 ; PC64LE9-NEXT:    stdu 1, -32(1)
+; PC64LE9-NEXT:    std 0, 48(1)
 ; PC64LE9-NEXT:    bl __gcc_qsub
 ; PC64LE9-NEXT:    nop
 ; PC64LE9-NEXT:    addi 1, 1, 32
@@ -76,8 +76,8 @@ define ppc_fp128 @test_fsub_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second) nounw
 ; PC64-LABEL: test_fsub_ppc_fp128:
 ; PC64:       # %bb.0: # %entry
 ; PC64-NEXT:    mflr 0
-; PC64-NEXT:    std 0, 16(1)
 ; PC64-NEXT:    stdu 1, -112(1)
+; PC64-NEXT:    std 0, 128(1)
 ; PC64-NEXT:    bl __gcc_qsub
 ; PC64-NEXT:    nop
 ; PC64-NEXT:    addi 1, 1, 112
@@ -89,16 +89,16 @@ entry:
                     ppc_fp128 %first,
                     ppc_fp128 %second,
                     metadata !"round.dynamic",
-                    metadata !"fpexcept.strict")
+                    metadata !"fpexcept.strict") #1
   ret ppc_fp128 %sub
 }
 
-define ppc_fp128 @test_fmul_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second) nounwind {
+define ppc_fp128 @test_fmul_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second) #0 {
 ; PC64LE-LABEL: test_fmul_ppc_fp128:
 ; PC64LE:       # %bb.0: # %entry
 ; PC64LE-NEXT:    mflr 0
-; PC64LE-NEXT:    std 0, 16(1)
 ; PC64LE-NEXT:    stdu 1, -32(1)
+; PC64LE-NEXT:    std 0, 48(1)
 ; PC64LE-NEXT:    bl __gcc_qmul
 ; PC64LE-NEXT:    nop
 ; PC64LE-NEXT:    addi 1, 1, 32
@@ -109,8 +109,8 @@ define ppc_fp128 @test_fmul_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second) nounw
 ; PC64LE9-LABEL: test_fmul_ppc_fp128:
 ; PC64LE9:       # %bb.0: # %entry
 ; PC64LE9-NEXT:    mflr 0
-; PC64LE9-NEXT:    std 0, 16(1)
 ; PC64LE9-NEXT:    stdu 1, -32(1)
+; PC64LE9-NEXT:    std 0, 48(1)
 ; PC64LE9-NEXT:    bl __gcc_qmul
 ; PC64LE9-NEXT:    nop
 ; PC64LE9-NEXT:    addi 1, 1, 32
@@ -121,8 +121,8 @@ define ppc_fp128 @test_fmul_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second) nounw
 ; PC64-LABEL: test_fmul_ppc_fp128:
 ; PC64:       # %bb.0: # %entry
 ; PC64-NEXT:    mflr 0
-; PC64-NEXT:    std 0, 16(1)
 ; PC64-NEXT:    stdu 1, -112(1)
+; PC64-NEXT:    std 0, 128(1)
 ; PC64-NEXT:    bl __gcc_qmul
 ; PC64-NEXT:    nop
 ; PC64-NEXT:    addi 1, 1, 112
@@ -134,16 +134,16 @@ entry:
                     ppc_fp128 %first,
                     ppc_fp128 %second,
                     metadata !"round.dynamic",
-                    metadata !"fpexcept.strict")
+                    metadata !"fpexcept.strict") #1
   ret ppc_fp128 %mul
 }
 
-define ppc_fp128 @test_fdiv_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second) nounwind {
+define ppc_fp128 @test_fdiv_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second) #0 {
 ; PC64LE-LABEL: test_fdiv_ppc_fp128:
 ; PC64LE:       # %bb.0: # %entry
 ; PC64LE-NEXT:    mflr 0
-; PC64LE-NEXT:    std 0, 16(1)
 ; PC64LE-NEXT:    stdu 1, -32(1)
+; PC64LE-NEXT:    std 0, 48(1)
 ; PC64LE-NEXT:    bl __gcc_qdiv
 ; PC64LE-NEXT:    nop
 ; PC64LE-NEXT:    addi 1, 1, 32
@@ -154,8 +154,8 @@ define ppc_fp128 @test_fdiv_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second) nounw
 ; PC64LE9-LABEL: test_fdiv_ppc_fp128:
 ; PC64LE9:       # %bb.0: # %entry
 ; PC64LE9-NEXT:    mflr 0
-; PC64LE9-NEXT:    std 0, 16(1)
 ; PC64LE9-NEXT:    stdu 1, -32(1)
+; PC64LE9-NEXT:    std 0, 48(1)
 ; PC64LE9-NEXT:    bl __gcc_qdiv
 ; PC64LE9-NEXT:    nop
 ; PC64LE9-NEXT:    addi 1, 1, 32
@@ -166,8 +166,8 @@ define ppc_fp128 @test_fdiv_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second) nounw
 ; PC64-LABEL: test_fdiv_ppc_fp128:
 ; PC64:       # %bb.0: # %entry
 ; PC64-NEXT:    mflr 0
-; PC64-NEXT:    std 0, 16(1)
 ; PC64-NEXT:    stdu 1, -112(1)
+; PC64-NEXT:    std 0, 128(1)
 ; PC64-NEXT:    bl __gcc_qdiv
 ; PC64-NEXT:    nop
 ; PC64-NEXT:    addi 1, 1, 112
@@ -179,16 +179,16 @@ entry:
                     ppc_fp128 %first,
                     ppc_fp128 %second,
                     metadata !"round.dynamic",
-                    metadata !"fpexcept.strict")
+                    metadata !"fpexcept.strict") #1
   ret ppc_fp128 %div
 }
 
-define ppc_fp128 @test_frem_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second) nounwind {
+define ppc_fp128 @test_frem_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second) #0 {
 ; PC64LE-LABEL: test_frem_ppc_fp128:
 ; PC64LE:       # %bb.0: # %entry
 ; PC64LE-NEXT:    mflr 0
-; PC64LE-NEXT:    std 0, 16(1)
 ; PC64LE-NEXT:    stdu 1, -32(1)
+; PC64LE-NEXT:    std 0, 48(1)
 ; PC64LE-NEXT:    bl fmodl
 ; PC64LE-NEXT:    nop
 ; PC64LE-NEXT:    addi 1, 1, 32
@@ -199,8 +199,8 @@ define ppc_fp128 @test_frem_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second) nounw
 ; PC64LE9-LABEL: test_frem_ppc_fp128:
 ; PC64LE9:       # %bb.0: # %entry
 ; PC64LE9-NEXT:    mflr 0
-; PC64LE9-NEXT:    std 0, 16(1)
 ; PC64LE9-NEXT:    stdu 1, -32(1)
+; PC64LE9-NEXT:    std 0, 48(1)
 ; PC64LE9-NEXT:    bl fmodl
 ; PC64LE9-NEXT:    nop
 ; PC64LE9-NEXT:    addi 1, 1, 32
@@ -211,8 +211,8 @@ define ppc_fp128 @test_frem_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second) nounw
 ; PC64-LABEL: test_frem_ppc_fp128:
 ; PC64:       # %bb.0: # %entry
 ; PC64-NEXT:    mflr 0
-; PC64-NEXT:    std 0, 16(1)
 ; PC64-NEXT:    stdu 1, -112(1)
+; PC64-NEXT:    std 0, 128(1)
 ; PC64-NEXT:    bl fmodl
 ; PC64-NEXT:    nop
 ; PC64-NEXT:    addi 1, 1, 112
@@ -224,16 +224,16 @@ entry:
                     ppc_fp128 %first,
                     ppc_fp128 %second,
                     metadata !"round.dynamic",
-                    metadata !"fpexcept.strict")
+                    metadata !"fpexcept.strict") #1
   ret ppc_fp128 %rem
 }
 
-define ppc_fp128 @test_fma_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second, ppc_fp128 %third) nounwind {
+define ppc_fp128 @test_fma_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second, ppc_fp128 %third) #0 {
 ; PC64LE-LABEL: test_fma_ppc_fp128:
 ; PC64LE:       # %bb.0: # %entry
 ; PC64LE-NEXT:    mflr 0
-; PC64LE-NEXT:    std 0, 16(1)
 ; PC64LE-NEXT:    stdu 1, -32(1)
+; PC64LE-NEXT:    std 0, 48(1)
 ; PC64LE-NEXT:    bl fmal
 ; PC64LE-NEXT:    nop
 ; PC64LE-NEXT:    addi 1, 1, 32
@@ -244,8 +244,8 @@ define ppc_fp128 @test_fma_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second, ppc_fp
 ; PC64LE9-LABEL: test_fma_ppc_fp128:
 ; PC64LE9:       # %bb.0: # %entry
 ; PC64LE9-NEXT:    mflr 0
-; PC64LE9-NEXT:    std 0, 16(1)
 ; PC64LE9-NEXT:    stdu 1, -32(1)
+; PC64LE9-NEXT:    std 0, 48(1)
 ; PC64LE9-NEXT:    bl fmal
 ; PC64LE9-NEXT:    nop
 ; PC64LE9-NEXT:    addi 1, 1, 32
@@ -256,8 +256,8 @@ define ppc_fp128 @test_fma_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second, ppc_fp
 ; PC64-LABEL: test_fma_ppc_fp128:
 ; PC64:       # %bb.0: # %entry
 ; PC64-NEXT:    mflr 0
-; PC64-NEXT:    std 0, 16(1)
 ; PC64-NEXT:    stdu 1, -112(1)
+; PC64-NEXT:    std 0, 128(1)
 ; PC64-NEXT:    bl fmal
 ; PC64-NEXT:    nop
 ; PC64-NEXT:    addi 1, 1, 112
@@ -270,16 +270,16 @@ entry:
                     ppc_fp128 %second,
                     ppc_fp128 %third,
                     metadata !"round.dynamic",
-                    metadata !"fpexcept.strict")
+                    metadata !"fpexcept.strict") #1
   ret ppc_fp128 %add
 }
 
-define ppc_fp128 @test_sqrt_ppc_fp128(ppc_fp128 %first) nounwind {
+define ppc_fp128 @test_sqrt_ppc_fp128(ppc_fp128 %first) #0 {
 ; PC64LE-LABEL: test_sqrt_ppc_fp128:
 ; PC64LE:       # %bb.0: # %entry
 ; PC64LE-NEXT:    mflr 0
-; PC64LE-NEXT:    std 0, 16(1)
 ; PC64LE-NEXT:    stdu 1, -32(1)
+; PC64LE-NEXT:    std 0, 48(1)
 ; PC64LE-NEXT:    bl sqrtl
 ; PC64LE-NEXT:    nop
 ; PC64LE-NEXT:    addi 1, 1, 32
@@ -290,8 +290,8 @@ define ppc_fp128 @test_sqrt_ppc_fp128(ppc_fp128 %first) nounwind {
 ; PC64LE9-LABEL: test_sqrt_ppc_fp128:
 ; PC64LE9:       # %bb.0: # %entry
 ; PC64LE9-NEXT:    mflr 0
-; PC64LE9-NEXT:    std 0, 16(1)
 ; PC64LE9-NEXT:    stdu 1, -32(1)
+; PC64LE9-NEXT:    std 0, 48(1)
 ; PC64LE9-NEXT:    bl sqrtl
 ; PC64LE9-NEXT:    nop
 ; PC64LE9-NEXT:    addi 1, 1, 32
@@ -302,8 +302,8 @@ define ppc_fp128 @test_sqrt_ppc_fp128(ppc_fp128 %first) nounwind {
 ; PC64-LABEL: test_sqrt_ppc_fp128:
 ; PC64:       # %bb.0: # %entry
 ; PC64-NEXT:    mflr 0
-; PC64-NEXT:    std 0, 16(1)
 ; PC64-NEXT:    stdu 1, -112(1)
+; PC64-NEXT:    std 0, 128(1)
 ; PC64-NEXT:    bl sqrtl
 ; PC64-NEXT:    nop
 ; PC64-NEXT:    addi 1, 1, 112
@@ -314,16 +314,16 @@ entry:
   %sqrt = call ppc_fp128 @llvm.experimental.constrained.sqrt.ppcf128(
                     ppc_fp128 %first,
                     metadata !"round.dynamic",
-                    metadata !"fpexcept.strict")
+                    metadata !"fpexcept.strict") #1
   ret ppc_fp128 %sqrt
 }
 
-define ppc_fp128 @test_pow_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second) nounwind {
+define ppc_fp128 @test_pow_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second) #0 {
 ; PC64LE-LABEL: test_pow_ppc_fp128:
 ; PC64LE:       # %bb.0: # %entry
 ; PC64LE-NEXT:    mflr 0
-; PC64LE-NEXT:    std 0, 16(1)
 ; PC64LE-NEXT:    stdu 1, -32(1)
+; PC64LE-NEXT:    std 0, 48(1)
 ; PC64LE-NEXT:    bl powl
 ; PC64LE-NEXT:    nop
 ; PC64LE-NEXT:    addi 1, 1, 32
@@ -334,8 +334,8 @@ define ppc_fp128 @test_pow_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second) nounwi
 ; PC64LE9-LABEL: test_pow_ppc_fp128:
 ; PC64LE9:       # %bb.0: # %entry
 ; PC64LE9-NEXT:    mflr 0
-; PC64LE9-NEXT:    std 0, 16(1)
 ; PC64LE9-NEXT:    stdu 1, -32(1)
+; PC64LE9-NEXT:    std 0, 48(1)
 ; PC64LE9-NEXT:    bl powl
 ; PC64LE9-NEXT:    nop
 ; PC64LE9-NEXT:    addi 1, 1, 32
@@ -346,8 +346,8 @@ define ppc_fp128 @test_pow_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second) nounwi
 ; PC64-LABEL: test_pow_ppc_fp128:
 ; PC64:       # %bb.0: # %entry
 ; PC64-NEXT:    mflr 0
-; PC64-NEXT:    std 0, 16(1)
 ; PC64-NEXT:    stdu 1, -112(1)
+; PC64-NEXT:    std 0, 128(1)
 ; PC64-NEXT:    bl powl
 ; PC64-NEXT:    nop
 ; PC64-NEXT:    addi 1, 1, 112
@@ -359,17 +359,17 @@ entry:
                     ppc_fp128 %first,
                     ppc_fp128 %second,
                     metadata !"round.dynamic",
-                    metadata !"fpexcept.strict")
+                    metadata !"fpexcept.strict") #1
   ret ppc_fp128 %pow
 }
 
-define ppc_fp128 @test_powi_ppc_fp128(ppc_fp128 %first, i32 %second) nounwind {
+define ppc_fp128 @test_powi_ppc_fp128(ppc_fp128 %first, i32 %second) #0 {
 ; PC64LE-LABEL: test_powi_ppc_fp128:
 ; PC64LE:       # %bb.0: # %entry
 ; PC64LE-NEXT:    mflr 0
-; PC64LE-NEXT:    std 0, 16(1)
 ; PC64LE-NEXT:    stdu 1, -32(1)
 ; PC64LE-NEXT:    clrldi 5, 5, 32
+; PC64LE-NEXT:    std 0, 48(1)
 ; PC64LE-NEXT:    bl __powitf2
 ; PC64LE-NEXT:    nop
 ; PC64LE-NEXT:    addi 1, 1, 32
@@ -380,9 +380,9 @@ define ppc_fp128 @test_powi_ppc_fp128(ppc_fp128 %first, i32 %second) nounwind {
 ; PC64LE9-LABEL: test_powi_ppc_fp128:
 ; PC64LE9:       # %bb.0: # %entry
 ; PC64LE9-NEXT:    mflr 0
-; PC64LE9-NEXT:    std 0, 16(1)
 ; PC64LE9-NEXT:    stdu 1, -32(1)
 ; PC64LE9-NEXT:    clrldi 5, 5, 32
+; PC64LE9-NEXT:    std 0, 48(1)
 ; PC64LE9-NEXT:    bl __powitf2
 ; PC64LE9-NEXT:    nop
 ; PC64LE9-NEXT:    addi 1, 1, 32
@@ -393,31 +393,30 @@ define ppc_fp128 @test_powi_ppc_fp128(ppc_fp128 %first, i32 %second) nounwind {
 ; PC64-LABEL: test_powi_ppc_fp128:
 ; PC64:       # %bb.0: # %entry
 ; PC64-NEXT:    mflr 0
-; PC64-NEXT:    std 0, 16(1)
 ; PC64-NEXT:    stdu 1, -112(1)
 ; PC64-NEXT:    clrldi 5, 5, 32
+; PC64-NEXT:    std 0, 128(1)
 ; PC64-NEXT:    bl __powitf2
 ; PC64-NEXT:    nop
 ; PC64-NEXT:    addi 1, 1, 112
 ; PC64-NEXT:    ld 0, 16(1)
 ; PC64-NEXT:    mtlr 0
 ; PC64-NEXT:    blr
-; PC64LE9     :    clrldi 5, 5, 32
 entry:
   %powi = call ppc_fp128 @llvm.experimental.constrained.powi.ppcf128(
                     ppc_fp128 %first,
                     i32 %second,
                     metadata !"round.dynamic",
-                    metadata !"fpexcept.strict")
+                    metadata !"fpexcept.strict") #1
   ret ppc_fp128 %powi
 }
 
-define ppc_fp128 @test_sin_ppc_fp128(ppc_fp128 %first) nounwind {
+define ppc_fp128 @test_sin_ppc_fp128(ppc_fp128 %first) #0 {
 ; PC64LE-LABEL: test_sin_ppc_fp128:
 ; PC64LE:       # %bb.0: # %entry
 ; PC64LE-NEXT:    mflr 0
-; PC64LE-NEXT:    std 0, 16(1)
 ; PC64LE-NEXT:    stdu 1, -32(1)
+; PC64LE-NEXT:    std 0, 48(1)
 ; PC64LE-NEXT:    bl sinl
 ; PC64LE-NEXT:    nop
 ; PC64LE-NEXT:    addi 1, 1, 32
@@ -428,8 +427,8 @@ define ppc_fp128 @test_sin_ppc_fp128(ppc_fp128 %first) nounwind {
 ; PC64LE9-LABEL: test_sin_ppc_fp128:
 ; PC64LE9:       # %bb.0: # %entry
 ; PC64LE9-NEXT:    mflr 0
-; PC64LE9-NEXT:    std 0, 16(1)
 ; PC64LE9-NEXT:    stdu 1, -32(1)
+; PC64LE9-NEXT:    std 0, 48(1)
 ; PC64LE9-NEXT:    bl sinl
 ; PC64LE9-NEXT:    nop
 ; PC64LE9-NEXT:    addi 1, 1, 32
@@ -440,8 +439,8 @@ define ppc_fp128 @test_sin_ppc_fp128(ppc_fp128 %first) nounwind {
 ; PC64-LABEL: test_sin_ppc_fp128:
 ; PC64:       # %bb.0: # %entry
 ; PC64-NEXT:    mflr 0
-; PC64-NEXT:    std 0, 16(1)
 ; PC64-NEXT:    stdu 1, -112(1)
+; PC64-NEXT:    std 0, 128(1)
 ; PC64-NEXT:    bl sinl
 ; PC64-NEXT:    nop
 ; PC64-NEXT:    addi 1, 1, 112
@@ -452,16 +451,16 @@ entry:
   %sin = call ppc_fp128 @llvm.experimental.constrained.sin.ppcf128(
                     ppc_fp128 %first,
                     metadata !"round.dynamic",
-                    metadata !"fpexcept.strict")
+                    metadata !"fpexcept.strict") #1
   ret ppc_fp128 %sin
 }
 
-define ppc_fp128 @test_cos_ppc_fp128(ppc_fp128 %first) nounwind {
+define ppc_fp128 @test_cos_ppc_fp128(ppc_fp128 %first) #0 {
 ; PC64LE-LABEL: test_cos_ppc_fp128:
 ; PC64LE:       # %bb.0: # %entry
 ; PC64LE-NEXT:    mflr 0
-; PC64LE-NEXT:    std 0, 16(1)
 ; PC64LE-NEXT:    stdu 1, -32(1)
+; PC64LE-NEXT:    std 0, 48(1)
 ; PC64LE-NEXT:    bl cosl
 ; PC64LE-NEXT:    nop
 ; PC64LE-NEXT:    addi 1, 1, 32
@@ -472,8 +471,8 @@ define ppc_fp128 @test_cos_ppc_fp128(ppc_fp128 %first) nounwind {
 ; PC64LE9-LABEL: test_cos_ppc_fp128:
 ; PC64LE9:       # %bb.0: # %entry
 ; PC64LE9-NEXT:    mflr 0
-; PC64LE9-NEXT:    std 0, 16(1)
 ; PC64LE9-NEXT:    stdu 1, -32(1)
+; PC64LE9-NEXT:    std 0, 48(1)
 ; PC64LE9-NEXT:    bl cosl
 ; PC64LE9-NEXT:    nop
 ; PC64LE9-NEXT:    addi 1, 1, 32
@@ -484,8 +483,8 @@ define ppc_fp128 @test_cos_ppc_fp128(ppc_fp128 %first) nounwind {
 ; PC64-LABEL: test_cos_ppc_fp128:
 ; PC64:       # %bb.0: # %entry
 ; PC64-NEXT:    mflr 0
-; PC64-NEXT:    std 0, 16(1)
 ; PC64-NEXT:    stdu 1, -112(1)
+; PC64-NEXT:    std 0, 128(1)
 ; PC64-NEXT:    bl cosl
 ; PC64-NEXT:    nop
 ; PC64-NEXT:    addi 1, 1, 112
@@ -496,16 +495,16 @@ entry:
   %cos = call ppc_fp128 @llvm.experimental.constrained.cos.ppcf128(
                     ppc_fp128 %first,
                     metadata !"round.dynamic",
-                    metadata !"fpexcept.strict")
+                    metadata !"fpexcept.strict") #1
   ret ppc_fp128 %cos
 }
 
-define ppc_fp128 @test_exp_ppc_fp128(ppc_fp128 %first) nounwind {
+define ppc_fp128 @test_exp_ppc_fp128(ppc_fp128 %first) #0 {
 ; PC64LE-LABEL: test_exp_ppc_fp128:
 ; PC64LE:       # %bb.0: # %entry
 ; PC64LE-NEXT:    mflr 0
-; PC64LE-NEXT:    std 0, 16(1)
 ; PC64LE-NEXT:    stdu 1, -32(1)
+; PC64LE-NEXT:    std 0, 48(1)
 ; PC64LE-NEXT:    bl expl
 ; PC64LE-NEXT:    nop
 ; PC64LE-NEXT:    addi 1, 1, 32
@@ -516,8 +515,8 @@ define ppc_fp128 @test_exp_ppc_fp128(ppc_fp128 %first) nounwind {
 ; PC64LE9-LABEL: test_exp_ppc_fp128:
 ; PC64LE9:       # %bb.0: # %entry
 ; PC64LE9-NEXT:    mflr 0
-; PC64LE9-NEXT:    std 0, 16(1)
 ; PC64LE9-NEXT:    stdu 1, -32(1)
+; PC64LE9-NEXT:    std 0, 48(1)
 ; PC64LE9-NEXT:    bl expl
 ; PC64LE9-NEXT:    nop
 ; PC64LE9-NEXT:    addi 1, 1, 32
@@ -528,8 +527,8 @@ define ppc_fp128 @test_exp_ppc_fp128(ppc_fp128 %first) nounwind {
 ; PC64-LABEL: test_exp_ppc_fp128:
 ; PC64:       # %bb.0: # %entry
 ; PC64-NEXT:    mflr 0
-; PC64-NEXT:    std 0, 16(1)
 ; PC64-NEXT:    stdu 1, -112(1)
+; PC64-NEXT:    std 0, 128(1)
 ; PC64-NEXT:    bl expl
 ; PC64-NEXT:    nop
 ; PC64-NEXT:    addi 1, 1, 112
@@ -540,16 +539,16 @@ entry:
   %exp = call ppc_fp128 @llvm.experimental.constrained.exp.ppcf128(
                     ppc_fp128 %first,
                     metadata !"round.dynamic",
-                    metadata !"fpexcept.strict")
+                    metadata !"fpexcept.strict") #1
   ret ppc_fp128 %exp
 }
 
-define ppc_fp128 @test_exp2_ppc_fp128(ppc_fp128 %first) nounwind {
+define ppc_fp128 @test_exp2_ppc_fp128(ppc_fp128 %first) #0 {
 ; PC64LE-LABEL: test_exp2_ppc_fp128:
 ; PC64LE:       # %bb.0: # %entry
 ; PC64LE-NEXT:    mflr 0
-; PC64LE-NEXT:    std 0, 16(1)
 ; PC64LE-NEXT:    stdu 1, -32(1)
+; PC64LE-NEXT:    std 0, 48(1)
 ; PC64LE-NEXT:    bl exp2l
 ; PC64LE-NEXT:    nop
 ; PC64LE-NEXT:    addi 1, 1, 32
@@ -560,8 +559,8 @@ define ppc_fp128 @test_exp2_ppc_fp128(ppc_fp128 %first) nounwind {
 ; PC64LE9-LABEL: test_exp2_ppc_fp128:
 ; PC64LE9:       # %bb.0: # %entry
 ; PC64LE9-NEXT:    mflr 0
-; PC64LE9-NEXT:    std 0, 16(1)
 ; PC64LE9-NEXT:    stdu 1, -32(1)
+; PC64LE9-NEXT:    std 0, 48(1)
 ; PC64LE9-NEXT:    bl exp2l
 ; PC64LE9-NEXT:    nop
 ; PC64LE9-NEXT:    addi 1, 1, 32
@@ -572,8 +571,8 @@ define ppc_fp128 @test_exp2_ppc_fp128(ppc_fp128 %first) nounwind {
 ; PC64-LABEL: test_exp2_ppc_fp128:
 ; PC64:       # %bb.0: # %entry
 ; PC64-NEXT:    mflr 0
-; PC64-NEXT:    std 0, 16(1)
 ; PC64-NEXT:    stdu 1, -112(1)
+; PC64-NEXT:    std 0, 128(1)
 ; PC64-NEXT:    bl exp2l
 ; PC64-NEXT:    nop
 ; PC64-NEXT:    addi 1, 1, 112
@@ -584,16 +583,16 @@ entry:
   %exp2 = call ppc_fp128 @llvm.experimental.constrained.exp2.ppcf128(
                     ppc_fp128 %first,
                     metadata !"round.dynamic",
-                    metadata !"fpexcept.strict")
+                    metadata !"fpexcept.strict") #1
   ret ppc_fp128 %exp2
 }
 
-define ppc_fp128 @test_log_ppc_fp128(ppc_fp128 %first) nounwind {
+define ppc_fp128 @test_log_ppc_fp128(ppc_fp128 %first) #0 {
 ; PC64LE-LABEL: test_log_ppc_fp128:
 ; PC64LE:       # %bb.0: # %entry
 ; PC64LE-NEXT:    mflr 0
-; PC64LE-NEXT:    std 0, 16(1)
 ; PC64LE-NEXT:    stdu 1, -32(1)
+; PC64LE-NEXT:    std 0, 48(1)
 ; PC64LE-NEXT:    bl logl
 ; PC64LE-NEXT:    nop
 ; PC64LE-NEXT:    addi 1, 1, 32
@@ -604,8 +603,8 @@ define ppc_fp128 @test_log_ppc_fp128(ppc_fp128 %first) nounwind {
 ; PC64LE9-LABEL: test_log_ppc_fp128:
 ; PC64LE9:       # %bb.0: # %entry
 ; PC64LE9-NEXT:    mflr 0
-; PC64LE9-NEXT:    std 0, 16(1)
 ; PC64LE9-NEXT:    stdu 1, -32(1)
+; PC64LE9-NEXT:    std 0, 48(1)
 ; PC64LE9-NEXT:    bl logl
 ; PC64LE9-NEXT:    nop
 ; PC64LE9-NEXT:    addi 1, 1, 32
@@ -616,8 +615,8 @@ define ppc_fp128 @test_log_ppc_fp128(ppc_fp128 %first) nounwind {
 ; PC64-LABEL: test_log_ppc_fp128:
 ; PC64:       # %bb.0: # %entry
 ; PC64-NEXT:    mflr 0
-; PC64-NEXT:    std 0, 16(1)
 ; PC64-NEXT:    stdu 1, -112(1)
+; PC64-NEXT:    std 0, 128(1)
 ; PC64-NEXT:    bl logl
 ; PC64-NEXT:    nop
 ; PC64-NEXT:    addi 1, 1, 112
@@ -628,16 +627,16 @@ entry:
   %log = call ppc_fp128 @llvm.experimental.constrained.log.ppcf128(
                     ppc_fp128 %first,
                     metadata !"round.dynamic",
-                    metadata !"fpexcept.strict")
+                    metadata !"fpexcept.strict") #1
   ret ppc_fp128 %log
 }
 
-define ppc_fp128 @test_log2_ppc_fp128(ppc_fp128 %first) nounwind {
+define ppc_fp128 @test_log2_ppc_fp128(ppc_fp128 %first) #0 {
 ; PC64LE-LABEL: test_log2_ppc_fp128:
 ; PC64LE:       # %bb.0: # %entry
 ; PC64LE-NEXT:    mflr 0
-; PC64LE-NEXT:    std 0, 16(1)
 ; PC64LE-NEXT:    stdu 1, -32(1)
+; PC64LE-NEXT:    std 0, 48(1)
 ; PC64LE-NEXT:    bl log2l
 ; PC64LE-NEXT:    nop
 ; PC64LE-NEXT:    addi 1, 1, 32
@@ -648,8 +647,8 @@ define ppc_fp128 @test_log2_ppc_fp128(ppc_fp128 %first) nounwind {
 ; PC64LE9-LABEL: test_log2_ppc_fp128:
 ; PC64LE9:       # %bb.0: # %entry
 ; PC64LE9-NEXT:    mflr 0
-; PC64LE9-NEXT:    std 0, 16(1)
 ; PC64LE9-NEXT:    stdu 1, -32(1)
+; PC64LE9-NEXT:    std 0, 48(1)
 ; PC64LE9-NEXT:    bl log2l
 ; PC64LE9-NEXT:    nop
 ; PC64LE9-NEXT:    addi 1, 1, 32
@@ -660,8 +659,8 @@ define ppc_fp128 @test_log2_ppc_fp128(ppc_fp128 %first) nounwind {
 ; PC64-LABEL: test_log2_ppc_fp128:
 ; PC64:       # %bb.0: # %entry
 ; PC64-NEXT:    mflr 0
-; PC64-NEXT:    std 0, 16(1)
 ; PC64-NEXT:    stdu 1, -112(1)
+; PC64-NEXT:    std 0, 128(1)
 ; PC64-NEXT:    bl log2l
 ; PC64-NEXT:    nop
 ; PC64-NEXT:    addi 1, 1, 112
@@ -672,16 +671,16 @@ entry:
   %log2 = call ppc_fp128 @llvm.experimental.constrained.log2.ppcf128(
                     ppc_fp128 %first,
                     metadata !"round.dynamic",
-                    metadata !"fpexcept.strict")
+                    metadata !"fpexcept.strict") #1
   ret ppc_fp128 %log2
 }
 
-define ppc_fp128 @test_log10_ppc_fp128(ppc_fp128 %first) nounwind {
+define ppc_fp128 @test_log10_ppc_fp128(ppc_fp128 %first) #0 {
 ; PC64LE-LABEL: test_log10_ppc_fp128:
 ; PC64LE:       # %bb.0: # %entry
 ; PC64LE-NEXT:    mflr 0
-; PC64LE-NEXT:    std 0, 16(1)
 ; PC64LE-NEXT:    stdu 1, -32(1)
+; PC64LE-NEXT:    std 0, 48(1)
 ; PC64LE-NEXT:    bl log10l
 ; PC64LE-NEXT:    nop
 ; PC64LE-NEXT:    addi 1, 1, 32
@@ -692,8 +691,8 @@ define ppc_fp128 @test_log10_ppc_fp128(ppc_fp128 %first) nounwind {
 ; PC64LE9-LABEL: test_log10_ppc_fp128:
 ; PC64LE9:       # %bb.0: # %entry
 ; PC64LE9-NEXT:    mflr 0
-; PC64LE9-NEXT:    std 0, 16(1)
 ; PC64LE9-NEXT:    stdu 1, -32(1)
+; PC64LE9-NEXT:    std 0, 48(1)
 ; PC64LE9-NEXT:    bl log10l
 ; PC64LE9-NEXT:    nop
 ; PC64LE9-NEXT:    addi 1, 1, 32
@@ -704,8 +703,8 @@ define ppc_fp128 @test_log10_ppc_fp128(ppc_fp128 %first) nounwind {
 ; PC64-LABEL: test_log10_ppc_fp128:
 ; PC64:       # %bb.0: # %entry
 ; PC64-NEXT:    mflr 0
-; PC64-NEXT:    std 0, 16(1)
 ; PC64-NEXT:    stdu 1, -112(1)
+; PC64-NEXT:    std 0, 128(1)
 ; PC64-NEXT:    bl log10l
 ; PC64-NEXT:    nop
 ; PC64-NEXT:    addi 1, 1, 112
@@ -716,16 +715,16 @@ entry:
   %log10 = call ppc_fp128 @llvm.experimental.constrained.log10.ppcf128(
                     ppc_fp128 %first,
                     metadata !"round.dynamic",
-                    metadata !"fpexcept.strict")
+                    metadata !"fpexcept.strict") #1
   ret ppc_fp128 %log10
 }
 
-define ppc_fp128 @test_rint_ppc_fp128(ppc_fp128 %first) nounwind {
+define ppc_fp128 @test_rint_ppc_fp128(ppc_fp128 %first) #0 {
 ; PC64LE-LABEL: test_rint_ppc_fp128:
 ; PC64LE:       # %bb.0: # %entry
 ; PC64LE-NEXT:    mflr 0
-; PC64LE-NEXT:    std 0, 16(1)
 ; PC64LE-NEXT:    stdu 1, -32(1)
+; PC64LE-NEXT:    std 0, 48(1)
 ; PC64LE-NEXT:    bl rintl
 ; PC64LE-NEXT:    nop
 ; PC64LE-NEXT:    addi 1, 1, 32
@@ -736,8 +735,8 @@ define ppc_fp128 @test_rint_ppc_fp128(ppc_fp128 %first) nounwind {
 ; PC64LE9-LABEL: test_rint_ppc_fp128:
 ; PC64LE9:       # %bb.0: # %entry
 ; PC64LE9-NEXT:    mflr 0
-; PC64LE9-NEXT:    std 0, 16(1)
 ; PC64LE9-NEXT:    stdu 1, -32(1)
+; PC64LE9-NEXT:    std 0, 48(1)
 ; PC64LE9-NEXT:    bl rintl
 ; PC64LE9-NEXT:    nop
 ; PC64LE9-NEXT:    addi 1, 1, 32
@@ -748,8 +747,8 @@ define ppc_fp128 @test_rint_ppc_fp128(ppc_fp128 %first) nounwind {
 ; PC64-LABEL: test_rint_ppc_fp128:
 ; PC64:       # %bb.0: # %entry
 ; PC64-NEXT:    mflr 0
-; PC64-NEXT:    std 0, 16(1)
 ; PC64-NEXT:    stdu 1, -112(1)
+; PC64-NEXT:    std 0, 128(1)
 ; PC64-NEXT:    bl rintl
 ; PC64-NEXT:    nop
 ; PC64-NEXT:    addi 1, 1, 112
@@ -760,16 +759,16 @@ entry:
   %rint = call ppc_fp128 @llvm.experimental.constrained.rint.ppcf128(
                     ppc_fp128 %first,
                     metadata !"round.dynamic",
-                    metadata !"fpexcept.strict")
+                    metadata !"fpexcept.strict") #1
   ret ppc_fp128 %rint
 }
 
-define ppc_fp128 @test_nearbyint_ppc_fp128(ppc_fp128 %first) nounwind {
+define ppc_fp128 @test_nearbyint_ppc_fp128(ppc_fp128 %first) #0 {
 ; PC64LE-LABEL: test_nearbyint_ppc_fp128:
 ; PC64LE:       # %bb.0: # %entry
 ; PC64LE-NEXT:    mflr 0
-; PC64LE-NEXT:    std 0, 16(1)
 ; PC64LE-NEXT:    stdu 1, -32(1)
+; PC64LE-NEXT:    std 0, 48(1)
 ; PC64LE-NEXT:    bl nearbyintl
 ; PC64LE-NEXT:    nop
 ; PC64LE-NEXT:    addi 1, 1, 32
@@ -780,8 +779,8 @@ define ppc_fp128 @test_nearbyint_ppc_fp128(ppc_fp128 %first) nounwind {
 ; PC64LE9-LABEL: test_nearbyint_ppc_fp128:
 ; PC64LE9:       # %bb.0: # %entry
 ; PC64LE9-NEXT:    mflr 0
-; PC64LE9-NEXT:    std 0, 16(1)
 ; PC64LE9-NEXT:    stdu 1, -32(1)
+; PC64LE9-NEXT:    std 0, 48(1)
 ; PC64LE9-NEXT:    bl nearbyintl
 ; PC64LE9-NEXT:    nop
 ; PC64LE9-NEXT:    addi 1, 1, 32
@@ -792,8 +791,8 @@ define ppc_fp128 @test_nearbyint_ppc_fp128(ppc_fp128 %first) nounwind {
 ; PC64-LABEL: test_nearbyint_ppc_fp128:
 ; PC64:       # %bb.0: # %entry
 ; PC64-NEXT:    mflr 0
-; PC64-NEXT:    std 0, 16(1)
 ; PC64-NEXT:    stdu 1, -112(1)
+; PC64-NEXT:    std 0, 128(1)
 ; PC64-NEXT:    bl nearbyintl
 ; PC64-NEXT:    nop
 ; PC64-NEXT:    addi 1, 1, 112
@@ -804,16 +803,16 @@ entry:
   %nearbyint = call ppc_fp128 @llvm.experimental.constrained.nearbyint.ppcf128(
                     ppc_fp128 %first,
                     metadata !"round.dynamic",
-                    metadata !"fpexcept.strict")
+                    metadata !"fpexcept.strict") #1
   ret ppc_fp128 %nearbyint
 }
 
-define ppc_fp128 @test_maxnum_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second) nounwind {
+define ppc_fp128 @test_maxnum_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second) #0 {
 ; PC64LE-LABEL: test_maxnum_ppc_fp128:
 ; PC64LE:       # %bb.0: # %entry
 ; PC64LE-NEXT:    mflr 0
-; PC64LE-NEXT:    std 0, 16(1)
 ; PC64LE-NEXT:    stdu 1, -32(1)
+; PC64LE-NEXT:    std 0, 48(1)
 ; PC64LE-NEXT:    bl fmaxl
 ; PC64LE-NEXT:    nop
 ; PC64LE-NEXT:    addi 1, 1, 32
@@ -824,8 +823,8 @@ define ppc_fp128 @test_maxnum_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second) nou
 ; PC64LE9-LABEL: test_maxnum_ppc_fp128:
 ; PC64LE9:       # %bb.0: # %entry
 ; PC64LE9-NEXT:    mflr 0
-; PC64LE9-NEXT:    std 0, 16(1)
 ; PC64LE9-NEXT:    stdu 1, -32(1)
+; PC64LE9-NEXT:    std 0, 48(1)
 ; PC64LE9-NEXT:    bl fmaxl
 ; PC64LE9-NEXT:    nop
 ; PC64LE9-NEXT:    addi 1, 1, 32
@@ -836,8 +835,8 @@ define ppc_fp128 @test_maxnum_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second) nou
 ; PC64-LABEL: test_maxnum_ppc_fp128:
 ; PC64:       # %bb.0: # %entry
 ; PC64-NEXT:    mflr 0
-; PC64-NEXT:    std 0, 16(1)
 ; PC64-NEXT:    stdu 1, -112(1)
+; PC64-NEXT:    std 0, 128(1)
 ; PC64-NEXT:    bl fmaxl
 ; PC64-NEXT:    nop
 ; PC64-NEXT:    addi 1, 1, 112
@@ -848,16 +847,16 @@ entry:
   %maxnum = call ppc_fp128 @llvm.experimental.constrained.maxnum.ppcf128(
                     ppc_fp128 %first,
                     ppc_fp128 %second,
-                    metadata !"fpexcept.strict")
+                    metadata !"fpexcept.strict") #1
   ret ppc_fp128 %maxnum
 }
 
-define ppc_fp128 @test_minnum_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second) nounwind {
+define ppc_fp128 @test_minnum_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second) #0 {
 ; PC64LE-LABEL: test_minnum_ppc_fp128:
 ; PC64LE:       # %bb.0: # %entry
 ; PC64LE-NEXT:    mflr 0
-; PC64LE-NEXT:    std 0, 16(1)
 ; PC64LE-NEXT:    stdu 1, -32(1)
+; PC64LE-NEXT:    std 0, 48(1)
 ; PC64LE-NEXT:    bl fminl
 ; PC64LE-NEXT:    nop
 ; PC64LE-NEXT:    addi 1, 1, 32
@@ -868,8 +867,8 @@ define ppc_fp128 @test_minnum_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second) nou
 ; PC64LE9-LABEL: test_minnum_ppc_fp128:
 ; PC64LE9:       # %bb.0: # %entry
 ; PC64LE9-NEXT:    mflr 0
-; PC64LE9-NEXT:    std 0, 16(1)
 ; PC64LE9-NEXT:    stdu 1, -32(1)
+; PC64LE9-NEXT:    std 0, 48(1)
 ; PC64LE9-NEXT:    bl fminl
 ; PC64LE9-NEXT:    nop
 ; PC64LE9-NEXT:    addi 1, 1, 32
@@ -880,8 +879,8 @@ define ppc_fp128 @test_minnum_ppc_fp128(ppc_fp128 %first, ppc_fp128 %second) nou
 ; PC64-LABEL: test_minnum_ppc_fp128:
 ; PC64:       # %bb.0: # %entry
 ; PC64-NEXT:    mflr 0
-; PC64-NEXT:    std 0, 16(1)
 ; PC64-NEXT:    stdu 1, -112(1)
+; PC64-NEXT:    std 0, 128(1)
 ; PC64-NEXT:    bl fminl
 ; PC64-NEXT:    nop
 ; PC64-NEXT:    addi 1, 1, 112
@@ -892,16 +891,16 @@ entry:
   %minnum = call ppc_fp128 @llvm.experimental.constrained.minnum.ppcf128(
                     ppc_fp128 %first,
                     ppc_fp128 %second,
-                    metadata !"fpexcept.strict")
+                    metadata !"fpexcept.strict") #1
   ret ppc_fp128 %minnum
 }
 
-define ppc_fp128 @test_ceil_ppc_fp128(ppc_fp128 %first) nounwind {
+define ppc_fp128 @test_ceil_ppc_fp128(ppc_fp128 %first) #0 {
 ; PC64LE-LABEL: test_ceil_ppc_fp128:
 ; PC64LE:       # %bb.0: # %entry
 ; PC64LE-NEXT:    mflr 0
-; PC64LE-NEXT:    std 0, 16(1)
 ; PC64LE-NEXT:    stdu 1, -32(1)
+; PC64LE-NEXT:    std 0, 48(1)
 ; PC64LE-NEXT:    bl ceill
 ; PC64LE-NEXT:    nop
 ; PC64LE-NEXT:    addi 1, 1, 32
@@ -912,8 +911,8 @@ define ppc_fp128 @test_ceil_ppc_fp128(ppc_fp128 %first) nounwind {
 ; PC64LE9-LABEL: test_ceil_ppc_fp128:
 ; PC64LE9:       # %bb.0: # %entry
 ; PC64LE9-NEXT:    mflr 0
-; PC64LE9-NEXT:    std 0, 16(1)
 ; PC64LE9-NEXT:    stdu 1, -32(1)
+; PC64LE9-NEXT:    std 0, 48(1)
 ; PC64LE9-NEXT:    bl ceill
 ; PC64LE9-NEXT:    nop
 ; PC64LE9-NEXT:    addi 1, 1, 32
@@ -924,8 +923,8 @@ define ppc_fp128 @test_ceil_ppc_fp128(ppc_fp128 %first) nounwind {
 ; PC64-LABEL: test_ceil_ppc_fp128:
 ; PC64:       # %bb.0: # %entry
 ; PC64-NEXT:    mflr 0
-; PC64-NEXT:    std 0, 16(1)
 ; PC64-NEXT:    stdu 1, -112(1)
+; PC64-NEXT:    std 0, 128(1)
 ; PC64-NEXT:    bl ceill
 ; PC64-NEXT:    nop
 ; PC64-NEXT:    addi 1, 1, 112
@@ -935,16 +934,16 @@ define ppc_fp128 @test_ceil_ppc_fp128(ppc_fp128 %first) nounwind {
 entry:
   %ceil = call ppc_fp128 @llvm.experimental.constrained.ceil.ppcf128(
                     ppc_fp128 %first,
-                    metadata !"fpexcept.strict")
+                    metadata !"fpexcept.strict") #1
   ret ppc_fp128 %ceil
 }
 
-define ppc_fp128 @test_floor_ppc_fp128(ppc_fp128 %first) nounwind {
+define ppc_fp128 @test_floor_ppc_fp128(ppc_fp128 %first) #0 {
 ; PC64LE-LABEL: test_floor_ppc_fp128:
 ; PC64LE:       # %bb.0: # %entry
 ; PC64LE-NEXT:    mflr 0
-; PC64LE-NEXT:    std 0, 16(1)
 ; PC64LE-NEXT:    stdu 1, -32(1)
+; PC64LE-NEXT:    std 0, 48(1)
 ; PC64LE-NEXT:    bl floorl
 ; PC64LE-NEXT:    nop
 ; PC64LE-NEXT:    addi 1, 1, 32
@@ -955,8 +954,8 @@ define ppc_fp128 @test_floor_ppc_fp128(ppc_fp128 %first) nounwind {
 ; PC64LE9-LABEL: test_floor_ppc_fp128:
 ; PC64LE9:       # %bb.0: # %entry
 ; PC64LE9-NEXT:    mflr 0
-; PC64LE9-NEXT:    std 0, 16(1)
 ; PC64LE9-NEXT:    stdu 1, -32(1)
+; PC64LE9-NEXT:    std 0, 48(1)
 ; PC64LE9-NEXT:    bl floorl
 ; PC64LE9-NEXT:    nop
 ; PC64LE9-NEXT:    addi 1, 1, 32
@@ -967,8 +966,8 @@ define ppc_fp128 @test_floor_ppc_fp128(ppc_fp128 %first) nounwind {
 ; PC64-LABEL: test_floor_ppc_fp128:
 ; PC64:       # %bb.0: # %entry
 ; PC64-NEXT:    mflr 0
-; PC64-NEXT:    std 0, 16(1)
 ; PC64-NEXT:    stdu 1, -112(1)
+; PC64-NEXT:    std 0, 128(1)
 ; PC64-NEXT:    bl floorl
 ; PC64-NEXT:    nop
 ; PC64-NEXT:    addi 1, 1, 112
@@ -978,16 +977,16 @@ define ppc_fp128 @test_floor_ppc_fp128(ppc_fp128 %first) nounwind {
 entry:
   %floor = call ppc_fp128 @llvm.experimental.constrained.floor.ppcf128(
                     ppc_fp128 %first,
-                    metadata !"fpexcept.strict")
+                    metadata !"fpexcept.strict") #1
   ret ppc_fp128 %floor
 }
 
-define ppc_fp128 @test_round_ppc_fp128(ppc_fp128 %first) nounwind {
+define ppc_fp128 @test_round_ppc_fp128(ppc_fp128 %first) #0 {
 ; PC64LE-LABEL: test_round_ppc_fp128:
 ; PC64LE:       # %bb.0: # %entry
 ; PC64LE-NEXT:    mflr 0
-; PC64LE-NEXT:    std 0, 16(1)
 ; PC64LE-NEXT:    stdu 1, -32(1)
+; PC64LE-NEXT:    std 0, 48(1)
 ; PC64LE-NEXT:    bl roundl
 ; PC64LE-NEXT:    nop
 ; PC64LE-NEXT:    addi 1, 1, 32
@@ -998,8 +997,8 @@ define ppc_fp128 @test_round_ppc_fp128(ppc_fp128 %first) nounwind {
 ; PC64LE9-LABEL: test_round_ppc_fp128:
 ; PC64LE9:       # %bb.0: # %entry
 ; PC64LE9-NEXT:    mflr 0
-; PC64LE9-NEXT:    std 0, 16(1)
 ; PC64LE9-NEXT:    stdu 1, -32(1)
+; PC64LE9-NEXT:    std 0, 48(1)
 ; PC64LE9-NEXT:    bl roundl
 ; PC64LE9-NEXT:    nop
 ; PC64LE9-NEXT:    addi 1, 1, 32
@@ -1010,8 +1009,8 @@ define ppc_fp128 @test_round_ppc_fp128(ppc_fp128 %first) nounwind {
 ; PC64-LABEL: test_round_ppc_fp128:
 ; PC64:       # %bb.0: # %entry
 ; PC64-NEXT:    mflr 0
-; PC64-NEXT:    std 0, 16(1)
 ; PC64-NEXT:    stdu 1, -112(1)
+; PC64-NEXT:    std 0, 128(1)
 ; PC64-NEXT:    bl roundl
 ; PC64-NEXT:    nop
 ; PC64-NEXT:    addi 1, 1, 112
@@ -1021,16 +1020,16 @@ define ppc_fp128 @test_round_ppc_fp128(ppc_fp128 %first) nounwind {
 entry:
   %round = call ppc_fp128 @llvm.experimental.constrained.round.ppcf128(
                     ppc_fp128 %first,
-                    metadata !"fpexcept.strict")
+                    metadata !"fpexcept.strict") #1
   ret ppc_fp128 %round
 }
 
-define ppc_fp128 @test_trunc_ppc_fp128(ppc_fp128 %first) nounwind {
+define ppc_fp128 @test_trunc_ppc_fp128(ppc_fp128 %first) #0 {
 ; PC64LE-LABEL: test_trunc_ppc_fp128:
 ; PC64LE:       # %bb.0: # %entry
 ; PC64LE-NEXT:    mflr 0
-; PC64LE-NEXT:    std 0, 16(1)
 ; PC64LE-NEXT:    stdu 1, -32(1)
+; PC64LE-NEXT:    std 0, 48(1)
 ; PC64LE-NEXT:    bl truncl
 ; PC64LE-NEXT:    nop
 ; PC64LE-NEXT:    addi 1, 1, 32
@@ -1041,8 +1040,8 @@ define ppc_fp128 @test_trunc_ppc_fp128(ppc_fp128 %first) nounwind {
 ; PC64LE9-LABEL: test_trunc_ppc_fp128:
 ; PC64LE9:       # %bb.0: # %entry
 ; PC64LE9-NEXT:    mflr 0
-; PC64LE9-NEXT:    std 0, 16(1)
 ; PC64LE9-NEXT:    stdu 1, -32(1)
+; PC64LE9-NEXT:    std 0, 48(1)
 ; PC64LE9-NEXT:    bl truncl
 ; PC64LE9-NEXT:    nop
 ; PC64LE9-NEXT:    addi 1, 1, 32
@@ -1053,8 +1052,8 @@ define ppc_fp128 @test_trunc_ppc_fp128(ppc_fp128 %first) nounwind {
 ; PC64-LABEL: test_trunc_ppc_fp128:
 ; PC64:       # %bb.0: # %entry
 ; PC64-NEXT:    mflr 0
-; PC64-NEXT:    std 0, 16(1)
 ; PC64-NEXT:    stdu 1, -112(1)
+; PC64-NEXT:    std 0, 128(1)
 ; PC64-NEXT:    bl truncl
 ; PC64-NEXT:    nop
 ; PC64-NEXT:    addi 1, 1, 112
@@ -1064,19 +1063,19 @@ define ppc_fp128 @test_trunc_ppc_fp128(ppc_fp128 %first) nounwind {
 entry:
   %trunc = call ppc_fp128 @llvm.experimental.constrained.trunc.ppcf128(
                     ppc_fp128 %first,
-                    metadata !"fpexcept.strict")
+                    metadata !"fpexcept.strict") #1
   ret ppc_fp128 %trunc
 }
 
-define float @test_fptrunc_ppc_fp128_f32(ppc_fp128 %first) nounwind {
+define float @test_fptrunc_ppc_fp128_f32(ppc_fp128 %first) #0 {
 ; PC64LE-LABEL: test_fptrunc_ppc_fp128_f32:
 ; PC64LE:       # %bb.0: # %entry
-; PC64LE-NEXT:    frsp 1, 1
+; PC64LE-NEXT:    xsrsp 1, 1
 ; PC64LE-NEXT:    blr
 ;
 ; PC64LE9-LABEL: test_fptrunc_ppc_fp128_f32:
 ; PC64LE9:       # %bb.0: # %entry
-; PC64LE9-NEXT:    frsp 1, 1
+; PC64LE9-NEXT:    xsrsp 1, 1
 ; PC64LE9-NEXT:    blr
 ;
 ; PC64-LABEL: test_fptrunc_ppc_fp128_f32:
@@ -1087,11 +1086,11 @@ entry:
   %fptrunc = call float @llvm.experimental.constrained.fptrunc.ppcf128.f32(
                     ppc_fp128 %first,
                     metadata !"round.dynamic",
-                    metadata !"fpexcept.strict")
+                    metadata !"fpexcept.strict") #1
   ret float %fptrunc
 }
 
-define double @test_fptrunc_ppc_fp128_f64(ppc_fp128 %first) nounwind {
+define double @test_fptrunc_ppc_fp128_f64(ppc_fp128 %first) #0 {
 ; PC64LE-LABEL: test_fptrunc_ppc_fp128_f64:
 ; PC64LE:       # %bb.0: # %entry
 ; PC64LE-NEXT:    blr
@@ -1107,11 +1106,11 @@ entry:
   %fptrunc = call double @llvm.experimental.constrained.fptrunc.ppcf128.f64(
                     ppc_fp128 %first,
                     metadata !"round.dynamic",
-                    metadata !"fpexcept.strict")
+                    metadata !"fpexcept.strict") #1
   ret double %fptrunc
 }
 
-define ppc_fp128 @test_fpext_ppc_fp128_f32(float %first) nounwind {
+define ppc_fp128 @test_fpext_ppc_fp128_f32(float %first) #0 {
 ; PC64LE-LABEL: test_fpext_ppc_fp128_f32:
 ; PC64LE:       # %bb.0: # %entry
 ; PC64LE-NEXT:    xxlxor 2, 2, 2
@@ -1130,11 +1129,11 @@ define ppc_fp128 @test_fpext_ppc_fp128_f32(float %first) nounwind {
 entry:
   %fpext = call ppc_fp128 @llvm.experimental.constrained.fpext.f32.ppcf128(
                     float %first,
-                    metadata !"fpexcept.strict")
+                    metadata !"fpexcept.strict") #1
   ret ppc_fp128 %fpext
 }
 
-define ppc_fp128 @test_fpext_ppc_fp128_f64(double %first) nounwind {
+define ppc_fp128 @test_fpext_ppc_fp128_f64(double %first) #0 {
 ; PC64LE-LABEL: test_fpext_ppc_fp128_f64:
 ; PC64LE:       # %bb.0: # %entry
 ; PC64LE-NEXT:    xxlxor 2, 2, 2
@@ -1153,16 +1152,16 @@ define ppc_fp128 @test_fpext_ppc_fp128_f64(double %first) nounwind {
 entry:
   %fpext = call ppc_fp128 @llvm.experimental.constrained.fpext.f64.ppcf128(
                     double %first,
-                    metadata !"fpexcept.strict")
+                    metadata !"fpexcept.strict") #1
   ret ppc_fp128 %fpext
 }
 
-define i64 @test_fptosi_ppc_i64_ppc_fp128(ppc_fp128 %first) nounwind {
+define i64 @test_fptosi_ppc_i64_ppc_fp128(ppc_fp128 %first) #0 {
 ; PC64LE-LABEL: test_fptosi_ppc_i64_ppc_fp128:
 ; PC64LE:       # %bb.0: # %entry
 ; PC64LE-NEXT:    mflr 0
-; PC64LE-NEXT:    std 0, 16(1)
 ; PC64LE-NEXT:    stdu 1, -32(1)
+; PC64LE-NEXT:    std 0, 48(1)
 ; PC64LE-NEXT:    bl __fixtfdi
 ; PC64LE-NEXT:    nop
 ; PC64LE-NEXT:    addi 1, 1, 32
@@ -1173,8 +1172,8 @@ define i64 @test_fptosi_ppc_i64_ppc_fp128(ppc_fp128 %first) nounwind {
 ; PC64LE9-LABEL: test_fptosi_ppc_i64_ppc_fp128:
 ; PC64LE9:       # %bb.0: # %entry
 ; PC64LE9-NEXT:    mflr 0
-; PC64LE9-NEXT:    std 0, 16(1)
 ; PC64LE9-NEXT:    stdu 1, -32(1)
+; PC64LE9-NEXT:    std 0, 48(1)
 ; PC64LE9-NEXT:    bl __fixtfdi
 ; PC64LE9-NEXT:    nop
 ; PC64LE9-NEXT:    addi 1, 1, 32
@@ -1185,8 +1184,8 @@ define i64 @test_fptosi_ppc_i64_ppc_fp128(ppc_fp128 %first) nounwind {
 ; PC64-LABEL: test_fptosi_ppc_i64_ppc_fp128:
 ; PC64:       # %bb.0: # %entry
 ; PC64-NEXT:    mflr 0
-; PC64-NEXT:    std 0, 16(1)
 ; PC64-NEXT:    stdu 1, -112(1)
+; PC64-NEXT:    std 0, 128(1)
 ; PC64-NEXT:    bl __fixtfdi
 ; PC64-NEXT:    nop
 ; PC64-NEXT:    addi 1, 1, 112
@@ -1196,59 +1195,57 @@ define i64 @test_fptosi_ppc_i64_ppc_fp128(ppc_fp128 %first) nounwind {
 entry:
   %fpext = call i64 @llvm.experimental.constrained.fptosi.i64.ppcf128(
                     ppc_fp128 %first,
-                    metadata !"fpexcept.strict")
+                    metadata !"fpexcept.strict") #1
   ret i64 %fpext
 }
 
-define i32 @test_fptosi_ppc_i32_ppc_fp128(ppc_fp128 %first) nounwind {
+define i32 @test_fptosi_ppc_i32_ppc_fp128(ppc_fp128 %first) #0 {
 ; PC64LE-LABEL: test_fptosi_ppc_i32_ppc_fp128:
 ; PC64LE:       # %bb.0: # %entry
-; PC64LE-NEXT:    mflr 0
-; PC64LE-NEXT:    std 0, 16(1)
-; PC64LE-NEXT:    stdu 1, -32(1)
-; PC64LE-NEXT:    bl __gcc_qtou
-; PC64LE-NEXT:    nop
-; PC64LE-NEXT:    addi 1, 1, 32
-; PC64LE-NEXT:    ld 0, 16(1)
-; PC64LE-NEXT:    mtlr 0
+; PC64LE-NEXT:    mffs 0
+; PC64LE-NEXT:    mtfsb1 31
+; PC64LE-NEXT:    mtfsb0 30
+; PC64LE-NEXT:    fadd 1, 2, 1
+; PC64LE-NEXT:    mtfsf 1, 0
+; PC64LE-NEXT:    xscvdpsxws 0, 1
+; PC64LE-NEXT:    mffprwz 3, 0
 ; PC64LE-NEXT:    blr
 ;
 ; PC64LE9-LABEL: test_fptosi_ppc_i32_ppc_fp128:
 ; PC64LE9:       # %bb.0: # %entry
-; PC64LE9-NEXT:    mflr 0
-; PC64LE9-NEXT:    std 0, 16(1)
-; PC64LE9-NEXT:    stdu 1, -32(1)
-; PC64LE9-NEXT:    bl __gcc_qtou
-; PC64LE9-NEXT:    nop
-; PC64LE9-NEXT:    addi 1, 1, 32
-; PC64LE9-NEXT:    ld 0, 16(1)
-; PC64LE9-NEXT:    mtlr 0
+; PC64LE9-NEXT:    mffs 0
+; PC64LE9-NEXT:    mtfsb1 31
+; PC64LE9-NEXT:    mtfsb0 30
+; PC64LE9-NEXT:    fadd 1, 2, 1
+; PC64LE9-NEXT:    mtfsf 1, 0
+; PC64LE9-NEXT:    xscvdpsxws 0, 1
+; PC64LE9-NEXT:    mffprwz 3, 0
 ; PC64LE9-NEXT:    blr
 ;
 ; PC64-LABEL: test_fptosi_ppc_i32_ppc_fp128:
 ; PC64:       # %bb.0: # %entry
-; PC64-NEXT:    mflr 0
-; PC64-NEXT:    std 0, 16(1)
-; PC64-NEXT:    stdu 1, -112(1)
-; PC64-NEXT:    bl __gcc_qtou
-; PC64-NEXT:    nop
-; PC64-NEXT:    addi 1, 1, 112
-; PC64-NEXT:    ld 0, 16(1)
-; PC64-NEXT:    mtlr 0
+; PC64-NEXT:    mffs 0
+; PC64-NEXT:    mtfsb1 31
+; PC64-NEXT:    mtfsb0 30
+; PC64-NEXT:    fadd 1, 2, 1
+; PC64-NEXT:    mtfsf 1, 0
+; PC64-NEXT:    fctiwz 0, 1
+; PC64-NEXT:    stfd 0, -8(1)
+; PC64-NEXT:    lwz 3, -4(1)
 ; PC64-NEXT:    blr
 entry:
   %fpext = call i32 @llvm.experimental.constrained.fptosi.i32.ppcf128(
                     ppc_fp128  %first,
-                    metadata !"fpexcept.strict")
+                    metadata !"fpexcept.strict") #1
   ret i32 %fpext
 }
 
-define i64 @test_fptoui_ppc_i64_ppc_fp128(ppc_fp128 %first) nounwind {
+define i64 @test_fptoui_ppc_i64_ppc_fp128(ppc_fp128 %first) #0 {
 ; PC64LE-LABEL: test_fptoui_ppc_i64_ppc_fp128:
 ; PC64LE:       # %bb.0: # %entry
 ; PC64LE-NEXT:    mflr 0
-; PC64LE-NEXT:    std 0, 16(1)
 ; PC64LE-NEXT:    stdu 1, -32(1)
+; PC64LE-NEXT:    std 0, 48(1)
 ; PC64LE-NEXT:    bl __fixunstfdi
 ; PC64LE-NEXT:    nop
 ; PC64LE-NEXT:    addi 1, 1, 32
@@ -1259,8 +1256,8 @@ define i64 @test_fptoui_ppc_i64_ppc_fp128(ppc_fp128 %first) nounwind {
 ; PC64LE9-LABEL: test_fptoui_ppc_i64_ppc_fp128:
 ; PC64LE9:       # %bb.0: # %entry
 ; PC64LE9-NEXT:    mflr 0
-; PC64LE9-NEXT:    std 0, 16(1)
 ; PC64LE9-NEXT:    stdu 1, -32(1)
+; PC64LE9-NEXT:    std 0, 48(1)
 ; PC64LE9-NEXT:    bl __fixunstfdi
 ; PC64LE9-NEXT:    nop
 ; PC64LE9-NEXT:    addi 1, 1, 32
@@ -1271,8 +1268,8 @@ define i64 @test_fptoui_ppc_i64_ppc_fp128(ppc_fp128 %first) nounwind {
 ; PC64-LABEL: test_fptoui_ppc_i64_ppc_fp128:
 ; PC64:       # %bb.0: # %entry
 ; PC64-NEXT:    mflr 0
-; PC64-NEXT:    std 0, 16(1)
 ; PC64-NEXT:    stdu 1, -112(1)
+; PC64-NEXT:    std 0, 128(1)
 ; PC64-NEXT:    bl __fixunstfdi
 ; PC64-NEXT:    nop
 ; PC64-NEXT:    addi 1, 1, 112
@@ -1282,56 +1279,139 @@ define i64 @test_fptoui_ppc_i64_ppc_fp128(ppc_fp128 %first) nounwind {
 entry:
   %fpext = call i64 @llvm.experimental.constrained.fptoui.i64.ppcf128(
                     ppc_fp128   %first,
-                    metadata !"fpexcept.strict")
+                    metadata !"fpexcept.strict") #1
   ret i64 %fpext
 }
 
-define i32 @test_fptoui_ppc_i32_ppc_fp128(ppc_fp128 %first) nounwind {
+define i32 @test_fptoui_ppc_i32_ppc_fp128(ppc_fp128 %first) #0 {
 ; PC64LE-LABEL: test_fptoui_ppc_i32_ppc_fp128:
 ; PC64LE:       # %bb.0: # %entry
 ; PC64LE-NEXT:    mflr 0
-; PC64LE-NEXT:    std 0, 16(1)
-; PC64LE-NEXT:    stdu 1, -32(1)
-; PC64LE-NEXT:    bl __fixunstfsi
+; PC64LE-NEXT:    std 30, -16(1) # 8-byte Folded Spill
+; PC64LE-NEXT:    stdu 1, -48(1)
+; PC64LE-NEXT:    addis 3, 2, .LCPI31_0@toc@ha
+; PC64LE-NEXT:    xxlxor 3, 3, 3
+; PC64LE-NEXT:    std 0, 64(1)
+; PC64LE-NEXT:    lfs 0, .LCPI31_0@toc@l(3)
+; PC64LE-NEXT:    fcmpo 1, 2, 3
+; PC64LE-NEXT:    lis 3, -32768
+; PC64LE-NEXT:    fcmpo 0, 1, 0
+; PC64LE-NEXT:    crand 20, 2, 4
+; PC64LE-NEXT:    crandc 21, 0, 2
+; PC64LE-NEXT:    cror 20, 21, 20
+; PC64LE-NEXT:    isel 30, 0, 3, 20
+; PC64LE-NEXT:    bc 12, 20, .LBB31_2
+; PC64LE-NEXT:  # %bb.1: # %entry
+; PC64LE-NEXT:    fmr 3, 0
+; PC64LE-NEXT:  .LBB31_2: # %entry
+; PC64LE-NEXT:    xxlxor 4, 4, 4
+; PC64LE-NEXT:    bl __gcc_qsub
 ; PC64LE-NEXT:    nop
-; PC64LE-NEXT:    addi 1, 1, 32
+; PC64LE-NEXT:    mffs 0
+; PC64LE-NEXT:    mtfsb1 31
+; PC64LE-NEXT:    mtfsb0 30
+; PC64LE-NEXT:    fadd 1, 2, 1
+; PC64LE-NEXT:    mtfsf 1, 0
+; PC64LE-NEXT:    xscvdpsxws 0, 1
+; PC64LE-NEXT:    mffprwz 3, 0
+; PC64LE-NEXT:    xor 3, 3, 30
+; PC64LE-NEXT:    addi 1, 1, 48
 ; PC64LE-NEXT:    ld 0, 16(1)
+; PC64LE-NEXT:    ld 30, -16(1) # 8-byte Folded Reload
 ; PC64LE-NEXT:    mtlr 0
 ; PC64LE-NEXT:    blr
 ;
 ; PC64LE9-LABEL: test_fptoui_ppc_i32_ppc_fp128:
 ; PC64LE9:       # %bb.0: # %entry
 ; PC64LE9-NEXT:    mflr 0
-; PC64LE9-NEXT:    std 0, 16(1)
-; PC64LE9-NEXT:    stdu 1, -32(1)
-; PC64LE9-NEXT:    bl __fixunstfsi
+; PC64LE9-NEXT:    std 30, -16(1) # 8-byte Folded Spill
+; PC64LE9-NEXT:    stdu 1, -48(1)
+; PC64LE9-NEXT:    addis 3, 2, .LCPI31_0@toc@ha
+; PC64LE9-NEXT:    xxlxor 3, 3, 3
+; PC64LE9-NEXT:    std 0, 64(1)
+; PC64LE9-NEXT:    lfs 0, .LCPI31_0@toc@l(3)
+; PC64LE9-NEXT:    fcmpo 1, 2, 3
+; PC64LE9-NEXT:    lis 3, -32768
+; PC64LE9-NEXT:    fcmpo 0, 1, 0
+; PC64LE9-NEXT:    crand 20, 2, 4
+; PC64LE9-NEXT:    crandc 21, 0, 2
+; PC64LE9-NEXT:    cror 20, 21, 20
+; PC64LE9-NEXT:    isel 30, 0, 3, 20
+; PC64LE9-NEXT:    bc 12, 20, .LBB31_2
+; PC64LE9-NEXT:  # %bb.1: # %entry
+; PC64LE9-NEXT:    fmr 3, 0
+; PC64LE9-NEXT:  .LBB31_2: # %entry
+; PC64LE9-NEXT:    xxlxor 4, 4, 4
+; PC64LE9-NEXT:    bl __gcc_qsub
 ; PC64LE9-NEXT:    nop
-; PC64LE9-NEXT:    addi 1, 1, 32
+; PC64LE9-NEXT:    mffs 0
+; PC64LE9-NEXT:    mtfsb1 31
+; PC64LE9-NEXT:    mtfsb0 30
+; PC64LE9-NEXT:    fadd 1, 2, 1
+; PC64LE9-NEXT:    mtfsf 1, 0
+; PC64LE9-NEXT:    xscvdpsxws 0, 1
+; PC64LE9-NEXT:    mffprwz 3, 0
+; PC64LE9-NEXT:    xor 3, 3, 30
+; PC64LE9-NEXT:    addi 1, 1, 48
 ; PC64LE9-NEXT:    ld 0, 16(1)
+; PC64LE9-NEXT:    ld 30, -16(1) # 8-byte Folded Reload
 ; PC64LE9-NEXT:    mtlr 0
 ; PC64LE9-NEXT:    blr
 ;
 ; PC64-LABEL: test_fptoui_ppc_i32_ppc_fp128:
 ; PC64:       # %bb.0: # %entry
+; PC64-NEXT:    mfcr 12
 ; PC64-NEXT:    mflr 0
-; PC64-NEXT:    std 0, 16(1)
-; PC64-NEXT:    stdu 1, -112(1)
-; PC64-NEXT:    bl __fixunstfsi
+; PC64-NEXT:    stw 12, 8(1)
+; PC64-NEXT:    stdu 1, -128(1)
+; PC64-NEXT:    addis 3, 2, .LCPI31_0@toc@ha
+; PC64-NEXT:    std 0, 144(1)
+; PC64-NEXT:    lfs 0, .LCPI31_0@toc@l(3)
+; PC64-NEXT:    addis 3, 2, .LCPI31_1@toc@ha
+; PC64-NEXT:    lfs 4, .LCPI31_1@toc@l(3)
+; PC64-NEXT:    fcmpo 0, 1, 0
+; PC64-NEXT:    crandc 21, 0, 2
+; PC64-NEXT:    fcmpo 1, 2, 4
+; PC64-NEXT:    crand 20, 2, 4
+; PC64-NEXT:    cror 8, 21, 20
+; PC64-NEXT:    fmr 3, 4
+; PC64-NEXT:    bc 12, 8, .LBB31_2
+; PC64-NEXT:  # %bb.1: # %entry
+; PC64-NEXT:    fmr 3, 0
+; PC64-NEXT:  .LBB31_2: # %entry
+; PC64-NEXT:    bl __gcc_qsub
 ; PC64-NEXT:    nop
-; PC64-NEXT:    addi 1, 1, 112
+; PC64-NEXT:    mffs 0
+; PC64-NEXT:    mtfsb1 31
+; PC64-NEXT:    lis 4, -32768
+; PC64-NEXT:    bc 12, 8, .LBB31_3
+; PC64-NEXT:    b .LBB31_4
+; PC64-NEXT:  .LBB31_3: # %entry
+; PC64-NEXT:    li 4, 0
+; PC64-NEXT:  .LBB31_4: # %entry
+; PC64-NEXT:    mtfsb0 30
+; PC64-NEXT:    fadd 1, 2, 1
+; PC64-NEXT:    mtfsf 1, 0
+; PC64-NEXT:    fctiwz 0, 1
+; PC64-NEXT:    stfd 0, 120(1)
+; PC64-NEXT:    lwz 3, 124(1)
+; PC64-NEXT:    xor 3, 3, 4
+; PC64-NEXT:    addi 1, 1, 128
 ; PC64-NEXT:    ld 0, 16(1)
+; PC64-NEXT:    lwz 12, 8(1)
 ; PC64-NEXT:    mtlr 0
+; PC64-NEXT:    mtcrf 32, 12 # cr2
 ; PC64-NEXT:    blr
 entry:
   %fpext = call i32 @llvm.experimental.constrained.fptoui.i32.ppcf128(
                     ppc_fp128   %first,
-                    metadata !"fpexcept.strict")
+                    metadata !"fpexcept.strict") #1
   ret i32 %fpext
 }
 
 ; Test that resultant libcalls retain order even when their non-strict FLOP form could be
 ; trivially optimized into differing sequences.
-define void @test_constrained_libcall_multichain(float* %firstptr, ppc_fp128* %result) nounwind {
+define void @test_constrained_libcall_multichain(ptr %firstptr, ptr %result) #0 {
 ; PC64LE-LABEL: test_constrained_libcall_multichain:
 ; PC64LE:       # %bb.0:
 ; PC64LE-NEXT:    mflr 0
@@ -1340,26 +1420,26 @@ define void @test_constrained_libcall_multichain(float* %firstptr, ppc_fp128* %r
 ; PC64LE-NEXT:    stfd 29, -24(1) # 8-byte Folded Spill
 ; PC64LE-NEXT:    stfd 30, -16(1) # 8-byte Folded Spill
 ; PC64LE-NEXT:    stfd 31, -8(1) # 8-byte Folded Spill
-; PC64LE-NEXT:    std 0, 16(1)
 ; PC64LE-NEXT:    stdu 1, -80(1)
+; PC64LE-NEXT:    std 0, 96(1)
 ; PC64LE-NEXT:    mr 29, 3
 ; PC64LE-NEXT:    xxlxor 2, 2, 2
+; PC64LE-NEXT:    xxlxor 4, 4, 4
+; PC64LE-NEXT:    lfs 31, 0(3)
 ; PC64LE-NEXT:    li 3, 0
 ; PC64LE-NEXT:    mr 30, 4
-; PC64LE-NEXT:    lfsx 31, 0, 29
-; PC64LE-NEXT:    xxlxor 4, 4, 4
 ; PC64LE-NEXT:    std 3, 8(4)
 ; PC64LE-NEXT:    fmr 1, 31
 ; PC64LE-NEXT:    fmr 3, 31
-; PC64LE-NEXT:    stfdx 31, 0, 4
+; PC64LE-NEXT:    stfd 31, 0(4)
 ; PC64LE-NEXT:    bl __gcc_qadd
 ; PC64LE-NEXT:    nop
 ; PC64LE-NEXT:    fmr 3, 1
 ; PC64LE-NEXT:    fmr 4, 2
-; PC64LE-NEXT:    fmr 30, 1
-; PC64LE-NEXT:    fmr 29, 2
 ; PC64LE-NEXT:    stfd 2, 24(30)
 ; PC64LE-NEXT:    stfd 1, 16(30)
+; PC64LE-NEXT:    fmr 30, 1
+; PC64LE-NEXT:    fmr 29, 2
 ; PC64LE-NEXT:    bl __gcc_qmul
 ; PC64LE-NEXT:    nop
 ; PC64LE-NEXT:    fmr 1, 31
@@ -1369,8 +1449,8 @@ define void @test_constrained_libcall_multichain(float* %firstptr, ppc_fp128* %r
 ; PC64LE-NEXT:    stfd 30, 32(30)
 ; PC64LE-NEXT:    bl __powitf2
 ; PC64LE-NEXT:    nop
-; PC64LE-NEXT:    frsp 0, 1
-; PC64LE-NEXT:    stfsx 0, 0, 29
+; PC64LE-NEXT:    xsrsp 0, 1
+; PC64LE-NEXT:    stfs 0, 0(29)
 ; PC64LE-NEXT:    stfd 1, -16(30)
 ; PC64LE-NEXT:    stfd 2, -8(30)
 ; PC64LE-NEXT:    addi 1, 1, 80
@@ -1391,24 +1471,24 @@ define void @test_constrained_libcall_multichain(float* %firstptr, ppc_fp128* %r
 ; PC64LE9-NEXT:    stfd 29, -24(1) # 8-byte Folded Spill
 ; PC64LE9-NEXT:    stfd 30, -16(1) # 8-byte Folded Spill
 ; PC64LE9-NEXT:    stfd 31, -8(1) # 8-byte Folded Spill
-; PC64LE9-NEXT:    std 0, 16(1)
 ; PC64LE9-NEXT:    stdu 1, -80(1)
-; PC64LE9-NEXT:    lfs 31, 0(3)
+; PC64LE9-NEXT:    std 0, 96(1)
 ; PC64LE9-NEXT:    mr 29, 3
-; PC64LE9-NEXT:    li 3, 0
 ; PC64LE9-NEXT:    xxlxor 2, 2, 2
+; PC64LE9-NEXT:    mr 30, 4
+; PC64LE9-NEXT:    lfs 31, 0(3)
+; PC64LE9-NEXT:    li 3, 0
 ; PC64LE9-NEXT:    xxlxor 4, 4, 4
 ; PC64LE9-NEXT:    std 3, 8(4)
 ; PC64LE9-NEXT:    fmr 1, 31
 ; PC64LE9-NEXT:    fmr 3, 31
-; PC64LE9-NEXT:    mr 30, 4
 ; PC64LE9-NEXT:    stfd 31, 0(4)
 ; PC64LE9-NEXT:    bl __gcc_qadd
 ; PC64LE9-NEXT:    nop
 ; PC64LE9-NEXT:    fmr 3, 1
 ; PC64LE9-NEXT:    fmr 4, 2
-; PC64LE9-NEXT:    fmr 30, 2
-; PC64LE9-NEXT:    fmr 29, 1
+; PC64LE9-NEXT:    fmr 30, 1
+; PC64LE9-NEXT:    fmr 29, 2
 ; PC64LE9-NEXT:    stfd 2, 24(30)
 ; PC64LE9-NEXT:    stfd 1, 16(30)
 ; PC64LE9-NEXT:    bl __gcc_qmul
@@ -1416,11 +1496,11 @@ define void @test_constrained_libcall_multichain(float* %firstptr, ppc_fp128* %r
 ; PC64LE9-NEXT:    fmr 1, 31
 ; PC64LE9-NEXT:    xxlxor 2, 2, 2
 ; PC64LE9-NEXT:    li 5, 2
-; PC64LE9-NEXT:    stfd 30, 40(30)
-; PC64LE9-NEXT:    stfd 29, 32(30)
+; PC64LE9-NEXT:    stfd 29, 40(30)
+; PC64LE9-NEXT:    stfd 30, 32(30)
 ; PC64LE9-NEXT:    bl __powitf2
 ; PC64LE9-NEXT:    nop
-; PC64LE9-NEXT:    frsp 0, 1
+; PC64LE9-NEXT:    xsrsp 0, 1
 ; PC64LE9-NEXT:    stfs 0, 0(29)
 ; PC64LE9-NEXT:    stfd 1, -16(30)
 ; PC64LE9-NEXT:    stfd 2, -8(30)
@@ -1437,25 +1517,25 @@ define void @test_constrained_libcall_multichain(float* %firstptr, ppc_fp128* %r
 ; PC64-LABEL: test_constrained_libcall_multichain:
 ; PC64:       # %bb.0:
 ; PC64-NEXT:    mflr 0
-; PC64-NEXT:    std 0, 16(1)
 ; PC64-NEXT:    stdu 1, -176(1)
+; PC64-NEXT:    std 0, 192(1)
 ; PC64-NEXT:    std 29, 120(1) # 8-byte Folded Spill
 ; PC64-NEXT:    mr 29, 3
 ; PC64-NEXT:    li 3, 0
 ; PC64-NEXT:    stfd 31, 168(1) # 8-byte Folded Spill
-; PC64-NEXT:    stfd 30, 160(1) # 8-byte Folded Spill
 ; PC64-NEXT:    std 30, 128(1) # 8-byte Folded Spill
-; PC64-NEXT:    stfd 28, 144(1) # 8-byte Folded Spill
-; PC64-NEXT:    stfd 29, 152(1) # 8-byte Folded Spill
 ; PC64-NEXT:    mr 30, 4
 ; PC64-NEXT:    lfs 31, 0(29)
 ; PC64-NEXT:    std 3, 8(4)
 ; PC64-NEXT:    addis 3, 2, .LCPI32_0@toc@ha
+; PC64-NEXT:    stfd 30, 160(1) # 8-byte Folded Spill
 ; PC64-NEXT:    lfs 30, .LCPI32_0@toc@l(3)
 ; PC64-NEXT:    fmr 1, 31
 ; PC64-NEXT:    fmr 3, 31
+; PC64-NEXT:    stfd 28, 144(1) # 8-byte Folded Spill
 ; PC64-NEXT:    fmr 2, 30
 ; PC64-NEXT:    fmr 4, 30
+; PC64-NEXT:    stfd 29, 152(1) # 8-byte Folded Spill
 ; PC64-NEXT:    stfd 31, 0(4)
 ; PC64-NEXT:    bl __gcc_qadd
 ; PC64-NEXT:    nop
@@ -1476,23 +1556,23 @@ define void @test_constrained_libcall_multichain(float* %firstptr, ppc_fp128* %r
 ; PC64-NEXT:    nop
 ; PC64-NEXT:    frsp 0, 1
 ; PC64-NEXT:    stfs 0, 0(29)
-; PC64-NEXT:    lfd 31, 168(1) # 8-byte Folded Reload
-; PC64-NEXT:    lfd 30, 160(1) # 8-byte Folded Reload
-; PC64-NEXT:    lfd 29, 152(1) # 8-byte Folded Reload
-; PC64-NEXT:    lfd 28, 144(1) # 8-byte Folded Reload
 ; PC64-NEXT:    ld 29, 120(1) # 8-byte Folded Reload
 ; PC64-NEXT:    stfd 1, -16(30)
 ; PC64-NEXT:    stfd 2, -8(30)
 ; PC64-NEXT:    ld 30, 128(1) # 8-byte Folded Reload
+; PC64-NEXT:    lfd 31, 168(1) # 8-byte Folded Reload
+; PC64-NEXT:    lfd 30, 160(1) # 8-byte Folded Reload
+; PC64-NEXT:    lfd 29, 152(1) # 8-byte Folded Reload
+; PC64-NEXT:    lfd 28, 144(1) # 8-byte Folded Reload
 ; PC64-NEXT:    addi 1, 1, 176
 ; PC64-NEXT:    ld 0, 16(1)
 ; PC64-NEXT:    mtlr 0
 ; PC64-NEXT:    blr
-  %load = load float, float* %firstptr
+  %load = load float, ptr %firstptr
   %first = call ppc_fp128 @llvm.experimental.constrained.fpext.f32.ppcf128(
                     float %load,
-                    metadata !"fpexcept.strict")
-  store ppc_fp128 %first, ppc_fp128* %result
+                    metadata !"fpexcept.strict") #1
+  store ppc_fp128 %first, ptr %result
 
   ; For unconstrained FLOPs, these next two FP instructions would necessarily
   ; be executed in series with one another.
@@ -1500,16 +1580,16 @@ define void @test_constrained_libcall_multichain(float* %firstptr, ppc_fp128* %r
                     ppc_fp128 %first,
                     ppc_fp128 %first,
                     metadata !"round.dynamic",
-                    metadata !"fpexcept.strict")
-  %stridx1 = getelementptr ppc_fp128, ppc_fp128* %result, i32 1
-  store ppc_fp128 %fadd, ppc_fp128* %stridx1
+                    metadata !"fpexcept.strict") #1
+  %stridx1 = getelementptr ppc_fp128, ptr %result, i32 1
+  store ppc_fp128 %fadd, ptr %stridx1
   %fmul = call ppc_fp128 @llvm.experimental.constrained.fmul.ppcf128(
                     ppc_fp128 %fadd,
                     ppc_fp128 %fadd,
                     metadata !"round.dynamic",
-                    metadata !"fpexcept.strict")
-  %stridx2 = getelementptr ppc_fp128, ppc_fp128* %stridx1, i32 1
-  store ppc_fp128 %fadd, ppc_fp128* %stridx2
+                    metadata !"fpexcept.strict") #1
+  %stridx2 = getelementptr ppc_fp128, ptr %stridx1, i32 1
+  store ppc_fp128 %fadd, ptr %stridx2
 
   ; For unconstrained FLOPs, these next two FP instructions could be reordered
   ; or even executed in parallel with respect to the previous two instructions.
@@ -1518,16 +1598,477 @@ define void @test_constrained_libcall_multichain(float* %firstptr, ppc_fp128* %r
                     ppc_fp128 %first,
                     i32 2,
                     metadata !"round.dynamic",
-                    metadata !"fpexcept.strict")
+                    metadata !"fpexcept.strict") #1
   %tinypow = call float @llvm.experimental.constrained.fptrunc.ppcf128.f32(
                     ppc_fp128 %powi,
                     metadata !"round.dynamic",
-                    metadata !"fpexcept.strict")
-  store float %tinypow, float* %firstptr
-  %stridxn1 = getelementptr ppc_fp128, ppc_fp128* %result, i32 -1
-  store ppc_fp128 %powi, ppc_fp128* %stridxn1
+                    metadata !"fpexcept.strict") #1
+  store float %tinypow, ptr %firstptr
+  %stridxn1 = getelementptr ppc_fp128, ptr %result, i32 -1
+  store ppc_fp128 %powi, ptr %stridxn1
   ret void
 }
+
+define ppc_fp128 @i32_to_ppcq(i32 signext %m) #0 {
+; PC64LE-LABEL: i32_to_ppcq:
+; PC64LE:       # %bb.0: # %entry
+; PC64LE-NEXT:    mtfprwa 0, 3
+; PC64LE-NEXT:    xxlxor 2, 2, 2
+; PC64LE-NEXT:    xscvsxddp 1, 0
+; PC64LE-NEXT:    blr
+;
+; PC64LE9-LABEL: i32_to_ppcq:
+; PC64LE9:       # %bb.0: # %entry
+; PC64LE9-NEXT:    mtfprwa 0, 3
+; PC64LE9-NEXT:    xxlxor 2, 2, 2
+; PC64LE9-NEXT:    xscvsxddp 1, 0
+; PC64LE9-NEXT:    blr
+;
+; PC64-LABEL: i32_to_ppcq:
+; PC64:       # %bb.0: # %entry
+; PC64-NEXT:    std 3, -8(1)
+; PC64-NEXT:    addis 3, 2, .LCPI33_0@toc@ha
+; PC64-NEXT:    lfd 0, -8(1)
+; PC64-NEXT:    lfs 2, .LCPI33_0@toc@l(3)
+; PC64-NEXT:    fcfid 1, 0
+; PC64-NEXT:    blr
+entry:
+  %conv = tail call ppc_fp128 @llvm.experimental.constrained.sitofp.ppcf128.i32(i32 %m, metadata !"round.dynamic", metadata !"fpexcept.strict") #1
+  ret ppc_fp128 %conv
+}
+
+define ppc_fp128 @i64_to_ppcq(i64 %m) #0 {
+; PC64LE-LABEL: i64_to_ppcq:
+; PC64LE:       # %bb.0: # %entry
+; PC64LE-NEXT:    mflr 0
+; PC64LE-NEXT:    stdu 1, -32(1)
+; PC64LE-NEXT:    std 0, 48(1)
+; PC64LE-NEXT:    bl __floatditf
+; PC64LE-NEXT:    nop
+; PC64LE-NEXT:    addi 1, 1, 32
+; PC64LE-NEXT:    ld 0, 16(1)
+; PC64LE-NEXT:    mtlr 0
+; PC64LE-NEXT:    blr
+;
+; PC64LE9-LABEL: i64_to_ppcq:
+; PC64LE9:       # %bb.0: # %entry
+; PC64LE9-NEXT:    mflr 0
+; PC64LE9-NEXT:    stdu 1, -32(1)
+; PC64LE9-NEXT:    std 0, 48(1)
+; PC64LE9-NEXT:    bl __floatditf
+; PC64LE9-NEXT:    nop
+; PC64LE9-NEXT:    addi 1, 1, 32
+; PC64LE9-NEXT:    ld 0, 16(1)
+; PC64LE9-NEXT:    mtlr 0
+; PC64LE9-NEXT:    blr
+;
+; PC64-LABEL: i64_to_ppcq:
+; PC64:       # %bb.0: # %entry
+; PC64-NEXT:    mflr 0
+; PC64-NEXT:    stdu 1, -112(1)
+; PC64-NEXT:    std 0, 128(1)
+; PC64-NEXT:    bl __floatditf
+; PC64-NEXT:    nop
+; PC64-NEXT:    addi 1, 1, 112
+; PC64-NEXT:    ld 0, 16(1)
+; PC64-NEXT:    mtlr 0
+; PC64-NEXT:    blr
+entry:
+  %conv = tail call ppc_fp128 @llvm.experimental.constrained.sitofp.ppcf128.i64(i64 %m, metadata !"round.dynamic", metadata !"fpexcept.strict") #1
+  ret ppc_fp128 %conv
+}
+
+define ppc_fp128 @u32_to_ppcq(i32 zeroext %m) #0 {
+; PC64LE-LABEL: u32_to_ppcq:
+; PC64LE:       # %bb.0: # %entry
+; PC64LE-NEXT:    mtfprwz 0, 3
+; PC64LE-NEXT:    xxlxor 2, 2, 2
+; PC64LE-NEXT:    xscvuxddp 1, 0
+; PC64LE-NEXT:    blr
+;
+; PC64LE9-LABEL: u32_to_ppcq:
+; PC64LE9:       # %bb.0: # %entry
+; PC64LE9-NEXT:    mtfprwz 0, 3
+; PC64LE9-NEXT:    xxlxor 2, 2, 2
+; PC64LE9-NEXT:    xscvuxddp 1, 0
+; PC64LE9-NEXT:    blr
+;
+; PC64-LABEL: u32_to_ppcq:
+; PC64:       # %bb.0: # %entry
+; PC64-NEXT:    lis 4, 17200
+; PC64-NEXT:    stw 3, -4(1)
+; PC64-NEXT:    addis 3, 2, .LCPI35_0@toc@ha
+; PC64-NEXT:    stw 4, -8(1)
+; PC64-NEXT:    lfs 0, .LCPI35_0@toc@l(3)
+; PC64-NEXT:    addis 3, 2, .LCPI35_1@toc@ha
+; PC64-NEXT:    lfd 1, -8(1)
+; PC64-NEXT:    lfs 2, .LCPI35_1@toc@l(3)
+; PC64-NEXT:    fsub 1, 1, 0
+; PC64-NEXT:    blr
+entry:
+  %conv = tail call ppc_fp128 @llvm.experimental.constrained.uitofp.ppcf128.i32(i32 %m, metadata !"round.dynamic", metadata !"fpexcept.strict") #1
+  ret ppc_fp128 %conv
+}
+
+define ppc_fp128 @u64_to_ppcq(i64 %m) #0 {
+; PC64LE-LABEL: u64_to_ppcq:
+; PC64LE:       # %bb.0: # %entry
+; PC64LE-NEXT:    mflr 0
+; PC64LE-NEXT:    std 30, -32(1) # 8-byte Folded Spill
+; PC64LE-NEXT:    stfd 30, -16(1) # 8-byte Folded Spill
+; PC64LE-NEXT:    stfd 31, -8(1) # 8-byte Folded Spill
+; PC64LE-NEXT:    stdu 1, -64(1)
+; PC64LE-NEXT:    std 0, 80(1)
+; PC64LE-NEXT:    mr 30, 3
+; PC64LE-NEXT:    bl __floatditf
+; PC64LE-NEXT:    nop
+; PC64LE-NEXT:    addis 3, 2, .LCPI36_0@toc@ha
+; PC64LE-NEXT:    xxlxor 4, 4, 4
+; PC64LE-NEXT:    fmr 30, 1
+; PC64LE-NEXT:    lfs 3, .LCPI36_0@toc@l(3)
+; PC64LE-NEXT:    fmr 31, 2
+; PC64LE-NEXT:    bl __gcc_qadd
+; PC64LE-NEXT:    nop
+; PC64LE-NEXT:    cmpdi 30, 0
+; PC64LE-NEXT:    blt 0, .LBB36_2
+; PC64LE-NEXT:  # %bb.1: # %entry
+; PC64LE-NEXT:    fmr 1, 30
+; PC64LE-NEXT:  .LBB36_2: # %entry
+; PC64LE-NEXT:    blt 0, .LBB36_4
+; PC64LE-NEXT:  # %bb.3: # %entry
+; PC64LE-NEXT:    fmr 2, 31
+; PC64LE-NEXT:  .LBB36_4: # %entry
+; PC64LE-NEXT:    addi 1, 1, 64
+; PC64LE-NEXT:    ld 0, 16(1)
+; PC64LE-NEXT:    lfd 31, -8(1) # 8-byte Folded Reload
+; PC64LE-NEXT:    lfd 30, -16(1) # 8-byte Folded Reload
+; PC64LE-NEXT:    ld 30, -32(1) # 8-byte Folded Reload
+; PC64LE-NEXT:    mtlr 0
+; PC64LE-NEXT:    blr
+;
+; PC64LE9-LABEL: u64_to_ppcq:
+; PC64LE9:       # %bb.0: # %entry
+; PC64LE9-NEXT:    mflr 0
+; PC64LE9-NEXT:    std 30, -32(1) # 8-byte Folded Spill
+; PC64LE9-NEXT:    stfd 30, -16(1) # 8-byte Folded Spill
+; PC64LE9-NEXT:    stfd 31, -8(1) # 8-byte Folded Spill
+; PC64LE9-NEXT:    stdu 1, -64(1)
+; PC64LE9-NEXT:    std 0, 80(1)
+; PC64LE9-NEXT:    mr 30, 3
+; PC64LE9-NEXT:    bl __floatditf
+; PC64LE9-NEXT:    nop
+; PC64LE9-NEXT:    addis 3, 2, .LCPI36_0@toc@ha
+; PC64LE9-NEXT:    xxlxor 4, 4, 4
+; PC64LE9-NEXT:    fmr 30, 1
+; PC64LE9-NEXT:    fmr 31, 2
+; PC64LE9-NEXT:    lfs 3, .LCPI36_0@toc@l(3)
+; PC64LE9-NEXT:    bl __gcc_qadd
+; PC64LE9-NEXT:    nop
+; PC64LE9-NEXT:    cmpdi 30, 0
+; PC64LE9-NEXT:    blt 0, .LBB36_2
+; PC64LE9-NEXT:  # %bb.1: # %entry
+; PC64LE9-NEXT:    fmr 1, 30
+; PC64LE9-NEXT:  .LBB36_2: # %entry
+; PC64LE9-NEXT:    blt 0, .LBB36_4
+; PC64LE9-NEXT:  # %bb.3: # %entry
+; PC64LE9-NEXT:    fmr 2, 31
+; PC64LE9-NEXT:  .LBB36_4: # %entry
+; PC64LE9-NEXT:    addi 1, 1, 64
+; PC64LE9-NEXT:    ld 0, 16(1)
+; PC64LE9-NEXT:    lfd 31, -8(1) # 8-byte Folded Reload
+; PC64LE9-NEXT:    lfd 30, -16(1) # 8-byte Folded Reload
+; PC64LE9-NEXT:    ld 30, -32(1) # 8-byte Folded Reload
+; PC64LE9-NEXT:    mtlr 0
+; PC64LE9-NEXT:    blr
+;
+; PC64-LABEL: u64_to_ppcq:
+; PC64:       # %bb.0: # %entry
+; PC64-NEXT:    mflr 0
+; PC64-NEXT:    stdu 1, -144(1)
+; PC64-NEXT:    std 0, 160(1)
+; PC64-NEXT:    std 30, 112(1) # 8-byte Folded Spill
+; PC64-NEXT:    stfd 30, 128(1) # 8-byte Folded Spill
+; PC64-NEXT:    mr 30, 3
+; PC64-NEXT:    stfd 31, 136(1) # 8-byte Folded Spill
+; PC64-NEXT:    bl __floatditf
+; PC64-NEXT:    nop
+; PC64-NEXT:    addis 3, 2, .LCPI36_0@toc@ha
+; PC64-NEXT:    fmr 31, 2
+; PC64-NEXT:    lfs 3, .LCPI36_0@toc@l(3)
+; PC64-NEXT:    addis 3, 2, .LCPI36_1@toc@ha
+; PC64-NEXT:    fmr 30, 1
+; PC64-NEXT:    lfs 4, .LCPI36_1@toc@l(3)
+; PC64-NEXT:    bl __gcc_qadd
+; PC64-NEXT:    nop
+; PC64-NEXT:    cmpdi 30, 0
+; PC64-NEXT:    blt 0, .LBB36_2
+; PC64-NEXT:  # %bb.1: # %entry
+; PC64-NEXT:    fmr 1, 30
+; PC64-NEXT:  .LBB36_2: # %entry
+; PC64-NEXT:    blt 0, .LBB36_4
+; PC64-NEXT:  # %bb.3: # %entry
+; PC64-NEXT:    fmr 2, 31
+; PC64-NEXT:  .LBB36_4: # %entry
+; PC64-NEXT:    lfd 31, 136(1) # 8-byte Folded Reload
+; PC64-NEXT:    ld 30, 112(1) # 8-byte Folded Reload
+; PC64-NEXT:    lfd 30, 128(1) # 8-byte Folded Reload
+; PC64-NEXT:    addi 1, 1, 144
+; PC64-NEXT:    ld 0, 16(1)
+; PC64-NEXT:    mtlr 0
+; PC64-NEXT:    blr
+entry:
+  %conv = tail call ppc_fp128 @llvm.experimental.constrained.uitofp.ppcf128.i64(i64 %m, metadata !"round.dynamic", metadata !"fpexcept.strict") #1
+  ret ppc_fp128 %conv
+}
+
+define ppc_fp128 @i128_to_ppcq(i128 %m) #0 {
+; PC64LE-LABEL: i128_to_ppcq:
+; PC64LE:       # %bb.0: # %entry
+; PC64LE-NEXT:    mflr 0
+; PC64LE-NEXT:    stdu 1, -32(1)
+; PC64LE-NEXT:    std 0, 48(1)
+; PC64LE-NEXT:    bl __floattitf
+; PC64LE-NEXT:    nop
+; PC64LE-NEXT:    addi 1, 1, 32
+; PC64LE-NEXT:    ld 0, 16(1)
+; PC64LE-NEXT:    mtlr 0
+; PC64LE-NEXT:    blr
+;
+; PC64LE9-LABEL: i128_to_ppcq:
+; PC64LE9:       # %bb.0: # %entry
+; PC64LE9-NEXT:    mflr 0
+; PC64LE9-NEXT:    stdu 1, -32(1)
+; PC64LE9-NEXT:    std 0, 48(1)
+; PC64LE9-NEXT:    bl __floattitf
+; PC64LE9-NEXT:    nop
+; PC64LE9-NEXT:    addi 1, 1, 32
+; PC64LE9-NEXT:    ld 0, 16(1)
+; PC64LE9-NEXT:    mtlr 0
+; PC64LE9-NEXT:    blr
+;
+; PC64-LABEL: i128_to_ppcq:
+; PC64:       # %bb.0: # %entry
+; PC64-NEXT:    mflr 0
+; PC64-NEXT:    stdu 1, -112(1)
+; PC64-NEXT:    std 0, 128(1)
+; PC64-NEXT:    bl __floattitf
+; PC64-NEXT:    nop
+; PC64-NEXT:    addi 1, 1, 112
+; PC64-NEXT:    ld 0, 16(1)
+; PC64-NEXT:    mtlr 0
+; PC64-NEXT:    blr
+entry:
+  %conv = tail call ppc_fp128 @llvm.experimental.constrained.sitofp.ppcf128.i128(i128 %m, metadata !"round.dynamic", metadata !"fpexcept.strict") #1
+  ret ppc_fp128 %conv
+}
+
+define ppc_fp128 @u128_to_ppcq(i128 %m) #0 {
+; PC64LE-LABEL: u128_to_ppcq:
+; PC64LE:       # %bb.0: # %entry
+; PC64LE-NEXT:    mflr 0
+; PC64LE-NEXT:    std 30, -32(1) # 8-byte Folded Spill
+; PC64LE-NEXT:    stfd 30, -16(1) # 8-byte Folded Spill
+; PC64LE-NEXT:    stfd 31, -8(1) # 8-byte Folded Spill
+; PC64LE-NEXT:    stdu 1, -64(1)
+; PC64LE-NEXT:    std 0, 80(1)
+; PC64LE-NEXT:    mr 30, 4
+; PC64LE-NEXT:    bl __floattitf
+; PC64LE-NEXT:    nop
+; PC64LE-NEXT:    addis 3, 2, .LCPI38_0@toc@ha
+; PC64LE-NEXT:    xxlxor 4, 4, 4
+; PC64LE-NEXT:    fmr 30, 1
+; PC64LE-NEXT:    lfd 3, .LCPI38_0@toc@l(3)
+; PC64LE-NEXT:    fmr 31, 2
+; PC64LE-NEXT:    bl __gcc_qadd
+; PC64LE-NEXT:    nop
+; PC64LE-NEXT:    cmpdi 30, 0
+; PC64LE-NEXT:    blt 0, .LBB38_2
+; PC64LE-NEXT:  # %bb.1: # %entry
+; PC64LE-NEXT:    fmr 1, 30
+; PC64LE-NEXT:  .LBB38_2: # %entry
+; PC64LE-NEXT:    blt 0, .LBB38_4
+; PC64LE-NEXT:  # %bb.3: # %entry
+; PC64LE-NEXT:    fmr 2, 31
+; PC64LE-NEXT:  .LBB38_4: # %entry
+; PC64LE-NEXT:    addi 1, 1, 64
+; PC64LE-NEXT:    ld 0, 16(1)
+; PC64LE-NEXT:    lfd 31, -8(1) # 8-byte Folded Reload
+; PC64LE-NEXT:    lfd 30, -16(1) # 8-byte Folded Reload
+; PC64LE-NEXT:    ld 30, -32(1) # 8-byte Folded Reload
+; PC64LE-NEXT:    mtlr 0
+; PC64LE-NEXT:    blr
+;
+; PC64LE9-LABEL: u128_to_ppcq:
+; PC64LE9:       # %bb.0: # %entry
+; PC64LE9-NEXT:    mflr 0
+; PC64LE9-NEXT:    std 30, -32(1) # 8-byte Folded Spill
+; PC64LE9-NEXT:    stfd 30, -16(1) # 8-byte Folded Spill
+; PC64LE9-NEXT:    stfd 31, -8(1) # 8-byte Folded Spill
+; PC64LE9-NEXT:    stdu 1, -64(1)
+; PC64LE9-NEXT:    std 0, 80(1)
+; PC64LE9-NEXT:    mr 30, 4
+; PC64LE9-NEXT:    bl __floattitf
+; PC64LE9-NEXT:    nop
+; PC64LE9-NEXT:    addis 3, 2, .LCPI38_0@toc@ha
+; PC64LE9-NEXT:    xxlxor 4, 4, 4
+; PC64LE9-NEXT:    fmr 30, 1
+; PC64LE9-NEXT:    lfd 3, .LCPI38_0@toc@l(3)
+; PC64LE9-NEXT:    fmr 31, 2
+; PC64LE9-NEXT:    bl __gcc_qadd
+; PC64LE9-NEXT:    nop
+; PC64LE9-NEXT:    cmpdi 30, 0
+; PC64LE9-NEXT:    blt 0, .LBB38_2
+; PC64LE9-NEXT:  # %bb.1: # %entry
+; PC64LE9-NEXT:    fmr 1, 30
+; PC64LE9-NEXT:  .LBB38_2: # %entry
+; PC64LE9-NEXT:    blt 0, .LBB38_4
+; PC64LE9-NEXT:  # %bb.3: # %entry
+; PC64LE9-NEXT:    fmr 2, 31
+; PC64LE9-NEXT:  .LBB38_4: # %entry
+; PC64LE9-NEXT:    addi 1, 1, 64
+; PC64LE9-NEXT:    ld 0, 16(1)
+; PC64LE9-NEXT:    lfd 31, -8(1) # 8-byte Folded Reload
+; PC64LE9-NEXT:    lfd 30, -16(1) # 8-byte Folded Reload
+; PC64LE9-NEXT:    ld 30, -32(1) # 8-byte Folded Reload
+; PC64LE9-NEXT:    mtlr 0
+; PC64LE9-NEXT:    blr
+;
+; PC64-LABEL: u128_to_ppcq:
+; PC64:       # %bb.0: # %entry
+; PC64-NEXT:    mflr 0
+; PC64-NEXT:    stdu 1, -144(1)
+; PC64-NEXT:    std 0, 160(1)
+; PC64-NEXT:    std 30, 112(1) # 8-byte Folded Spill
+; PC64-NEXT:    stfd 30, 128(1) # 8-byte Folded Spill
+; PC64-NEXT:    mr 30, 3
+; PC64-NEXT:    stfd 31, 136(1) # 8-byte Folded Spill
+; PC64-NEXT:    bl __floattitf
+; PC64-NEXT:    nop
+; PC64-NEXT:    addis 3, 2, .LCPI38_0@toc@ha
+; PC64-NEXT:    fmr 31, 2
+; PC64-NEXT:    lfd 3, .LCPI38_0@toc@l(3)
+; PC64-NEXT:    addis 3, 2, .LCPI38_1@toc@ha
+; PC64-NEXT:    fmr 30, 1
+; PC64-NEXT:    lfs 4, .LCPI38_1@toc@l(3)
+; PC64-NEXT:    bl __gcc_qadd
+; PC64-NEXT:    nop
+; PC64-NEXT:    cmpdi 30, 0
+; PC64-NEXT:    blt 0, .LBB38_2
+; PC64-NEXT:  # %bb.1: # %entry
+; PC64-NEXT:    fmr 1, 30
+; PC64-NEXT:  .LBB38_2: # %entry
+; PC64-NEXT:    blt 0, .LBB38_4
+; PC64-NEXT:  # %bb.3: # %entry
+; PC64-NEXT:    fmr 2, 31
+; PC64-NEXT:  .LBB38_4: # %entry
+; PC64-NEXT:    lfd 31, 136(1) # 8-byte Folded Reload
+; PC64-NEXT:    ld 30, 112(1) # 8-byte Folded Reload
+; PC64-NEXT:    lfd 30, 128(1) # 8-byte Folded Reload
+; PC64-NEXT:    addi 1, 1, 144
+; PC64-NEXT:    ld 0, 16(1)
+; PC64-NEXT:    mtlr 0
+; PC64-NEXT:    blr
+entry:
+  %conv = tail call ppc_fp128 @llvm.experimental.constrained.uitofp.ppcf128.i128(i128 %m, metadata !"round.dynamic", metadata !"fpexcept.strict") #1
+  ret ppc_fp128 %conv
+}
+
+define i1 @ppcq_to_s1(ppc_fp128 %a) {
+; PC64LE-LABEL: ppcq_to_s1:
+; PC64LE:       # %bb.0: # %entry
+; PC64LE-NEXT:    mflr 0
+; PC64LE-NEXT:    stdu 1, -32(1)
+; PC64LE-NEXT:    std 0, 48(1)
+; PC64LE-NEXT:    .cfi_def_cfa_offset 32
+; PC64LE-NEXT:    .cfi_offset lr, 16
+; PC64LE-NEXT:    bl __gcc_qtou
+; PC64LE-NEXT:    nop
+; PC64LE-NEXT:    addi 1, 1, 32
+; PC64LE-NEXT:    ld 0, 16(1)
+; PC64LE-NEXT:    mtlr 0
+; PC64LE-NEXT:    blr
+;
+; PC64LE9-LABEL: ppcq_to_s1:
+; PC64LE9:       # %bb.0: # %entry
+; PC64LE9-NEXT:    mflr 0
+; PC64LE9-NEXT:    stdu 1, -32(1)
+; PC64LE9-NEXT:    std 0, 48(1)
+; PC64LE9-NEXT:    .cfi_def_cfa_offset 32
+; PC64LE9-NEXT:    .cfi_offset lr, 16
+; PC64LE9-NEXT:    bl __gcc_qtou
+; PC64LE9-NEXT:    nop
+; PC64LE9-NEXT:    addi 1, 1, 32
+; PC64LE9-NEXT:    ld 0, 16(1)
+; PC64LE9-NEXT:    mtlr 0
+; PC64LE9-NEXT:    blr
+;
+; PC64-LABEL: ppcq_to_s1:
+; PC64:       # %bb.0: # %entry
+; PC64-NEXT:    mflr 0
+; PC64-NEXT:    stdu 1, -112(1)
+; PC64-NEXT:    std 0, 128(1)
+; PC64-NEXT:    .cfi_def_cfa_offset 112
+; PC64-NEXT:    .cfi_offset lr, 16
+; PC64-NEXT:    bl __gcc_qtou
+; PC64-NEXT:    nop
+; PC64-NEXT:    addi 1, 1, 112
+; PC64-NEXT:    ld 0, 16(1)
+; PC64-NEXT:    mtlr 0
+; PC64-NEXT:    blr
+entry:
+  %conv = tail call i1 @llvm.experimental.constrained.fptosi.ppcf128.i1(ppc_fp128 %a, metadata !"fpexcept.strict") #1
+  ret i1 %conv
+}
+
+define i1 @ppcq_to_u1(ppc_fp128 %a) {
+; PC64LE-LABEL: ppcq_to_u1:
+; PC64LE:       # %bb.0: # %entry
+; PC64LE-NEXT:    mflr 0
+; PC64LE-NEXT:    stdu 1, -32(1)
+; PC64LE-NEXT:    std 0, 48(1)
+; PC64LE-NEXT:    .cfi_def_cfa_offset 32
+; PC64LE-NEXT:    .cfi_offset lr, 16
+; PC64LE-NEXT:    bl __fixunstfsi
+; PC64LE-NEXT:    nop
+; PC64LE-NEXT:    addi 1, 1, 32
+; PC64LE-NEXT:    ld 0, 16(1)
+; PC64LE-NEXT:    mtlr 0
+; PC64LE-NEXT:    blr
+;
+; PC64LE9-LABEL: ppcq_to_u1:
+; PC64LE9:       # %bb.0: # %entry
+; PC64LE9-NEXT:    mflr 0
+; PC64LE9-NEXT:    stdu 1, -32(1)
+; PC64LE9-NEXT:    std 0, 48(1)
+; PC64LE9-NEXT:    .cfi_def_cfa_offset 32
+; PC64LE9-NEXT:    .cfi_offset lr, 16
+; PC64LE9-NEXT:    bl __fixunstfsi
+; PC64LE9-NEXT:    nop
+; PC64LE9-NEXT:    addi 1, 1, 32
+; PC64LE9-NEXT:    ld 0, 16(1)
+; PC64LE9-NEXT:    mtlr 0
+; PC64LE9-NEXT:    blr
+;
+; PC64-LABEL: ppcq_to_u1:
+; PC64:       # %bb.0: # %entry
+; PC64-NEXT:    mflr 0
+; PC64-NEXT:    stdu 1, -112(1)
+; PC64-NEXT:    std 0, 128(1)
+; PC64-NEXT:    .cfi_def_cfa_offset 112
+; PC64-NEXT:    .cfi_offset lr, 16
+; PC64-NEXT:    bl __fixunstfsi
+; PC64-NEXT:    nop
+; PC64-NEXT:    addi 1, 1, 112
+; PC64-NEXT:    ld 0, 16(1)
+; PC64-NEXT:    mtlr 0
+; PC64-NEXT:    blr
+entry:
+  %conv = tail call i1 @llvm.experimental.constrained.fptoui.ppcf128.i1(ppc_fp128 %a, metadata !"fpexcept.strict") #1
+  ret i1 %conv
+}
+
+attributes #0 = { nounwind strictfp }
+attributes #1 = { strictfp }
 
 declare ppc_fp128 @llvm.experimental.constrained.fadd.ppcf128(ppc_fp128, ppc_fp128, metadata, metadata)
 declare ppc_fp128 @llvm.experimental.constrained.ceil.ppcf128(ppc_fp128, metadata)
@@ -1559,5 +2100,13 @@ declare ppc_fp128 @llvm.experimental.constrained.fsub.ppcf128(ppc_fp128, ppc_fp1
 declare ppc_fp128 @llvm.experimental.constrained.trunc.ppcf128(ppc_fp128, metadata)
 declare i64 @llvm.experimental.constrained.fptosi.i64.ppcf128(ppc_fp128, metadata)
 declare i32 @llvm.experimental.constrained.fptosi.i32.ppcf128(ppc_fp128, metadata)
+declare i1 @llvm.experimental.constrained.fptosi.ppcf128.i1(ppc_fp128, metadata)
 declare i64 @llvm.experimental.constrained.fptoui.i64.ppcf128(ppc_fp128, metadata)
 declare i32 @llvm.experimental.constrained.fptoui.i32.ppcf128(ppc_fp128, metadata)
+declare i1 @llvm.experimental.constrained.fptoui.ppcf128.i1(ppc_fp128, metadata)
+declare ppc_fp128 @llvm.experimental.constrained.sitofp.ppcf128.i32(i32, metadata, metadata)
+declare ppc_fp128 @llvm.experimental.constrained.uitofp.ppcf128.i32(i32, metadata, metadata)
+declare ppc_fp128 @llvm.experimental.constrained.sitofp.ppcf128.i64(i64, metadata, metadata)
+declare ppc_fp128 @llvm.experimental.constrained.uitofp.ppcf128.i64(i64, metadata, metadata)
+declare ppc_fp128 @llvm.experimental.constrained.sitofp.ppcf128.i128(i128, metadata, metadata)
+declare ppc_fp128 @llvm.experimental.constrained.uitofp.ppcf128.i128(i128, metadata, metadata)

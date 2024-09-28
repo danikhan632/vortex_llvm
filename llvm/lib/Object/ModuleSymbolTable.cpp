@@ -15,18 +15,16 @@
 #include "llvm/Object/ModuleSymbolTable.h"
 #include "RecordStreamer.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/SmallString.h"
-#include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/ADT/Triple.h"
+#include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalAlias.h"
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/Module.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
-#include "llvm/MC/MCDirectives.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCObjectFileInfo.h"
 #include "llvm/MC/MCParser/MCAsmParser.h"
@@ -35,15 +33,15 @@
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/MCTargetOptions.h"
+#include "llvm/MC/TargetRegistry.h"
 #include "llvm/Object/SymbolicFile.h"
 #include "llvm/Support/Casting.h"
-#include "llvm/Support/CodeGen.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/SMLoc.h"
 #include "llvm/Support/SourceMgr.h"
-#include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/TargetParser/Triple.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -63,13 +61,19 @@ void ModuleSymbolTable::addModule(Module *M) {
     SymTab.push_back(&GV);
 
   CollectAsmSymbols(*M, [this](StringRef Name, BasicSymbolRef::Flags Flags) {
-    SymTab.push_back(new (AsmSymbols.Allocate()) AsmSymbol(Name, Flags));
+    SymTab.push_back(new (AsmSymbols.Allocate())
+                         AsmSymbol(std::string(Name), Flags));
   });
 }
 
 static void
 initializeRecordStreamer(const Module &M,
                          function_ref<void(RecordStreamer &)> Init) {
+  // This function may be called twice, once for ModuleSummaryIndexAnalysis and
+  // the other when writing the IR symbol table. If parsing inline assembly has
+  // caused errors in the first run, suppress the second run.
+  if (M.getContext().getDiagHandlerPtr()->HasErrors)
+    return;
   StringRef InlineAsm = M.getModuleInlineAsm();
   if (InlineAsm.empty())
     return;
@@ -97,16 +101,19 @@ initializeRecordStreamer(const Module &M,
   if (!MCII)
     return;
 
-  MCObjectFileInfo MOFI;
-  MCContext MCCtx(MAI.get(), MRI.get(), &MOFI);
-  MOFI.InitMCObjectFileInfo(TT, /*PIC*/ false, MCCtx);
-  MOFI.setSDKVersion(M.getSDKVersion());
+  std::unique_ptr<MemoryBuffer> Buffer(
+      MemoryBuffer::getMemBuffer(InlineAsm, "<inline asm>"));
+  SourceMgr SrcMgr;
+  SrcMgr.AddNewSourceBuffer(std::move(Buffer), SMLoc());
+
+  MCContext MCCtx(TT, MAI.get(), MRI.get(), STI.get(), &SrcMgr);
+  std::unique_ptr<MCObjectFileInfo> MOFI(
+      T->createMCObjectFileInfo(MCCtx, /*PIC=*/false));
+  MOFI->setSDKVersion(M.getSDKVersion());
+  MCCtx.setObjectFileInfo(MOFI.get());
   RecordStreamer Streamer(MCCtx, M);
   T->createNullTargetStreamer(Streamer);
 
-  std::unique_ptr<MemoryBuffer> Buffer(MemoryBuffer::getMemBuffer(InlineAsm));
-  SourceMgr SrcMgr;
-  SrcMgr.AddNewSourceBuffer(std::move(Buffer), SMLoc());
   std::unique_ptr<MCAsmParser> Parser(
       createMCAsmParser(SrcMgr, MCCtx, Streamer, *MAI));
 
@@ -114,6 +121,17 @@ initializeRecordStreamer(const Module &M,
       T->createMCAsmParser(*STI, *Parser, *MCII, MCOptions));
   if (!TAP)
     return;
+
+  MCCtx.setDiagnosticHandler([&](const SMDiagnostic &SMD, bool IsInlineAsm,
+                                 const SourceMgr &SrcMgr,
+                                 std::vector<const MDNode *> &LocInfos) {
+    M.getContext().diagnose(
+        DiagnosticInfoSrcMgr(SMD, M.getName(), IsInlineAsm, /*LocCookie=*/0));
+  });
+
+  // Module-level inline asm is assumed to use At&t syntax (see
+  // AsmPrinter::doInitialization()).
+  Parser->setAssemblerDialect(InlineAsm::AD_ATT);
 
   Parser->setTargetParser(*TAP);
   if (Parser->Run(false))
@@ -169,12 +187,12 @@ void ModuleSymbolTable::CollectAsmSymvers(
 }
 
 void ModuleSymbolTable::printSymbolName(raw_ostream &OS, Symbol S) const {
-  if (S.is<AsmSymbol *>()) {
-    OS << S.get<AsmSymbol *>()->first;
+  if (isa<AsmSymbol *>(S)) {
+    OS << cast<AsmSymbol *>(S)->first;
     return;
   }
 
-  auto *GV = S.get<GlobalValue *>();
+  auto *GV = cast<GlobalValue *>(S);
   if (GV->hasDLLImportStorageClass())
     OS << "__imp_";
 
@@ -182,10 +200,10 @@ void ModuleSymbolTable::printSymbolName(raw_ostream &OS, Symbol S) const {
 }
 
 uint32_t ModuleSymbolTable::getSymbolFlags(Symbol S) const {
-  if (S.is<AsmSymbol *>())
-    return S.get<AsmSymbol *>()->second;
+  if (isa<AsmSymbol *>(S))
+    return cast<AsmSymbol *>(S)->second;
 
-  auto *GV = S.get<GlobalValue *>();
+  auto *GV = cast<GlobalValue *>(S);
 
   uint32_t Res = BasicSymbolRef::SF_None;
   if (GV->isDeclarationForLinker())
@@ -196,8 +214,9 @@ uint32_t ModuleSymbolTable::getSymbolFlags(Symbol S) const {
     if (GVar->isConstant())
       Res |= BasicSymbolRef::SF_Const;
   }
-  if (dyn_cast_or_null<Function>(GV->getBaseObject()))
-    Res |= BasicSymbolRef::SF_Executable;
+  if (const GlobalObject *GO = GV->getAliaseeObject())
+    if (isa<Function>(GO) || isa<GlobalIFunc>(GO))
+      Res |= BasicSymbolRef::SF_Executable;
   if (isa<GlobalAlias>(GV))
     Res |= BasicSymbolRef::SF_Indirect;
   if (GV->hasPrivateLinkage())
@@ -210,7 +229,7 @@ uint32_t ModuleSymbolTable::getSymbolFlags(Symbol S) const {
       GV->hasExternalWeakLinkage())
     Res |= BasicSymbolRef::SF_Weak;
 
-  if (GV->getName().startswith("llvm."))
+  if (GV->getName().starts_with("llvm."))
     Res |= BasicSymbolRef::SF_FormatSpecific;
   else if (auto *Var = dyn_cast<GlobalVariable>(GV)) {
     if (Var->getSection() == "llvm.metadata")

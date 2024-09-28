@@ -13,21 +13,24 @@
 
 using namespace clang::ast_matchers;
 
-namespace clang {
-namespace tidy {
-namespace google {
-namespace build {
+namespace clang::tidy::google::build {
 
 UnnamedNamespaceInHeaderCheck::UnnamedNamespaceInHeaderCheck(
     StringRef Name, ClangTidyContext *Context)
-    : ClangTidyCheck(Name, Context),
-      RawStringHeaderFileExtensions(Options.getLocalOrGlobal(
-          "HeaderFileExtensions", utils::defaultHeaderFileExtensions())) {
-  if (!utils::parseHeaderFileExtensions(RawStringHeaderFileExtensions,
-                                        HeaderFileExtensions, ',')) {
-    llvm::errs() << "Invalid header file extension: "
-                 << RawStringHeaderFileExtensions << "\n";
-  }
+    : ClangTidyCheck(Name, Context) {
+  std::optional<StringRef> HeaderFileExtensionsOption =
+      Options.get("HeaderFileExtensions");
+  RawStringHeaderFileExtensions =
+      HeaderFileExtensionsOption.value_or(utils::defaultHeaderFileExtensions());
+  if (HeaderFileExtensionsOption) {
+    if (!utils::parseFileExtensions(RawStringHeaderFileExtensions,
+                                    HeaderFileExtensions,
+                                    utils::defaultFileExtensionDelimiters())) {
+      this->configurationDiag("Invalid header file extension: '%0'")
+          << RawStringHeaderFileExtensions;
+    }
+  } else
+    HeaderFileExtensions = Context->getHeaderFileExtensions();
 }
 
 void UnnamedNamespaceInHeaderCheck::storeOptions(
@@ -37,9 +40,6 @@ void UnnamedNamespaceInHeaderCheck::storeOptions(
 
 void UnnamedNamespaceInHeaderCheck::registerMatchers(
     ast_matchers::MatchFinder *Finder) {
-  // Only register the matchers for C++; the functionality currently does not
-  // provide any benefit to other languages, despite being benign.
-  if (getLangOpts().CPlusPlus)
     Finder->addMatcher(namespaceDecl(isAnonymous()).bind("anonymousNamespace"),
                        this);
 }
@@ -56,7 +56,4 @@ void UnnamedNamespaceInHeaderCheck::check(
     diag(Loc, "do not use unnamed namespaces in header files");
 }
 
-} // namespace build
-} // namespace google
-} // namespace tidy
-} // namespace clang
+} // namespace clang::tidy::google::build

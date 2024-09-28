@@ -1,4 +1,4 @@
-//===-- MemoryHistoryASan.cpp -----------------------------------*- C++ -*-===//
+//===-- MemoryHistoryASan.cpp ---------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -28,19 +28,16 @@
 using namespace lldb;
 using namespace lldb_private;
 
+LLDB_PLUGIN_DEFINE(MemoryHistoryASan)
+
 MemoryHistorySP MemoryHistoryASan::CreateInstance(const ProcessSP &process_sp) {
   if (!process_sp.get())
     return nullptr;
 
   Target &target = process_sp->GetTarget();
 
-  const ModuleList &target_modules = target.GetImages();
-  std::lock_guard<std::recursive_mutex> guard(target_modules.GetMutex());
-  const size_t num_modules = target_modules.GetSize();
-  for (size_t i = 0; i < num_modules; ++i) {
-    Module *module_pointer = target_modules.GetModulePointerAtIndexUnlocked(i);
-
-    const Symbol *symbol = module_pointer->FindFirstSymbolWithNameAndType(
+  for (ModuleSP module_sp : target.GetImages().Modules()) {
+    const Symbol *symbol = module_sp->FindFirstSymbolWithNameAndType(
         ConstString("__asan_get_alloc_stack"), lldb::eSymbolTypeAny);
 
     if (symbol != nullptr)
@@ -59,11 +56,6 @@ void MemoryHistoryASan::Terminate() {
   PluginManager::UnregisterPlugin(CreateInstance);
 }
 
-ConstString MemoryHistoryASan::GetPluginNameStatic() {
-  static ConstString g_name("asan");
-  return g_name;
-}
-
 MemoryHistoryASan::MemoryHistoryASan(const ProcessSP &process_sp) {
   if (process_sp)
     m_process_wp = process_sp;
@@ -75,21 +67,19 @@ const char *memory_history_asan_command_prefix = R"(
         size_t __asan_get_alloc_stack(void *addr, void **trace, size_t size, int *thread_id);
         size_t __asan_get_free_stack(void *addr, void **trace, size_t size, int *thread_id);
     }
-
-    struct data {
-        void *alloc_trace[256];
-        size_t alloc_count;
-        int alloc_tid;
-        
-        void *free_trace[256];
-        size_t free_count;
-        int free_tid;
-    };
 )";
 
 const char *memory_history_asan_command_format =
     R"(
-    data t;
+    struct {
+        void *alloc_trace[256];
+        size_t alloc_count;
+        int alloc_tid;
+
+        void *free_trace[256];
+        size_t free_count;
+        int free_tid;
+    } t;
 
     t.alloc_count = __asan_get_alloc_stack((void *)0x%)" PRIx64
     R"(, t.alloc_trace, 256, &t.alloc_tid);
@@ -130,13 +120,18 @@ static void CreateHistoryThreadFromValueObject(ProcessSP process_sp,
 
   std::vector<lldb::addr_t> pcs;
   for (int i = 0; i < count; i++) {
-    addr_t pc = trace_sp->GetChildAtIndex(i, true)->GetValueAsUnsigned(0);
+    addr_t pc = trace_sp->GetChildAtIndex(i)->GetValueAsUnsigned(0);
     if (pc == 0 || pc == 1 || pc == LLDB_INVALID_ADDRESS)
       continue;
     pcs.push_back(pc);
   }
 
-  HistoryThread *history_thread = new HistoryThread(*process_sp, tid, pcs);
+  // The ASAN runtime already massages the return addresses into call
+  // addresses, we don't want LLDB's unwinder to try to locate the previous
+  // instruction again as this might lead to us reporting a different line.
+  bool pcs_are_call_addresses = true;
+  HistoryThread *history_thread =
+      new HistoryThread(*process_sp, tid, pcs, pcs_are_call_addresses);
   ThreadSP new_thread_sp(history_thread);
   std::ostringstream thread_name_with_number;
   thread_name_with_number << thread_name << " Thread " << tid;
@@ -159,7 +154,8 @@ HistoryThreads MemoryHistoryASan::GetHistoryThreads(lldb::addr_t address) {
   if (!thread_sp)
     return result;
 
-  StackFrameSP frame_sp = thread_sp->GetSelectedFrame();
+  StackFrameSP frame_sp =
+      thread_sp->GetSelectedFrame(DoNoSelectMostRelevantFrame);
   if (!frame_sp)
     return result;
 
@@ -182,9 +178,11 @@ HistoryThreads MemoryHistoryASan::GetHistoryThreads(lldb::addr_t address) {
   ExpressionResults expr_result = UserExpression::Evaluate(
       exe_ctx, options, expr.GetString(), "", return_value_sp, eval_error);
   if (expr_result != eExpressionCompleted) {
-    process_sp->GetTarget().GetDebugger().GetAsyncOutputStream()->Printf(
-        "Warning: Cannot evaluate AddressSanitizer expression:\n%s\n",
-        eval_error.AsCString());
+    StreamString ss;
+    ss << "cannot evaluate AddressSanitizer expression:\n";
+    ss << eval_error.AsCString();
+    Debugger::ReportWarning(ss.GetString().str(),
+                            process_sp->GetTarget().GetDebugger().GetID());
     return result;
   }
 

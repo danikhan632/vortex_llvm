@@ -1,6 +1,7 @@
 # RUN: llvm-mc -triple x86_64-unknown-linux %s -filetype=obj -o %t.o
-# RUN: llvm-dwarfdump -v %t.o 2> %t.err | FileCheck --check-prefix=COMMON --check-prefix=SPLIT %s
+# RUN: llvm-dwarfdump -v %t.o 2> %t.err | FileCheck --check-prefixes=COMMON,SPLIT,OFFSETS %s
 # RUN: llvm-dwarfdump -verify %t.o | FileCheck --check-prefix=VERIFY %s
+# RUN: llvm-dwarfdump -debug-str-offsets %t.o | FileCheck --check-prefix=OFFSETS %s
 # 
 # Check that we don't report an error on a non-existent range list table.
 # RUN: FileCheck -allow-empty --check-prefix ERR %s < %t.err
@@ -69,7 +70,7 @@ str_Variable3:
         .long str_TU_type
 .debug_str_offsets_segment2_end:
 
-        .section .debug_str.dwo,"MS",@progbits,1
+        .section .debug_str.dwo,"MSe",@progbits,1
 dwo_str_CU_5_producer:
         .asciz "Handmade split DWARF producer"
 dwo_str_CU_5_name:
@@ -81,7 +82,7 @@ dwo_str_TU_5:
 dwo_str_TU_5_type:
         .asciz "V5_split_Mystruct"
 
-        .section .debug_str_offsets.dwo,"",@progbits
+        .section .debug_str_offsets.dwo,"e",@progbits
 # One contribution only in a .dwo file
         .long .debug_dwo_str_offsets_segment0_end-.debug_dwo_str_offsets_base0+4
         .short 5    # DWARF version
@@ -174,7 +175,7 @@ dwo_str_TU_5_type:
         .byte 0x00  # EOM(3)
 
 # And a .dwo copy of a subset for the .dwo sections.
-        .section .debug_abbrev.dwo,"",@progbits
+        .section .debug_abbrev.dwo,"e",@progbits
         .byte 0x01  # Abbrev code
         .byte 0x11  # DW_TAG_compile_unit
         .byte 0x00  # DW_CHILDREN_no
@@ -300,7 +301,7 @@ TU_5_type:
         .byte 0 # NULL
 TU_5_end:
         
-        .section .debug_info.dwo,"",@progbits
+        .section .debug_info.dwo,"e",@progbits
 
 # DWARF v5 split CU header.
         .long  CU_split_5_end-CU_split_5_version  # Length of Unit
@@ -318,7 +319,7 @@ CU_split_5_version:
         .byte 0 # NULL
 CU_split_5_end:
         
-        .section .debug_types.dwo,"",@progbits
+        .section .debug_types.dwo,"e",@progbits
 
 # DWARF v5 split type unit header.
 TU_split_5_start:
@@ -377,7 +378,7 @@ TU_split_5_end:
 # COMMON:      DW_TAG_compile_unit
 # COMMON-NEXT: DW_AT_producer [DW_FORM_strx] (indexed (00000000) string = "Handmade DWARF producer")
 # COMMON-NEXT: DW_AT_name [DW_FORM_strx] (indexed (00000001) string = "Compile_Unit_2")
-# COMMON-NEXT: DW_AT_str_offsets_base [DW_FORM_sec_offset] (0x00000038)
+# COMMON-NEXT: DW_AT_str_offsets_base [DW_FORM_sec_offset] (0x0000000000000038)
 # COMMON-NEXT: DW_AT_comp_dir [DW_FORM_strx] (indexed (00000002) string = "/home/test/CU2")
 # 
 # The split CU
@@ -403,31 +404,31 @@ TU_split_5_end:
 # SPLIT-NEXT:  DW_AT_name [DW_FORM_strx] (indexed (00000004) string = "V5_split_Mystruct")
 # 
 # The .debug_str_offsets section
-# COMMON:      .debug_str_offsets contents:
-# COMMON-NEXT: 0x00000000: Contribution size = 32, Format = DWARF32, Version = 5
-# COMMON-NEXT: 0x00000008: 00000000 "Handmade DWARF producer"
-# COMMON-NEXT: 0x0000000c: 00000018 "Compile_Unit_1"
-# COMMON-NEXT: 0x00000010: 00000027 "/home/test/CU1"
-# COMMON-NEXT: 0x00000014: 00000067 "MyFunc"
-# COMMON-NEXT: 0x00000018: 0000006e "MyVar1"
-# COMMON-NEXT: 0x0000001c: 00000075 "MyVar2"
-# COMMON-NEXT: 0x00000020: 0000007c "MyVar3"
-# COMMON-NEXT: Gap, length = 4
-# COMMON-NEXT: 0x00000028: Contribution size = 28, Format = DWARF64, Version = 5
-# COMMON-NEXT: 0x00000038: 00000000 "Handmade DWARF producer"
-# COMMON-NEXT: 0x00000040: 00000036 "Compile_Unit_2"
-# COMMON-NEXT: 0x00000048: 00000045 "/home/test/CU2"
-# COMMON-NEXT: 0x00000050: Contribution size = 12, Format = DWARF32, Version = 5
-# COMMON-NEXT: 0x00000058: 00000054 "Type_Unit"
-# COMMON-NEXT: 0x0000005c: 0000005e "MyStruct"
+# OFFSETS:      .debug_str_offsets contents:
+# OFFSETS-NEXT: 0x00000000: Contribution size = 32, Format = DWARF32, Version = 5
+# OFFSETS-NEXT: 0x00000008: 00000000 "Handmade DWARF producer"
+# OFFSETS-NEXT: 0x0000000c: 00000018 "Compile_Unit_1"
+# OFFSETS-NEXT: 0x00000010: 00000027 "/home/test/CU1"
+# OFFSETS-NEXT: 0x00000014: 00000067 "MyFunc"
+# OFFSETS-NEXT: 0x00000018: 0000006e "MyVar1"
+# OFFSETS-NEXT: 0x0000001c: 00000075 "MyVar2"
+# OFFSETS-NEXT: 0x00000020: 0000007c "MyVar3"
+# OFFSETS-NEXT: Gap, length = 4
+# OFFSETS-NEXT: 0x00000028: Contribution size = 28, Format = DWARF64, Version = 5
+# OFFSETS-NEXT: 0x00000038: 0000000000000000 "Handmade DWARF producer"
+# OFFSETS-NEXT: 0x00000040: 0000000000000036 "Compile_Unit_2"
+# OFFSETS-NEXT: 0x00000048: 0000000000000045 "/home/test/CU2"
+# OFFSETS-NEXT: 0x00000050: Contribution size = 12, Format = DWARF32, Version = 5
+# OFFSETS-NEXT: 0x00000058: 00000054 "Type_Unit"
+# OFFSETS-NEXT: 0x0000005c: 0000005e "MyStruct"
 # 
-# SPLIT:       .debug_str_offsets.dwo contents:
-# SPLIT-NEXT:  0x00000000: Contribution size = 24, Format = DWARF32, Version = 5
-# SPLIT-NEXT:  0x00000008: 00000000 "Handmade split DWARF producer"
-# SPLIT-NEXT:  0x0000000c: 0000001e "V5_split_compile_unit"
-# SPLIT-NEXT:  0x00000010: 00000034 "/home/test/splitCU"
-# SPLIT-NEXT:  0x00000014: 00000047 "V5_split_type_unit"
-# SPLIT-NEXT:  0x00000018: 0000005a "V5_split_Mystruct"
+# OFFSETS:       .debug_str_offsets.dwo contents:
+# OFFSETS-NEXT:  0x00000000: Contribution size = 24, Format = DWARF32, Version = 5
+# OFFSETS-NEXT:  0x00000008: 00000000 "Handmade split DWARF producer"
+# OFFSETS-NEXT:  0x0000000c: 0000001e "V5_split_compile_unit"
+# OFFSETS-NEXT:  0x00000010: 00000034 "/home/test/splitCU"
+# OFFSETS-NEXT:  0x00000014: 00000047 "V5_split_type_unit"
+# OFFSETS-NEXT:  0x00000018: 0000005a "V5_split_Mystruct"
 
 # VERIFY: No errors.
 

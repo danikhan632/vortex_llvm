@@ -14,9 +14,13 @@
 
 using namespace clang::ast_matchers;
 
-namespace clang {
-namespace tidy {
-namespace performance {
+namespace clang::tidy::performance {
+
+namespace {
+
+AST_MATCHER(VarDecl, isNRVOVariable) { return Node.isNRVOVariable(); }
+
+} // namespace
 
 NoAutomaticMoveCheck::NoAutomaticMoveCheck(StringRef Name,
                                            ClangTidyContext *Context)
@@ -25,12 +29,9 @@ NoAutomaticMoveCheck::NoAutomaticMoveCheck(StringRef Name,
           utils::options::parseStringList(Options.get("AllowedTypes", ""))) {}
 
 void NoAutomaticMoveCheck::registerMatchers(MatchFinder *Finder) {
-  // Automatic move exists only for c++11 onwards.
-  if (!getLangOpts().CPlusPlus11)
-    return;
-
-  const auto ConstLocalVariable =
+  const auto NonNrvoConstLocalVariable =
       varDecl(hasLocalStorage(), unless(hasType(lValueReferenceType())),
+              unless(isNRVOVariable()),
               hasType(qualType(
                   isConstQualified(),
                   hasCanonicalType(matchers::isExpensiveToCopy()),
@@ -47,13 +48,23 @@ void NoAutomaticMoveCheck::registerMatchers(MatchFinder *Finder) {
           hasParameter(0, hasType(rValueReferenceType(
                               pointee(type(equalsBoundNode("SrcT")))))))))));
 
+  // A matcher for `DstT::DstT(const Src&&)`, which typically comes from an
+  // instantiation of `template <typename U> DstT::DstT(U&&)`.
+  const auto ConstRefRefCtor = cxxConstructorDecl(
+      parameterCountIs(1),
+      hasParameter(0,
+                   hasType(rValueReferenceType(pointee(isConstQualified())))));
+
   Finder->addMatcher(
-      returnStmt(
-          hasReturnValue(ignoringElidableConstructorCall(ignoringParenImpCasts(
-              cxxConstructExpr(hasDeclaration(LValueRefCtor),
-                               hasArgument(0, ignoringParenImpCasts(declRefExpr(
-                                                  to(ConstLocalVariable)))))
-                  .bind("ctor_call"))))),
+      traverse(
+          TK_AsIs,
+          returnStmt(hasReturnValue(
+              ignoringElidableConstructorCall(ignoringParenImpCasts(
+                  cxxConstructExpr(
+                      hasDeclaration(anyOf(LValueRefCtor, ConstRefRefCtor)),
+                      hasArgument(0, ignoringParenImpCasts(declRefExpr(
+                                         to(NonNrvoConstLocalVariable)))))
+                      .bind("ctor_call")))))),
       this);
 }
 
@@ -69,6 +80,4 @@ void NoAutomaticMoveCheck::storeOptions(ClangTidyOptions::OptionMap &Opts) {
                 utils::options::serializeStringList(AllowedTypes));
 }
 
-} // namespace performance
-} // namespace tidy
-} // namespace clang
+} // namespace clang::tidy::performance

@@ -6,6 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+// UNSUPPORTED: c++03
+
 // <functional>
 
 // class function<R(ArgTypes...)>
@@ -14,6 +16,7 @@
 
 #include <functional>
 #include <cassert>
+#include <type_traits>
 
 #include "test_macros.h"
 
@@ -21,6 +24,9 @@ int g(int) {return 0;}
 
 int main(int, char**)
 {
+    static_assert(std::is_constructible<bool, std::function<void()> >::value, "");
+    static_assert(!std::is_convertible<std::function<void()>, bool>::value, "");
+
     {
     std::function<int(int)> f;
     assert(!f);

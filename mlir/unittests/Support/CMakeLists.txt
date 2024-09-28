@@ -1,5 +1,7 @@
 add_mlir_unittest(MLIRSupportTests
-  IndexedAccessorTest.cpp
+  IndentedOstreamTest.cpp
+  MathExtrasTest.cpp
+  StorageUniquerTest.cpp
 )
 
 target_link_libraries(MLIRSupportTests

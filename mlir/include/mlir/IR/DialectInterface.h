@@ -1,6 +1,6 @@
 //===- DialectInterface.h - IR Dialect Interfaces ---------------*- C++ -*-===//
 //
-// Part of the MLIR Project, under the Apache License v2.0 with LLVM Exceptions.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
@@ -9,8 +9,9 @@
 #ifndef MLIR_IR_DIALECTINTERFACE_H
 #define MLIR_IR_DIALECTINTERFACE_H
 
-#include "mlir/Support/STLExtras.h"
+#include "mlir/Support/TypeID.h"
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/STLExtras.h"
 
 namespace mlir {
 class Dialect;
@@ -29,12 +30,12 @@ public:
   using Base = DialectInterfaceBase<ConcreteType, BaseT>;
 
   /// Get a unique id for the derived interface type.
-  static ClassID *getInterfaceID() { return ClassID::getID<ConcreteType>(); }
+  static TypeID getInterfaceID() { return TypeID::get<ConcreteType>(); }
 
 protected:
   DialectInterfaceBase(Dialect *dialect) : BaseT(dialect, getInterfaceID()) {}
 };
-} // end namespace detail
+} // namespace detail
 
 /// This class represents an interface overridden for a single dialect.
 class DialectInterface {
@@ -49,11 +50,14 @@ public:
   /// Return the dialect that this interface represents.
   Dialect *getDialect() const { return dialect; }
 
+  /// Return the context that holds the parent dialect of this interface.
+  MLIRContext *getContext() const;
+
   /// Return the derived interface id.
-  ClassID *getID() const { return interfaceID; }
+  TypeID getID() const { return interfaceID; }
 
 protected:
-  DialectInterface(Dialect *dialect, ClassID *id)
+  DialectInterface(Dialect *dialect, TypeID id)
       : dialect(dialect), interfaceID(id) {}
 
 private:
@@ -61,7 +65,7 @@ private:
   Dialect *dialect;
 
   /// The unique identifier for the derived interface type.
-  ClassID *interfaceID;
+  TypeID interfaceID;
 };
 
 //===----------------------------------------------------------------------===//
@@ -93,7 +97,8 @@ class DialectInterfaceCollectionBase {
   using InterfaceVectorT = std::vector<const DialectInterface *>;
 
 public:
-  DialectInterfaceCollectionBase(MLIRContext *ctx, ClassID *interfaceKind);
+  DialectInterfaceCollectionBase(MLIRContext *ctx, TypeID interfaceKind,
+                                 StringRef interfaceName);
   virtual ~DialectInterfaceCollectionBase();
 
 protected:
@@ -110,27 +115,27 @@ protected:
   /// An iterator class that iterates the held interface objects of the given
   /// derived interface type.
   template <typename InterfaceT>
-  class iterator : public llvm::mapped_iterator<
-                       InterfaceVectorT::const_iterator,
-                       const InterfaceT &(*)(const DialectInterface *)> {
-    static const InterfaceT &remapIt(const DialectInterface *interface) {
+  struct iterator
+      : public llvm::mapped_iterator_base<iterator<InterfaceT>,
+                                          InterfaceVectorT::const_iterator,
+                                          const InterfaceT &> {
+    using llvm::mapped_iterator_base<iterator<InterfaceT>,
+                                     InterfaceVectorT::const_iterator,
+                                     const InterfaceT &>::mapped_iterator_base;
+
+    /// Map the element to the iterator result type.
+    const InterfaceT &mapElement(const DialectInterface *interface) const {
       return *static_cast<const InterfaceT *>(interface);
     }
-
-    iterator(InterfaceVectorT::const_iterator it)
-        : llvm::mapped_iterator<
-              InterfaceVectorT::const_iterator,
-              const InterfaceT &(*)(const DialectInterface *)>(it, &remapIt) {}
-
-    /// Allow access to the constructor.
-    friend DialectInterfaceCollectionBase;
   };
 
   /// Iterator access to the held interfaces.
-  template <typename InterfaceT> iterator<InterfaceT> interface_begin() const {
+  template <typename InterfaceT>
+  iterator<InterfaceT> interface_begin() const {
     return iterator<InterfaceT>(orderedInterfaces.begin());
   }
-  template <typename InterfaceT> iterator<InterfaceT> interface_end() const {
+  template <typename InterfaceT>
+  iterator<InterfaceT> interface_end() const {
     return iterator<InterfaceT>(orderedInterfaces.end());
   }
 
@@ -155,7 +160,8 @@ public:
   /// Collect the registered dialect interfaces within the provided context.
   DialectInterfaceCollection(MLIRContext *ctx)
       : detail::DialectInterfaceCollectionBase(
-            ctx, InterfaceType::getInterfaceID()) {}
+            ctx, InterfaceType::getInterfaceID(),
+            llvm::getTypeName<InterfaceType>()) {}
 
   /// Get the interface for a given object, or null if one is not registered.
   /// The object may be a dialect or an operation instance.

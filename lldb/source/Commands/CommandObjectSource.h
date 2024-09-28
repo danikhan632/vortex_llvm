@@ -1,5 +1,4 @@
-//===-- CommandObjectSource.h.h -----------------------------------*- C++
-//-*-===//
+//===-- CommandObjectSource.h -----------------------------------*- C++-*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -7,14 +6,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_CommandObjectSource_h_
-#define liblldb_CommandObjectSource_h_
+#ifndef LLDB_SOURCE_COMMANDS_COMMANDOBJECTSOURCE_H
+#define LLDB_SOURCE_COMMANDS_COMMANDOBJECTSOURCE_H
 
 #include "lldb/Interpreter/CommandObjectMultiword.h"
 
 namespace lldb_private {
-
-// CommandObjectMultiwordSource
 
 class CommandObjectMultiwordSource : public CommandObjectMultiword {
 public:
@@ -25,4 +22,4 @@ public:
 
 } // namespace lldb_private
 
-#endif // liblldb_CommandObjectSource_h_
+#endif // LLDB_SOURCE_COMMANDS_COMMANDOBJECTSOURCE_H
