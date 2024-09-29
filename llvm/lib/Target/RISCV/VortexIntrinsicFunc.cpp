@@ -63,7 +63,7 @@ ModulePass *createVortexIntrinsicFuncLoweringPass() {
 } // End namespace llvm
 
 INITIALIZE_PASS(VortexIntrinsicFuncLowering, DEBUG_TYPE,
-                "Fix function bitcasts for AMDGPU", false, false)
+                "Fix function bitcasts for VortexGPU", false, false)
 
 char VortexIntrinsicFuncLowering::ID = 0;
 
@@ -135,7 +135,8 @@ bool VortexIntrinsicFuncLowering::runOnModule(Module &M) {
       {"vx_thread_mask", "llvm.riscv.vx.tmask"},
       {"vx_tmc", "llvm.riscv.vx.tmc"},
       {"vx_wmma", "llvm.riscv.vx_wmma"},
-      {"local_sw", "llvm.riscv.vx_local_sw"}
+      {"local_sw", "llvm.riscv.vx_local_sw"},
+      {"local_lw", "llvm.riscv.vx_local_lw"}
 
       };
   // Type* SizeTTy_;
@@ -163,6 +164,7 @@ bool VortexIntrinsicFuncLowering::runOnModule(Module &M) {
   Function *tmc_func_;
   Function *wmma_func_; // New function pointer for WMMA intrinsic
 Function *local_sw_; // New function pointer for WMMA intrinsi
+Function *local_lw_; // New function pointer for WMMA intrinsi
 
   if (sizeTSize == 64) {
     bar_func_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_bar_i64);
@@ -175,6 +177,8 @@ Function *local_sw_; // New function pointer for WMMA intrinsi
     tmask_func_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_tmask_i64);
     tmc_func_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_tmc_i64);
     wmma_func_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_wmma_i64);
+  local_sw_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_local_sw_i64);
+  local_lw_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_local_lw_i64);
   } else {
     assert(sizeTSize == 32);
     bar_func_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_bar_i32);
@@ -187,7 +191,8 @@ Function *local_sw_; // New function pointer for WMMA intrinsi
     tmask_func_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_tmask_i32);
     tmc_func_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_tmc_i32);
     wmma_func_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_wmma_i32);
-      // local_sw_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_local_sw);
+ local_sw_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_local_sw_i32);
+  local_lw_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_local_lw_i32);
   }
 
   // Find target vx intrinsic
@@ -216,6 +221,29 @@ Function *local_sw_; // New function pointer for WMMA intrinsi
         std::cout << "\033[34m" << check << "\033[0m" << std::endl;
         printColored("hiii", "magenta");
 
+
+
+  if (check == 10) { // local_sw
+  printColored("woahhhh","red");
+  CallInst *CallInstr = dyn_cast<CallInst>(Instr);
+  Value *Arg0 = CallInstr->getArgOperand(0); // Value to store
+  Value *Arg1 = CallInstr->getArgOperand(1); // Base address register
+  Value *Arg2 = CallInstr->getArgOperand(2); // Immediate offset
+
+  auto local_sw_inst = CallInst::Create(local_sw_, {Arg0, Arg1, Arg2}, "", Instr);
+  Instr->replaceAllUsesWith(local_sw_inst);
+  CallToRemove.insert(Instr);
+}
+
+if (check == 11) { // local_lw
+  CallInst *CallInstr = dyn_cast<CallInst>(Instr);
+  Value *Arg0 = CallInstr->getArgOperand(0); // Base address register
+  Value *Arg1 = CallInstr->getArgOperand(1); // Immediate offset
+
+  auto local_lw_inst = CallInst::Create(local_lw_, {Arg0, Arg1}, "", Instr);
+  Instr->replaceAllUsesWith(local_lw_inst);
+  CallToRemove.insert(Instr);
+}
 
 
         if (check == 9) { // WMMA case
@@ -270,7 +298,8 @@ Function *local_sw_; // New function pointer for WMMA intrinsi
           Instr->replaceAllUsesWith(widinst);
           CallToRemove.insert(Instr);
 
-        } else if (check == 6) {
+        } 
+        else if (check == 6) {
           auto cidinst = CallInst::Create(cid_func_, "cid", Instr);
           Instr->replaceAllUsesWith(cidinst);
           CallToRemove.insert(Instr);

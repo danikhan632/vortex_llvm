@@ -10,7 +10,7 @@
 #define MLIR_DIALECT_VortexGPU_TRANSFORMS_PASSES_H
 
 #include "mlir/Conversion/LLVMCommon/TypeConverter.h"
-// #include "mlir/Dialect/VortexGPU/Transforms/PassesEnums.h.inc"
+ #include "mlir/Dialect/VortexGPU/Transforms/PassesEnums.h.inc"
 #include "mlir/Pass/Pass.h"
 
 namespace mlir {
@@ -22,15 +22,8 @@ namespace vortex_gpu {
 // The EnableArmStreaming pass.
 //===----------------------------------------------------------------------===//
 #define GEN_PASS_DECL
-// #include "mlir/Dialect/VortexGPU/Transforms/Passes.h.inc"
+#include "mlir/Dialect/VortexGPU/Transforms/Passes.h.inc"
 
-
-std::unique_ptr<Pass> createEnableArmStreamingPass(
-    const ArmStreamingMode = ArmStreamingMode::Streaming,
-    const ArmZaMode = ArmZaMode::Disabled, bool onlyIfRequiredByOps = false);
-
-/// Pass that allocates tile IDs to VortexGPU operations.
-std::unique_ptr<Pass> createTileAllocationPass();
 
 //===----------------------------------------------------------------------===//
 // Registration
@@ -38,7 +31,7 @@ std::unique_ptr<Pass> createTileAllocationPass();
 
 /// Generate the code for registering passes.
 #define GEN_PASS_REGISTRATION
-// #include "mlir/Dialect/VortexGPU/Transforms/Passes.h.inc"
+ #include "mlir/Dialect/VortexGPU/Transforms/Passes.h.inc"
 
 } // namespace vortex_gpu
 } // namespace mlir

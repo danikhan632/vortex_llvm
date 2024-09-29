@@ -154,6 +154,9 @@ def : StPat<store, SW, GPR, PtrVT>;
 }
 
 let Predicates = [IsRV64] in {
+  
 def : LdPat<load, LD, PtrVT>;
+
 def : StPat<store, SD, GPR, PtrVT>;
+
 }

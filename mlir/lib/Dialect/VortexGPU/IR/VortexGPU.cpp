@@ -47,13 +47,12 @@ void VortexGPUDialect::initialize() {
   addAttributes<
 #define GET_ATTRDEF_LIST
 #include "mlir/Dialect/VortexGPU/IR/VortexGPUAttrDefs.cpp.inc"
-      >();
+>();
 
   addOperations<
-#define GET_OP_LIST
+
 #include "mlir/Dialect/VortexGPU/IR/VortexGPUOps.cpp.inc"
-      ,
-#define GET_OP_LIST
+
 #include "mlir/Dialect/VortexGPU/IR/VortexGPUIntrinsicOps.cpp.inc"
       >();
 }

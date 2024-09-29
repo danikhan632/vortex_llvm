@@ -73,10 +73,61 @@ let TargetPrefix = "riscv" in {
   defm int_riscv_masked_cmpxchg : MaskedAtomicRMWFiveArgIntrinsics;
 
   // Vortex extension
-  
+
+// Vortex extension
+
+class VortexD1S1ImmIntrinsicsImpl<LLVMType itype>
+    : Intrinsic<[itype], [itype, llvm_i32_ty], [IntrReadMem, IntrHasSideEffects, IntrConvergent]>;
+
+class VortexD0S2ImmIntrinsicsImpl<LLVMType itype>
+    : Intrinsic<[], [itype, itype, llvm_i32_ty], [IntrWriteMem, IntrHasSideEffects, IntrConvergent]>;
+
+multiclass VortexD1S1ImmIntrinsics {
+    def _i32 : VortexD1S1ImmIntrinsicsImpl<llvm_i32_ty>;
+    def _i64 : VortexD1S1ImmIntrinsicsImpl<llvm_i64_ty>;
+}
+
+multiclass VortexD0S2ImmIntrinsics {
+    def _i32 : VortexD0S2ImmIntrinsicsImpl<llvm_i32_ty>;
+    def _i64 : VortexD0S2ImmIntrinsicsImpl<llvm_i64_ty>;
+}
+
+
+
+class VortexWMMAIntrinsicsImpl<LLVMType itype>
+    : Intrinsic<[], [
+        itype,           // shape (e.g., m16n16k16)
+        itype,           // A layout (row/col)
+        itype,           // B layout (row/col)
+        itype,           // C layout (row/col)
+        itype,           // A element type
+        itype,           // B element type
+        itype,           // C element type
+        itype,           // D element type (result)
+        llvm_ptr_ty,     // destination pointer
+        llvm_ptr_ty,     // A matrix pointer
+        llvm_ptr_ty,     // B matrix pointer
+        llvm_ptr_ty      // C matrix pointer
+    ], [IntrHasSideEffects, IntrConvergent]>;
 
   def int_riscv_vx_uniform : Intrinsic<[llvm_any_ty], [llvm_any_ty], [IntrNoMem]>;
 
+
+def int_riscv_vx_local_lw_i32 : Intrinsic<[llvm_i32_ty],
+                                          [llvm_i32_ty, llvm_i32_ty],
+                                          [IntrReadMem, IntrHasSideEffects, IntrWillReturn]>;
+
+def int_riscv_vx_local_lw_i64 : Intrinsic<[llvm_i64_ty],
+                                          [llvm_i64_ty, llvm_i32_ty],
+                                          [IntrReadMem, IntrHasSideEffects, IntrWillReturn]>;
+
+def int_riscv_vx_local_sw_i32 : Intrinsic<[],
+                                          [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty],
+                                          [IntrWriteMem, IntrHasSideEffects, IntrWillReturn]>;
+
+def int_riscv_vx_local_sw_i64 : Intrinsic<[],
+                                          [llvm_i64_ty, llvm_i64_ty, llvm_i32_ty],
+                                          [IntrWriteMem, IntrHasSideEffects, IntrWillReturn]>;
   class VortexCSRIntrinsicsImpl<LLVMType itype>
       : Intrinsic<[itype], [], [IntrNoMem, IntrWillReturn]>;
 
@@ -135,18 +186,9 @@ let TargetPrefix = "riscv" in {
   defm int_riscv_vx_wmma : VortexWMMAIntrinsics;
 
 
-  // Define a new intrinsic class for instructions with two registers and an immediate (like local_sw)
-class VortexD0S2ImmIntrinsicsImpl<LLVMType itype>
-    : Intrinsic<[], [itype, itype, llvm_i32_ty], [IntrHasSideEffects, IntrConvergent]>;
 
-// Multiclass for `local_sw` instruction (both i32 and i64 variants)
-multiclass VortexD0S2ImmIntrinsics {
-    def _i32 : VortexD0S2ImmIntrinsicsImpl<llvm_i32_ty>;
-    def _i64 : VortexD0S2ImmIntrinsicsImpl<llvm_i64_ty>;
-}
 
-// Instantiate the new intrinsic `local_sw`
-defm int_riscv_local_sw : VortexD0S2ImmIntrinsics;
+
 
 
 } // TargetPrefix = "riscv"

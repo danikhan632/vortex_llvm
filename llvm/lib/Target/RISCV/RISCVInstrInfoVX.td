@@ -1,21 +1,48 @@
 // Vortex instructions definitions
 
 
-
 def RISCV_CUSTOM0 : RISCVOpcode<"CUSTOM0", 0b0001011>;   // 0x0B
 def RISCV_CUSTOM1 : RISCVOpcode<"CUSTOM1", 0b0101011>;   // 0x2B
 def RISCV_CUSTOM2 : RISCVOpcode<"CUSTOM2", 0b1011011>;   // 0x5B
 def RISCV_CUSTOM3 : RISCVOpcode<"CUSTOM3", 0b1111011>;   // 0x7B
-// Custom opcode definition for local_sw
+def RISCV_CUSTOM4 : RISCVOpcode<"CUSTOM4", 0b1101011>;
+// Vortex instructions definitions
 
+// Vortex instructions definitions
 
-let hasSideEffects = 1, mayStore = 1, mayLoad = 0 in {
-  // Definition of local_sw instruction (store word with immediate and register)
-  def LOCAL_SW : RVInstS<0b010, RISCV_CUSTOM4, (outs),
-                        (ins GPR:$rs2, simm12:$imm12, GPR:$rs1),
-                        "vx_local_sw", "$rs2, ${imm12}(${rs1})">;
+let hasSideEffects = 1, mayLoad = 1, mayStore = 0 in {
+def VX_LOCAL_LW : RVInstI<0b000, RISCV_CUSTOM4, 
+                          (outs GPR:$rd), 
+                          (ins GPR:$rs1, simm12:$imm12),
+                          "vx_local_lw", 
+                          "$rd, ${imm12}(${rs1})"> {
+  let Inst{31-25} = 0b0000000;
+}
 }
 
+let hasSideEffects = 1, mayLoad = 0, mayStore = 1 in {
+def VX_LOCAL_SW : RVInstS<0b001, RISCV_CUSTOM4, 
+                          (outs), 
+                          (ins GPR:$rs2, GPR:$rs1, simm12:$imm12),
+                          "vx_local_sw", 
+                          "$rs2, ${imm12}(${rs1})"> {
+  let Inst{31-25} = 0b0000000;
+}
+}
+
+// Patterns for intrinsics
+
+def : Pat<(int_riscv_vx_local_lw_i32 GPR:$rs1, simm12:$imm12),
+          (VX_LOCAL_LW GPR:$rs1, simm12:$imm12)>;
+
+def : Pat<(int_riscv_vx_local_lw_i64 GPR:$rs1, simm12:$imm12),
+          (VX_LOCAL_LW GPR:$rs1, simm12:$imm12)>;
+
+def : Pat<(int_riscv_vx_local_sw_i32 GPR:$rs1, GPR:$rs2, simm12:$imm12),
+          (VX_LOCAL_SW GPR:$rs2, GPR:$rs1, simm12:$imm12)>;
+
+def : Pat<(int_riscv_vx_local_sw_i64 GPR:$rs1, GPR:$rs2, simm12:$imm12),
+          (VX_LOCAL_SW GPR:$rs2, GPR:$rs1, simm12:$imm12)>;
 
 let hasSideEffects = 1, mayStore = 0, mayLoad = 0 in {
   def VX_TMC : RVInstR<0, 0, RISCV_CUSTOM0, (outs), (ins GPR:$rs1),
@@ -151,9 +178,3 @@ def : Pat<(int_riscv_vx_wmma_i64 GPR:$rs1, GPR:$rs2, GPR:$rs3, GPR:$rs4,
                    GPR:$rs5, GPR:$rs6, GPR:$rs7, GPR:$rs8,
                    GPR:$rs9, GPR:$rs10, GPR:$rs11, GPR:$rs12)>;
 
-
-// def : Pat<(int_riscv_vx_local_sw_i32 GPR:$rs2, simm12:$imm12, GPR:$rs1),
-//           (LOCAL_SW GPR:$rs2, simm12:$imm12, GPR:$rs1)>;
-
-// def : Pat<(int_riscv_vx_local_sw_i64 GPR:$rs2, simm12:$imm12, GPR:$rs1),
-//           (LOCAL_SW GPR:$rs2, simm12:$imm12, GPR:$rs1)>;

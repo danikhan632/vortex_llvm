@@ -11,7 +11,7 @@
                 "-march=riscv32",
                 "-mcpu=generic-rv32",
                 "-mattr=+m,+a,+f,+vortex",
-                "${workspaceFolder}/foo/simple.ll",
+                "${workspaceFolder}/foo/kernel.ll",
                 "-o",
                 "${workspaceFolder}/foo/kernel.s"
             ],
