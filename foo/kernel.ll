@@ -4,6 +4,12 @@ target datalayout = "e-m:e-p:32:32-i64:64-n32-S128"
 target triple = "riscv32-unknown-unknown-elf"
 
 ; Function Attrs: convergent norecurse nounwind
+; ModuleID = 'kernel'
+source_filename = "kernel.cl"
+target datalayout = "e-m:e-p:32:32-i64:64-n32-S128"
+target triple = "riscv32-unknown-unknown-elf"
+
+; Function Attrs: convergent norecurse nounwind
 define dso_local spir_kernel void @sgemm3(ptr nocapture noundef readonly align 4 %0, ptr nocapture noundef readonly align 4 %1, ptr nocapture noundef writeonly align 4 %2, i32 noundef %3, ptr nocapture noundef align 4 %4, ptr nocapture noundef align 4 %5) local_unnamed_addr #0 !kernel_arg_addr_space !6 !kernel_arg_access_qual !7 !kernel_arg_type !8 !kernel_arg_base_type !8 !kernel_arg_type_qual !9 {
   %7 = tail call i32 @_Z13get_global_idj(i32 noundef 1) #4
   %8 = tail call i32 @_Z13get_global_idj(i32 noundef 0) #4
@@ -43,7 +49,8 @@ define dso_local spir_kernel void @sgemm3(ptr nocapture noundef readonly align 4
   %34 = add i32 %33, %8
   %35 = getelementptr inbounds float, ptr %1, i32 %34
   %36 = load float, ptr %35, align 4, !tbaa !10
-  store float %36, ptr %19, align 4, !tbaa !10
+; REPLACE: Store to %5 (local memory)
+tail call void asm sideeffect "vx_local_sw $0, 0($1)", "r,r"(float %36, ptr %19)
 
   ; Updated to use two operands for the barrier intrinsic
   tail call void @llvm.riscv.vx.bar(i32 %7, i32 %8) #5
