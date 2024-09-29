@@ -7,31 +7,31 @@
 // //
 // //===----------------------------------------------------------------------===//
 
-// #ifndef MLIR_CONVERSION_VortexGPUTOLLVM_VortexGPUTOLLVM_H_
-// #define MLIR_CONVERSION_VortexGPUTOLLVM_VortexGPUTOLLVM_H_
+#ifndef MLIR_CONVERSION_VortexGPUTOLLVM_VortexGPUTOLLVM_H_
+#define MLIR_CONVERSION_VortexGPUTOLLVM_VortexGPUTOLLVM_H_
 
-// #include <memory>
+#include <memory>
 
-// #include "mlir/Dialect/VortexGPU/Transforms/Passes.h"
+#include "mlir/Dialect/VortexGPU/Transforms/Passes.h"
 
-// namespace mlir {
-// class Pass;
-// class RewritePatternSet;
+namespace mlir {
+class Pass;
+class RewritePatternSet;
 
-// #define GEN_PASS_DECL_CONVERTVortexGPUTOLLVM
-// #include "mlir/Conversion/Passes.h.inc"
+#define GEN_PASS_DECL_CONVERTVortexGPUTOLLVM
+#include "mlir/Conversion/Passes.h.inc"
 
-// /// Create a pass to convert from the VortexGPU dialect to LLVM intrinsics.
-// std::unique_ptr<Pass> createConvertVortexGPUToLLVMPass();
+/// Create a pass to convert from the VortexGPU dialect to LLVM intrinsics.
+std::unique_ptr<Pass> createConvertVortexGPUToLLVMPass();
 
-// /// Configure target to convert from the VortexGPU dialect to LLVM intrinsics.
-// void configureVortexGPUToLLVMConversionLegality(ConversionTarget &target);
+/// Configure target to convert from the VortexGPU dialect to LLVM intrinsics.
+void configureVortexGPUToLLVMConversionLegality(ConversionTarget &target);
 
-// /// Populate the given list with patterns that convert from the VortexGPU dialect
-// /// to LLVM intrinsics.
-// void populateVortexGPUToLLVMConversionPatterns(LLVMTypeConverter &converter,
-//                                             RewritePatternSet &patterns);
+/// Populate the given list with patterns that convert from the VortexGPU dialect
+/// to LLVM intrinsics.
+void populateVortexGPUToLLVMConversionPatterns(LLVMTypeConverter &converter,
+                                            RewritePatternSet &patterns);
 
-// } // namespace mlir
+} // namespace mlir
 
-// #endif // MLIR_CONVERSION_VortexGPUTOLLVM_VortexGPUTOLLVM_H_
+#endif // MLIR_CONVERSION_VortexGPUTOLLVM_VortexGPUTOLLVM_H_
