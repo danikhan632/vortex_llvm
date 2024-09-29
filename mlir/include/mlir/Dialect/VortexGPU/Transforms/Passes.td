@@ -6,12 +6,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef MLIR_DIALECT_VortexGPU_TRANSFORMS_PASSES_TD
-#define MLIR_DIALECT_VortexGPU_TRANSFORMS_PASSES_TD
+#ifndef MLIR_DIALECT_VORTEXGPU_TRANSFORMS_PASSES_TD
+#define MLIR_DIALECT_VORTEXGPU_TRANSFORMS_PASSES_TD
 
 include "mlir/Pass/PassBase.td"
-include "mlir/IR/EnumAttr.td"
 
 
 
-#endif // MLIR_DIALECT_VortexGPU_TRANSFORMS_PASSES_TD
+#endif // MLIR_DIALECT_VORTEXGPU_TRANSFORMS_PASSES_TD

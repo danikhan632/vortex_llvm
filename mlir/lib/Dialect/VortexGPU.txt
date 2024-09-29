@@ -1,0 +1,197 @@
+File: CMakeLists.txt
+add_subdirectory(IR)
+add_subdirectory(Transforms)
+
+
+File: IR/VortexGPU.cpp
+//===- VortexGPUDialect.cpp - MLIR VortexGPU dialect implementation -------------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+// This file implements the VortexGPU dialect and its operations.
+//
+//===----------------------------------------------------------------------===//
+
+#include "mlir/Dialect/VortexGPU/IR/VortexGPU.h"
+#include "mlir/Dialect/LLVMIR/LLVMTypes.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/IR/DialectImplementation.h"
+#include "mlir/IR/TypeUtilities.h"
+#include "llvm/ADT/TypeSwitch.h"
+
+using namespace mlir;
+using namespace mlir::vortex_gpu;
+
+//===----------------------------------------------------------------------===//
+// Tablegen Definitions
+//===----------------------------------------------------------------------===//
+
+
+#include "mlir/Dialect/VortexGPU/IR/VortexGPUDialect.cpp.inc"
+
+#include "mlir/Dialect/VortexGPU/IR/VortexGPUEnums.cpp.inc"
+
+#include "mlir/Dialect/VortexGPU/IR/VortexGPUOpInterfaces.cpp.inc"
+
+#define GET_OP_CLASSES
+#include "mlir/Dialect/VortexGPU/IR/VortexGPUOps.cpp.inc"
+
+#define GET_OP_CLASSES
+#include "mlir/Dialect/VortexGPU/IR/VortexGPUIntrinsicOps.cpp.inc"
+
+#define GET_TYPEDEF_CLASSES
+#include "mlir/Dialect/VortexGPU/IR/VortexGPUTypes.cpp.inc"
+
+#define GET_ATTRDEF_CLASSES
+#include "mlir/Dialect/VortexGPU/IR/VortexGPUAttrDefs.cpp.inc"
+
+void VortexGPUDialect::initialize() {
+  addAttributes<
+#define GET_ATTRDEF_LIST
+#include "mlir/Dialect/VortexGPU/IR/VortexGPUAttrDefs.cpp.inc"
+>();
+
+  addOperations<
+
+#include "mlir/Dialect/VortexGPU/IR/VortexGPUOps.cpp.inc"
+
+#include "mlir/Dialect/VortexGPU/IR/VortexGPUIntrinsicOps.cpp.inc"
+      >();
+}
+
+
+File: IR/CMakeLists.txt
+add_mlir_dialect_library(MLIRVortexGPUDialect
+  VortexGPU.cpp
+  Utils.cpp
+
+  ADDITIONAL_HEADER_DIRS
+  ${MLIR_MAIN_INCLUDE_DIR}/mlir/Dialect/VortexGPU
+  
+
+  DEPENDS
+  MLIRVortexGPUOpsIncGen
+  MLIRVortexGPUIntrinsicOpsIncGen
+
+  LINK_LIBS PUBLIC
+  MLIRIR
+  MLIRLLVMDialect
+  MLIRMemRefDialect
+  MLIRSCFDialect
+  MLIRSideEffectInterfaces
+  MLIRVectorDialect
+)
+
+
+File: IR/Utils.cpp
+//===- Utils.cpp - Utilities to support the VortexGPU dialect ----------------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+// This file implements utilities for the VortexGPU dialect.
+//
+//===----------------------------------------------------------------------===//
+
+#include "mlir/Dialect/VortexGPU/Utils/Utils.h"
+#include "mlir/Dialect/VortexGPU/IR/VortexGPU.h"
+
+
+namespace mlir::vortex_gpu {
+
+
+} // namespace mlir::vortex_gpu
+
+
+File: Transforms/CMakeLists.txt
+add_mlir_dialect_library(MLIRVortexGPUTransforms
+  EnableArmStreaming.cpp
+  TileAllocation.cpp
+  
+
+  ADDITIONAL_HEADER_DIRS
+  ${MLIR_MAIN_INCLUDE_DIR}/mlir/Dialect/VortexGPU/Transforms
+
+  DEPENDS
+  MLIRVortexGPUTransformsIncGen
+
+  LINK_LIBS PUBLIC
+  MLIRVortexGPUDialect
+  MLIRFuncDialect
+  MLIRLLVMCommonConversion
+  MLIRVectorDialect
+  MLIRSCFDialect
+  MLIRPass
+  )
+
+
+File: Transforms/EnableArmStreaming.cpp
+
+
+#include "mlir/Dialect/VortexGPU/IR/VortexGPU.h"
+#include "mlir/Dialect/VortexGPU/Transforms/Passes.h"
+#include "mlir/Dialect/VortexGPU/Transforms/PassesEnums.cpp.inc"
+
+#include "mlir/Dialect/Func/IR/FuncOps.h"
+
+#define DEBUG_TYPE "enable-arm-streaming"
+
+namespace mlir {
+namespace vortex_gpu {
+#define GEN_PASS_DEF_ENABLEARMSTREAMING
+#include "mlir/Dialect/VortexGPU/Transforms/Passes.h.inc"
+} // namespace vortex_gpu
+} // namespace mlir
+
+using namespace mlir;
+using namespace mlir::vortex_gpu;
+namespace {
+
+} // namespace
+
+// std::unique_ptr<Pass> mlir::vortex_gpu::createTemplatePass() {
+//   return nullptr;
+// }
+
+
+File: Transforms/TileAllocation.cpp
+//===- TileAllocation.cpp - Allocate SME ZA tiles -------------------------===//
+
+//===----------------------------------------------------------------------===//
+
+#include "mlir/Dialect/VortexGPU/IR/VortexGPU.h"
+#include "mlir/Dialect/VortexGPU/Transforms/Passes.h"
+#include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+#include "llvm/ADT/TypeSwitch.h"
+
+#define DEBUG_TYPE "allocate-arm-sme-tiles"
+
+namespace mlir {
+namespace vortex_gpu {
+#define GEN_PASS_DEF_TILEALLOCATION
+#include "mlir/Dialect/VortexGPU/Transforms/Passes.h.inc"
+} // namespace vortex_gpu
+} // namespace mlir
+
+using namespace mlir;
+using namespace mlir::vortex_gpu;
+
+namespace {
+
+
+} // namespace
+
+// std::unique_ptr<Pass> mlir::vortex_gpu::createTileAllocationPass() {
+//   return nullptr;
+// }
+
+

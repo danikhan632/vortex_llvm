@@ -1,0 +1,385 @@
+File: CMakeLists.txt
+add_subdirectory(IR)
+add_subdirectory(Transforms)
+
+
+File: IR/CMakeLists.txt
+add_mlir_dialect(VortexGPU vortex_gpu VortexGPU)
+
+
+# Generate declarations and definitions of VortexGPU Ops
+set(LLVM_TARGET_DEFINITIONS VortexGPUOps.td)
+mlir_tablegen(VortexGPUOps.h.inc -gen-op-decls)
+mlir_tablegen(VortexGPUOps.cpp.inc -gen-op-defs)
+mlir_tablegen(VortexGPUEnums.h.inc -gen-enum-decls)
+mlir_tablegen(VortexGPUEnums.cpp.inc -gen-enum-defs)
+mlir_tablegen(VortexGPUAttrDefs.h.inc -gen-attrdef-decls -attrdefs-dialect=vortex_gpu)
+mlir_tablegen(VortexGPUAttrDefs.cpp.inc -gen-attrdef-defs -attrdefs-dialect=vortex_gpu)
+add_public_tablegen_target(MLIRVortexGPUOpsIncGen)
+
+# Generate LLVM IR Conversions
+set(LLVM_TARGET_DEFINITIONS VortexGPUOps.td)
+mlir_tablegen(VortexGPUOpsConversions.inc -gen-llvmir-conversions)
+add_public_tablegen_target(MLIRVortexGPUConversionsIncGen)
+
+# Generate op interface declarations and definitions
+set(LLVM_TARGET_DEFINITIONS VortexGPUOps.td)
+mlir_tablegen(VortexGPUOpInterfaces.h.inc -gen-op-interface-decls)
+mlir_tablegen(VortexGPUOpInterfaces.cpp.inc -gen-op-interface-defs)
+add_public_tablegen_target(MLIRVortexGPUOpInterfaces)
+
+# Generate declarations and definitions of VortexGPU intrinsic Ops
+set(LLVM_TARGET_DEFINITIONS VortexGPUIntrinsicOps.td)
+mlir_tablegen(VortexGPUIntrinsicOps.h.inc -gen-op-decls)
+mlir_tablegen(VortexGPUIntrinsicOps.cpp.inc -gen-op-defs)
+mlir_tablegen(VortexGPUIntrinsicConversions.inc -gen-llvmir-conversions)
+add_public_tablegen_target(MLIRVortexGPUIntrinsicOpsIncGen)
+
+# Generate the docs
+add_mlir_doc(VortexGPUOps VortexGPUOps Dialects/ -gen-op-doc)
+add_mlir_doc(VortexGPUIntrinsicOps VortexGPUIntrinsicOps Dialects/ -gen-op-doc)
+
+
+File: IR/VortexGPUIntrinsicOps.td
+//===-- VortexGPUIntrinsicOps.td ------------------------------*- tablegen -*-===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+// This file contains definitions of the intrinsic Ops for the VortexGPU dialect
+//
+//===----------------------------------------------------------------------===//
+
+#ifndef VortexGPU_INTRINSIC_OPS
+#define VortexGPU_INTRINSIC_OPS
+
+include "VortexGPU.td"
+
+//===----------------------------------------------------------------------===//
+// VortexGPU Intrinsic op definitions
+//===----------------------------------------------------------------------===//
+
+
+#endif // VortexGPU_INTRINSIC_OPS
+
+
+File: IR/VortexGPU.h
+//===- VortexGPUDialect.h - MLIR Dialect for Vortex GPU---------------*- C++ -*-===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+// This file declares the Target dialect for VortexGPU in MLIR.
+//
+//===----------------------------------------------------------------------===//
+
+#ifndef MLIR_DIALECT_VortexGPU_IR_VortexGPU_H
+#define MLIR_DIALECT_VortexGPU_IR_VortexGPU_H
+
+#include "mlir/Bytecode/BytecodeOpInterface.h"
+#include "mlir/Dialect/VortexGPU/IR/VortexGPUEnums.h"
+#include "mlir/Dialect/VortexGPU/Utils/Utils.h"
+#include "mlir/Dialect/LLVMIR/LLVMTypes.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/Vector/IR/VectorOps.h"
+#include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/Dialect.h"
+#include "mlir/IR/OpDefinition.h"
+#include "mlir/Interfaces/SideEffectInterfaces.h"
+
+namespace mlir::arm_sme {
+static constexpr unsigned kInMemoryTileIdBase = 16;
+#include "mlir/Dialect/VortexGPU/IR/VortexGPUOpInterfaces.h.inc"
+} // namespace mlir::arm_sme
+
+#define GET_ATTRDEF_CLASSES
+#include "mlir/Dialect/VortexGPU/IR/VortexGPUAttrDefs.h.inc"
+
+#include "mlir/Dialect/VortexGPU/IR/VortexGPUDialect.h.inc"
+
+#define GET_OP_CLASSES
+#include "mlir/Dialect/VortexGPU/IR/VortexGPUOps.h.inc"
+
+#define GET_OP_CLASSES
+#include "mlir/Dialect/VortexGPU/IR/VortexGPUIntrinsicOps.h.inc"
+
+#endif // MLIR_DIALECT_VortexGPU_IR_VortexGPU_H
+
+
+File: IR/VortexGPU.td
+//===-- VortexGPU.td - VortexGPU dialect definitions ------------*- tablegen -*-===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+// This file contains the definition of the VortexGPU dialect as well as some
+// shared definitions.
+//
+//===----------------------------------------------------------------------===//
+
+#ifndef VortexGPU
+#define VortexGPU
+
+
+include "mlir/IR/DialectBase.td"
+include "mlir/Dialect/LLVMIR/LLVMOpBase.td"
+
+//===----------------------------------------------------------------------===//
+// VortexGPU Dialect
+//===----------------------------------------------------------------------===//
+
+def VortexGPU_Dialect : Dialect {
+  let name = "vortex_gpu";
+  let cppNamespace = "::mlir::vortex_gpu";
+  let summary = "Basic dialect to target Arm SME architectures";
+  let description = [{
+
+  }];
+  let dependentDialects = ["scf::SCFDialect", "vector::VectorDialect",
+                           "memref::MemRefDialect"];
+  let useDefaultAttributePrinterParser = 1;
+}
+
+//===----------------------------------------------------------------------===//
+// VortexGPU type definitions
+//===----------------------------------------------------------------------===//
+
+// FIXME: This allows types that are not SVE vectors, e.g. vector<[16]xi128>.
+
+
+#endif // VortexGPU
+
+
+File: IR/VortexGPUOps.td
+//===-- VortexGPUOps.td - VortexGPU dialect operation definitions *- tablegen -*-===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+// This file defines the VortexGPU dialect ops. It also defines custom attributes
+// and types that are used to define the Ops
+//
+//===----------------------------------------------------------------------===//
+
+#ifndef VortexGPU_OPS
+#define VortexGPU_OPS
+
+include "VortexGPU.td"
+include "mlir/IR/EnumAttr.td"
+include "mlir/IR/OpBase.td"
+include "mlir/Interfaces/SideEffectInterfaces.td"
+include "mlir/Dialect/LLVMIR/LLVMOpBase.td"
+include "mlir/Interfaces/InferTypeOpInterface.td"
+
+//===----------------------------------------------------------------------===//
+// VortexGPU op interfaces
+//===----------------------------------------------------------------------===//
+
+
+//===----------------------------------------------------------------------===//
+// VortexGPU op definitions
+//===----------------------------------------------------------------------===//
+
+class VortexGPU_Op<string mnemonic, list<Trait> traits = []> :
+  Op<VortexGPU_Dialect, mnemonic, traits> {}
+
+
+
+
+
+#endif // VortexGPU_OPS
+
+
+File: IR/VortexGPUEnums.h
+//===- VortexGPUEnums.h -  Enums --------------------*- C++ -*-===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+
+#ifndef MLIR_DIALECT_VortexGPU_ENUMS_H
+#define MLIR_DIALECT_VortexGPU_ENUMS_H
+
+#include "mlir/IR/Dialect.h"
+
+#include "mlir/Dialect/VortexGPU/IR/VortexGPUEnums.h.inc"
+
+#endif
+
+
+File: Utils/Utils.h
+//===- Utils.h - General VortexGPU transformation utilities --------*- C++ -*-===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+// This header file defines prototypes for various utilities for the VortexGPU
+// dialect. These are not passes by themselves but are used either by passes,
+// optimization sequences, or in turn by other transformation utilities.
+//
+//===----------------------------------------------------------------------===//
+
+
+#ifndef MLIR_DIALECT_VortexGPU_UTILS_UTILS_H_
+#define MLIR_DIALECT_VortexGPU_UTILS_UTILS_H_
+
+#include "mlir/Dialect/VortexGPU/IR/VortexGPUEnums.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/IR/BuiltinTypes.h"
+#include <optional>
+
+namespace mlir {
+class Location;
+class PatternRewriter;
+class Value;
+} // namespace mlir
+
+namespace mlir::arm_sme {
+
+constexpr unsigned MinStreamingVectorLengthInBits = 128;
+
+/// Return minimum number of elements for the given element `type` in
+/// a vector of SVL bits.
+unsigned getSMETileSliceMinNumElts(Type type);
+
+/// Returns true if `type` is a valid element type for an SME tile or false
+/// otherwise.
+bool isValidSMETileElementType(Type type);
+
+/// Returns true if `vType` is a valid vector type for an SME tile or false
+/// otherwise.
+bool isValidSMETileVectorType(VectorType vType);
+
+/// Returns the type of SME tile this vector type corresponds to, or none if the
+/// vector type does not fit within an SME tile.
+
+/// Verifies the tile ID (if set) on this tile operation is valid.
+LogicalResult verifyOperationHasValidTileId(Operation *);
+
+/// Generates a for loop over ZA tile slices where the induction variable is
+/// the tile slice index and each iteration yields a new tile. Loop body is
+/// built via `makeLoopBody`, which returns the next tile value.
+scf::ForOp createLoopOverTileSlices(
+    PatternRewriter &rewriter, Location loc, Value initTile,
+    std::function<Value(OpBuilder &, Location, Value, Value)> makeLoopBody);
+
+} // namespace mlir::arm_sme
+
+#endif // MLIR_DIALECT_VortexGPU_UTILS_UTILS_H_
+
+
+File: Transforms/CMakeLists.txt
+set(LLVM_TARGET_DEFINITIONS Passes.td)
+mlir_tablegen(Passes.h.inc -gen-pass-decls -name VortexGPU)
+mlir_tablegen(PassesEnums.h.inc -gen-enum-decls)
+mlir_tablegen(PassesEnums.cpp.inc -gen-enum-defs)
+add_public_tablegen_target(MLIRVortexGPUTransformsIncGen)
+add_dependencies(mlir-headers MLIRVortexGPUTransformsIncGen)
+
+add_mlir_doc(Passes VortexGPUPasses ./ -gen-pass-doc)
+
+
+
+File: Transforms/Passes.td
+//===-- Passes.td - VortexGPU pass definition file ------------*- tablegen -*-===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+
+#ifndef MLIR_DIALECT_VortexGPU_TRANSFORMS_PASSES_TD
+#define MLIR_DIALECT_VortexGPU_TRANSFORMS_PASSES_TD
+
+include "mlir/Pass/PassBase.td"
+include "mlir/IR/EnumAttr.td"
+
+
+
+#endif // MLIR_DIALECT_VortexGPU_TRANSFORMS_PASSES_TD
+
+
+File: Transforms/Transforms.h
+//===- Transforms.h - VortexGPU Dialect Transformation Entrypoints -*- C++ -*-===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+
+
+#ifndef MLIR_DIALECT_VortexGPU_TRANSFORMS_H
+#define MLIR_DIALECT_VortexGPU_TRANSFORMS_H
+
+namespace mlir {
+
+class LLVMConversionTarget;
+class LLVMTypeConverter;
+class RewritePatternSet;
+
+} // namespace mlir
+
+#endif // MLIR_DIALECT_VortexGPU_TRANSFORMS_H
+
+
+File: Transforms/Passes.h
+//===- Passes.h - Pass Entrypoints ------------------------------*- C++ -*-===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+
+#ifndef MLIR_DIALECT_VortexGPU_TRANSFORMS_PASSES_H
+#define MLIR_DIALECT_VortexGPU_TRANSFORMS_PASSES_H
+
+#include "mlir/Conversion/LLVMCommon/TypeConverter.h"
+ #include "mlir/Dialect/VortexGPU/Transforms/PassesEnums.h.inc"
+#include "mlir/Pass/Pass.h"
+
+namespace mlir {
+
+class RewritePatternSet;
+
+namespace vortex_gpu {
+//===----------------------------------------------------------------------===//
+// The EnableArmStreaming pass.
+//===----------------------------------------------------------------------===//
+#define GEN_PASS_DECL
+#include "mlir/Dialect/VortexGPU/Transforms/Passes.h.inc"
+
+
+//===----------------------------------------------------------------------===//
+// Registration
+//===----------------------------------------------------------------------===//
+
+/// Generate the code for registering passes.
+#define GEN_PASS_REGISTRATION
+ #include "mlir/Dialect/VortexGPU/Transforms/Passes.h.inc"
+
+} // namespace vortex_gpu
+} // namespace mlir
+
+#endif // MLIR_DIALECT_VortexGPU_TRANSFORMS_PASSES_H
+
+

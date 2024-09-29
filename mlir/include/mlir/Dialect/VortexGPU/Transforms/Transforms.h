@@ -6,9 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-
-#ifndef MLIR_DIALECT_VortexGPU_TRANSFORMS_H
-#define MLIR_DIALECT_VortexGPU_TRANSFORMS_H
+#ifndef MLIR_DIALECT_VORTEXGPU_TRANSFORMS_H
+#define MLIR_DIALECT_VORTEXGPU_TRANSFORMS_H
 
 namespace mlir {
 
@@ -16,6 +15,15 @@ class LLVMConversionTarget;
 class LLVMTypeConverter;
 class RewritePatternSet;
 
+/// Collect a set of patterns to lower VortexGPU ops to ops that map to LLVM
+/// intrinsics.
+void populateVortexGPULegalizeForLLVMExportPatterns(LLVMTypeConverter &converter,
+                                                 RewritePatternSet &patterns);
+
+// /// Configure the target to support lowering VortexGPU ops to ops that map to LLVM
+// /// intrinsics.
+// void configureVortexGPULegalizeForExportTarget(LLVMConversionTarget &target);
+
 } // namespace mlir
 
-#endif // MLIR_DIALECT_VortexGPU_TRANSFORMS_H
+#endif // MLIR_DIALECT_VORTEXGPU_TRANSFORMS_H
