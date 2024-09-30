@@ -35,11 +35,14 @@ def VX_LOCAL_SW : RVInstS<0b001, RISCV_CUSTOM4,
 def : Pat<(int_riscv_vx_local_lw_i32 GPR:$rs1, simm12:$imm12),
           (VX_LOCAL_LW GPR:$rs1, simm12:$imm12)>;
 
-def : Pat<(int_riscv_vx_local_lw_i64 GPR:$rs1, simm12:$imm12),
-          (VX_LOCAL_LW GPR:$rs1, simm12:$imm12)>;
+
 
 def : Pat<(int_riscv_vx_local_sw_i32 GPR:$rs1, GPR:$rs2, simm12:$imm12),
           (VX_LOCAL_SW GPR:$rs2, GPR:$rs1, simm12:$imm12)>;
+
+def : Pat<(int_riscv_vx_local_lw_i64 GPR:$rs1, simm12:$imm12),
+          (VX_LOCAL_LW GPR:$rs1, simm12:$imm12)>;
+
 
 def : Pat<(int_riscv_vx_local_sw_i64 GPR:$rs1, GPR:$rs2, simm12:$imm12),
           (VX_LOCAL_SW GPR:$rs2, GPR:$rs1, simm12:$imm12)>;

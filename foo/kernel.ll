@@ -42,15 +42,25 @@ define dso_local spir_kernel void @sgemm3(ptr nocapture noundef readonly align 4
   %28 = phi float [ 0.000000e+00, %13 ], [ %38, %37 ]
   %29 = add i32 %15, %27
   %30 = getelementptr inbounds float, ptr %0, i32 %29
-  %31 = load float, ptr %30, align 4, !tbaa !10
-  store float %31, ptr %18, align 4, !tbaa !10
+  ; Replace the float %31 load with an indirect method
+  %ptr31 = alloca float                          ; Create space for the output value
+  tail call void asm sideeffect "vx_local_lw $0, 0($1)", "r,r"(ptr %ptr31, ptr %30)
+  %31 = load float, ptr %ptr31                   ; Load the value from %ptr31
+  
+  ; Replace store to %18 with vx_local_sw intrinsic
+  tail call void asm sideeffect "vx_local_sw $0, 0($1)", "r,r"(float %31, ptr %18)
+
   %32 = add nsw i32 %27, %9
   %33 = mul i32 %32, %3
   %34 = add i32 %33, %8
   %35 = getelementptr inbounds float, ptr %1, i32 %34
-  %36 = load float, ptr %35, align 4, !tbaa !10
-; REPLACE: Store to %5 (local memory)
-tail call void asm sideeffect "vx_local_sw $0, 0($1)", "r,r"(float %36, ptr %19)
+  ; Replace float load from %35 using an indirect method
+  %ptr36 = alloca float                          ; Create space for the output value
+  tail call void asm sideeffect "vx_local_lw $0, 0($1)", "r,r"(ptr %ptr36, ptr %35)
+  %36 = load float, ptr %ptr36                   ; Load the value from %ptr36
+
+  ; REPLACE: Store to %5 (local memory)
+  tail call void asm sideeffect "vx_local_sw $0, 0($1)", "r,r"(float %36, ptr %19)
 
   ; Updated to use two operands for the barrier intrinsic
   tail call void @llvm.riscv.vx.bar(i32 %7, i32 %8) #5
@@ -72,16 +82,26 @@ tail call void asm sideeffect "vx_local_sw $0, 0($1)", "r,r"(float %36, ptr %19)
   %43 = phi float [ %51, %41 ], [ %28, %26 ]
   %44 = add nsw i32 %42, %16
   %45 = getelementptr inbounds float, ptr %4, i32 %44
-  %46 = load float, ptr %45, align 4, !tbaa !10
+  ; Replace float load from %45 using an indirect method
+  %ptr46 = alloca float                          ; Create space for the output value
+  tail call void asm sideeffect "vx_local_lw $0, 0($1)", "r,r"(ptr %ptr46, ptr %45)
+  %46 = load float, ptr %ptr46                   ; Load the value from %ptr46
+  
   %47 = mul nsw i32 %42, %11
   %48 = add nsw i32 %47, %10
   %49 = getelementptr inbounds float, ptr %5, i32 %48
-  %50 = load float, ptr %49, align 4, !tbaa !10
+  ; Replace float load from %49 using an indirect method
+  %ptr50 = alloca float                          ; Create space for the output value
+  tail call void asm sideeffect "vx_local_lw $0, 0($1)", "r,r"(ptr %ptr50, ptr %49)
+  %50 = load float, ptr %ptr50                   ; Load the value from %ptr50
+  
   %51 = tail call float @llvm.fmuladd.f32(float %46, float %50, float %43)
   %52 = add nuw nsw i32 %42, 1
   %53 = icmp eq i32 %52, %11
   br i1 %53, label %37, label %41
 }
+
+
 
 ; Function Attrs: convergent mustprogress nofree nounwind willreturn memory(none)
 declare dso_local i32 @_Z13get_global_idj(i32 noundef) local_unnamed_addr #1
