@@ -6,22 +6,19 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef MLIR_DIALECT_ARMSVE_TRANSFORMS_PASSES_H
-#define MLIR_DIALECT_ARMSVE_TRANSFORMS_PASSES_H
+#ifndef MLIR_DIALECT_VORTEXGPU_TRANSFORMS_PASSES_H
+#define MLIR_DIALECT_VORTEXGPU_TRANSFORMS_PASSES_H
 
 #include "mlir/Conversion/LLVMCommon/TypeConverter.h"
 #include "mlir/Pass/Pass.h"
 
 namespace mlir::vortex_gpu {
 
-#define GEN_PASS_DECL
-#include "mlir/Dialect/VortexGPU/Transforms/Passes.h.inc"
+//===----------------------------------------------------------------------===//
+// Passes
+//===----------------------------------------------------------------------===//
 
-/// Pass to legalize Arm SVE vector storage.
-std::unique_ptr<Pass> createLegalizeVectorStoragePass();
-
-/// Collect a set of patterns to legalize Arm SVE vector storage.
-void populateLegalizeVectorStoragePatterns(RewritePatternSet &patterns);
+std::unique_ptr<Pass> createVortexGPUOptimizePass();
 
 //===----------------------------------------------------------------------===//
 // Registration
@@ -33,4 +30,4 @@ void populateLegalizeVectorStoragePatterns(RewritePatternSet &patterns);
 
 } // namespace mlir::vortex_gpu
 
-#endif // MLIR_DIALECT_ARMSVE_TRANSFORMS_PASSES_H
+#endif // MLIR_DIALECT_VORTEXGPU_TRANSFORMS_PASSES_H

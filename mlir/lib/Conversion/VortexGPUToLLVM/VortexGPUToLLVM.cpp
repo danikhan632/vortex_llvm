@@ -25,3 +25,28 @@
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 
+#include "mlir/Dialect/VortexGPU/Transforms/Passes.h"
+#include "mlir/Dialect/VortexGPU/IR/VortexGPUDialect.h"
+#include "mlir/Pass/Pass.h"
+
+using namespace mlir;
+
+namespace mlir {
+namespace vortex_gpu {
+
+#define GEN_PASS_DEF_VORTEXGPUOPTIMIZEPASS
+#include "mlir/Dialect/VortexGPU/Transforms/Passes.h.inc"
+
+struct VortexGPUOptimizePass
+    : public impl::VortexGPUOptimizePassBase<VortexGPUOptimizePass> {
+  void runOnOperation() override {
+    // Implement your VortexGPU optimization logic here
+  }
+};
+
+std::unique_ptr<Pass> createVortexGPUOptimizePass() {
+  return std::make_unique<VortexGPUOptimizePass>();
+}
+
+} // namespace vortexgpu
+} // namespace mlir

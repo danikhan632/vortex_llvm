@@ -1,37 +1,34 @@
+//===- VortexGPUPasses.h - VortexGPU optimization passes --------*- C++ -*-===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+// This file declares the optimization passes for the VortexGPU dialect.
+//
+//===----------------------------------------------------------------------===//
 
-// //===- VortexGPUToLLVM.h - Convert VortexGPU to LLVM dialect ----------*- C++ -*-===//
-// //
-// // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// // See https://llvm.org/LICENSE.txt for license information.
-// // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-// //
-// //===----------------------------------------------------------------------===//
+#ifndef MLIR_DIALECT_VORTEXGPU_TRANSFORMS_PASSES_H
+#define MLIR_DIALECT_VORTEXGPU_TRANSFORMS_PASSES_H
 
-#ifndef MLIR_CONVERSION_VortexGPUTOLLVM_VortexGPUTOLLVM_H_
-#define MLIR_CONVERSION_VortexGPUTOLLVM_VortexGPUTOLLVM_H_
-
-#include <memory>
-
-#include "mlir/Dialect/VortexGPU/Transforms/Passes.h"
+#include "mlir/Pass/Pass.h"
 
 namespace mlir {
-class Pass;
-class RewritePatternSet;
+namespace vortex_gpu {
 
-#define GEN_PASS_DECL_CONVERTVortexGPUTOLLVM
-#include "mlir/Conversion/Passes.h.inc"
+#define GEN_PASS_DECL_VORTEXGPUOPTIMIZEPASS
+#include "mlir/Dialect/VortexGPU/Transforms/Passes.h.inc"
 
-/// Create a pass to convert from the VortexGPU dialect to LLVM intrinsics.
-std::unique_ptr<Pass> createConvertVortexGPUToLLVMPass();
+/// Creates a pass to perform VortexGPU-specific optimizations.
+std::unique_ptr<Pass> createVortexGPUOptimizePass();
 
-/// Configure target to convert from the VortexGPU dialect to LLVM intrinsics.
-void configureVortexGPUToLLVMConversionLegality(ConversionTarget &target);
+/// Generate the code for registering passes.
+#define GEN_PASS_REGISTRATION
+#include "mlir/Dialect/VortexGPU/Transforms/Passes.h.inc"
 
-/// Populate the given list with patterns that convert from the VortexGPU dialect
-/// to LLVM intrinsics.
-void populateVortexGPUToLLVMConversionPatterns(LLVMTypeConverter &converter,
-                                            RewritePatternSet &patterns);
-
+} // namespace vortexgpu
 } // namespace mlir
 
-#endif // MLIR_CONVERSION_VortexGPUTOLLVM_VortexGPUTOLLVM_H_
+#endif // MLIR_DIALECT_VORTEXGPU_TRANSFORMS_PASSES_H
