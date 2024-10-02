@@ -128,6 +128,28 @@ def int_riscv_vx_local_sw_i32 : Intrinsic<[],
 def int_riscv_vx_local_sw_i64 : Intrinsic<[],
                                           [llvm_i64_ty, llvm_i64_ty, llvm_i32_ty],
                                           [IntrWriteMem, IntrHasSideEffects, IntrWillReturn]>;
+
+// Updated intrinsic for 32-bit load (GPR:$rd, GPR:$rs1, imm7:$imm7, imm5:$imm5)
+def int_riscv_vx_asyncbulk_ld_g2l_i32 : Intrinsic<[llvm_i32_ty],
+                                                  [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty],
+                                                  [IntrReadMem, IntrHasSideEffects, IntrWillReturn]>;
+
+// Updated intrinsic for 64-bit load (GPR:$rd, GPR:$rs1, imm7:$imm7, imm5:$imm5)
+def int_riscv_vx_asyncbulk_ld_g2l_i64 : Intrinsic<[llvm_i64_ty],
+                                                  [llvm_i64_ty, llvm_i32_ty, llvm_i32_ty],
+                                                  [IntrReadMem, IntrHasSideEffects, IntrWillReturn]>;
+
+// Updated intrinsic for 32-bit store (GPR:$rs2, GPR:$rs1, imm7:$imm7, imm5:$imm5)
+def int_riscv_vx_asyncbulk_st_l2g_i32 : Intrinsic<[],
+                                                  [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty, llvm_i32_ty],
+                                                  [IntrWriteMem, IntrHasSideEffects, IntrWillReturn]>;
+
+// Updated intrinsic for 64-bit store (GPR:$rs2, GPR:$rs1, imm7:$imm7, imm5:$imm5)
+def int_riscv_vx_asyncbulk_st_l2g_i64 : Intrinsic<[],
+                                                  [llvm_i64_ty, llvm_i64_ty, llvm_i32_ty, llvm_i32_ty],
+                                                  [IntrWriteMem, IntrHasSideEffects, IntrWillReturn]>;
+
+
   class VortexCSRIntrinsicsImpl<LLVMType itype>
       : Intrinsic<[itype], [], [IntrNoMem, IntrWillReturn]>;
 
