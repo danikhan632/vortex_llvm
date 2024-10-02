@@ -191,8 +191,8 @@ Function *local_lw_; // New function pointer for WMMA intrinsi
     tmask_func_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_tmask_i32);
     tmc_func_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_tmc_i32);
     wmma_func_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_wmma_i32);
- local_sw_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_local_sw_i32);
-  local_lw_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_local_lw_i32);
+    local_sw_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_local_sw_i32);
+    local_lw_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_local_lw_i32);
   }
 
   // Find target vx intrinsic
