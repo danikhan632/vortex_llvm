@@ -136,7 +136,11 @@ bool VortexIntrinsicFuncLowering::runOnModule(Module &M) {
       {"vx_tmc", "llvm.riscv.vx.tmc"},
       {"vx_wmma", "llvm.riscv.vx_wmma"},
       {"local_sw", "llvm.riscv.vx_local_sw"},
-      {"local_lw", "llvm.riscv.vx_local_lw"}
+      {"local_lw", "llvm.riscv.vx_local_lw"},
+      {"vx_asyncbulk_ld_g2l_i32", "llvm.riscv.vx.asyncbulk.ld.g2l.i32"},
+      {"vx_asyncbulk_ld_g2l_i64", "llvm.riscv.vx.asyncbulk.ld.g2l.i64"},
+      {"vx_asyncbulk_st_l2g_i32", "llvm.riscv.vx.asyncbulk.st.l2g.i32"},
+      {"vx_asyncbulk_st_l2g_i64", "llvm.riscv.vx.asyncbulk.st.l2g.i64"}
 
       };
   // Type* SizeTTy_;
@@ -163,8 +167,15 @@ bool VortexIntrinsicFuncLowering::runOnModule(Module &M) {
   Function *tmask_func_;
   Function *tmc_func_;
   Function *wmma_func_; // New function pointer for WMMA intrinsic
-Function *local_sw_; // New function pointer for WMMA intrinsi
-Function *local_lw_; // New function pointer for WMMA intrinsi
+  Function *local_sw_; // New function pointer for WMMA intrinsi
+  Function *local_lw_; // New function pointer for WMMA intrinsi
+  Function *asyncbulk_ld_g2l_i32_func_;
+  Function *asyncbulk_ld_g2l_i64_func_;
+  Function *asyncbulk_st_l2g_i32_func_;
+  Function *asyncbulk_st_l2g_i64_func_;
+
+
+
 
   if (sizeTSize == 64) {
     bar_func_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_bar_i64);
@@ -177,8 +188,11 @@ Function *local_lw_; // New function pointer for WMMA intrinsi
     tmask_func_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_tmask_i64);
     tmc_func_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_tmc_i64);
     wmma_func_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_wmma_i64);
-  local_sw_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_local_sw_i64);
-  local_lw_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_local_lw_i64);
+    local_sw_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_local_sw_i64);
+    local_lw_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_local_lw_i64);
+    asyncbulk_ld_g2l_i64_func_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_asyncbulk_ld_g2l_i64);
+    asyncbulk_st_l2g_i64_func_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_asyncbulk_st_l2g_i64);
+
   } else {
     assert(sizeTSize == 32);
     bar_func_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_bar_i32);
@@ -193,6 +207,8 @@ Function *local_lw_; // New function pointer for WMMA intrinsi
     wmma_func_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_wmma_i32);
     local_sw_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_local_sw_i32);
     local_lw_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_local_lw_i32);
+    asyncbulk_ld_g2l_i32_func_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_asyncbulk_ld_g2l_i32);
+    asyncbulk_st_l2g_i32_func_ = Intrinsic::getDeclaration(&M, Intrinsic::riscv_vx_asyncbulk_st_l2g_i32);
   }
 
   // Find target vx intrinsic
@@ -221,7 +237,52 @@ Function *local_lw_; // New function pointer for WMMA intrinsi
         std::cout << "\033[34m" << check << "\033[0m" << std::endl;
         printColored("hiii", "magenta");
 
+// In the main loop where instructions are processed, add these cases:
+if (check == FTargetsMap.size() - 4) { // vx_asyncbulk_ld_g2l_i32
+  CallInst *CallInstr = dyn_cast<CallInst>(Instr);
+  Value *Arg0 = CallInstr->getArgOperand(0); // Base address register
+  Value *Arg1 = CallInstr->getArgOperand(1); // Immediate offset
+  Value *Arg2 = CallInstr->getArgOperand(2); // Number of addresses
 
+  auto asyncbulk_ld_g2l_i32_inst = CallInst::Create(asyncbulk_ld_g2l_i32_func_, {Arg0, Arg1, Arg2}, "", Instr);
+  Instr->replaceAllUsesWith(asyncbulk_ld_g2l_i32_inst);
+  CallToRemove.insert(Instr);
+}
+
+if (check == FTargetsMap.size() - 3) { // vx_asyncbulk_ld_g2l_i64
+  CallInst *CallInstr = dyn_cast<CallInst>(Instr);
+  Value *Arg0 = CallInstr->getArgOperand(0); // Base address register
+  Value *Arg1 = CallInstr->getArgOperand(1); // Immediate offset
+  Value *Arg2 = CallInstr->getArgOperand(2); // Number of addresses
+
+  auto asyncbulk_ld_g2l_i64_inst = CallInst::Create(asyncbulk_ld_g2l_i64_func_, {Arg0, Arg1, Arg2}, "", Instr);
+  Instr->replaceAllUsesWith(asyncbulk_ld_g2l_i64_inst);
+  CallToRemove.insert(Instr);
+}
+
+if (check == FTargetsMap.size() - 2) { // vx_asyncbulk_st_l2g_i32
+  CallInst *CallInstr = dyn_cast<CallInst>(Instr);
+  Value *Arg0 = CallInstr->getArgOperand(0); // Value to store
+  Value *Arg1 = CallInstr->getArgOperand(1); // Base address register
+  Value *Arg2 = CallInstr->getArgOperand(2); // Immediate offset
+  Value *Arg3 = CallInstr->getArgOperand(3); // Number of addresses
+
+  auto asyncbulk_st_l2g_i32_inst = CallInst::Create(asyncbulk_st_l2g_i32_func_, {Arg0, Arg1, Arg2, Arg3}, "", Instr);
+  Instr->replaceAllUsesWith(asyncbulk_st_l2g_i32_inst);
+  CallToRemove.insert(Instr);
+}
+
+if (check == FTargetsMap.size() - 1) { // vx_asyncbulk_st_l2g_i64
+  CallInst *CallInstr = dyn_cast<CallInst>(Instr);
+  Value *Arg0 = CallInstr->getArgOperand(0); // Value to store
+  Value *Arg1 = CallInstr->getArgOperand(1); // Base address register
+  Value *Arg2 = CallInstr->getArgOperand(2); // Immediate offset
+  Value *Arg3 = CallInstr->getArgOperand(3); // Number of addresses
+
+  auto asyncbulk_st_l2g_i64_inst = CallInst::Create(asyncbulk_st_l2g_i64_func_, {Arg0, Arg1, Arg2, Arg3}, "", Instr);
+  Instr->replaceAllUsesWith(asyncbulk_st_l2g_i64_inst);
+  CallToRemove.insert(Instr);
+}
 
   if (check == 10) { // local_sw
   printColored("woahhhh","red");
