@@ -167,16 +167,7 @@ let hasSideEffects = 1, mayStore = 0, mayLoad = 0 in {
   }
 }
 
-// WMMA instruction with adjusted format
-let hasSideEffects = 1, mayStore = 1, mayLoad = 1 in {
-  def VX_WMMA : RVInstR<0, 2, RISCV_CUSTOM1, (outs),
-                       (ins GPR:$rs1, GPR:$rs2, GPR:$rs3, GPR:$rs4,
-                            GPR:$rs5, GPR:$rs6, GPR:$rs7, GPR:$rs8,
-                            GPR:$rs9, GPR:$rs10, GPR:$rs11, GPR:$rs12),
-                       "vx_wmma", "$rs1, $rs2, $rs3, $rs4, $rs5, $rs6, $rs7, $rs8, $rs9, $rs10, $rs11, $rs12">, Sched<[]> {
-    let rd = 0;
-  }
-}
+
 
 // Pseudo Instructions
 def VX_MOV : Pseudo<(outs GPR:$dst), (ins GPR:$src), [], "vx_mov", "$dst, $src"> {}
@@ -235,35 +226,16 @@ def : Pat<(int_riscv_vx_mov_i64 GPR:$src),     (VX_MOV GPR:$src)>;
 def : Pat<(int_riscv_vx_bar_i32 GPR:$rs1, GPR:$rs2),    (VX_BAR GPR:$rs1, GPR:$rs2)>;
 def : Pat<(int_riscv_vx_bar_i64 GPR:$rs1, GPR:$rs2),    (VX_BAR GPR:$rs1, GPR:$rs2)>;
 
-// WMMA intrinsic patterns
-def : Pat<(int_riscv_vx_wmma_i32 GPR:$rs1, GPR:$rs2, GPR:$rs3, GPR:$rs4,
-                                  GPR:$rs5, GPR:$rs6, GPR:$rs7, GPR:$rs8,
-                                  GPR:$rs9, GPR:$rs10, GPR:$rs11, GPR:$rs12),
-          (VX_WMMA GPR:$rs1, GPR:$rs2, GPR:$rs3, GPR:$rs4,
-                   GPR:$rs5, GPR:$rs6, GPR:$rs7, GPR:$rs8,
-                   GPR:$rs9, GPR:$rs10, GPR:$rs11, GPR:$rs12)>;
-
-def : Pat<(int_riscv_vx_wmma_i64 GPR:$rs1, GPR:$rs2, GPR:$rs3, GPR:$rs4,
-                                  GPR:$rs5, GPR:$rs6, GPR:$rs7, GPR:$rs8,
-                                  GPR:$rs9, GPR:$rs10, GPR:$rs11, GPR:$rs12),
-          (VX_WMMA GPR:$rs1, GPR:$rs2, GPR:$rs3, GPR:$rs4,
-                   GPR:$rs5, GPR:$rs6, GPR:$rs7, GPR:$rs8,
-                   GPR:$rs9, GPR:$rs10, GPR:$rs11, GPR:$rs12)>;
 
 
 
-// WMMA intrinsic patterns
-def : Pat<(int_riscv_vx_wmma_i32 GPR:$rs1, GPR:$rs2, GPR:$rs3, GPR:$rs4,
-                                  GPR:$rs5, GPR:$rs6, GPR:$rs7, GPR:$rs8,
-                                  GPR:$rs9, GPR:$rs10, GPR:$rs11, GPR:$rs12),
-          (VX_WMMA GPR:$rs1, GPR:$rs2, GPR:$rs3, GPR:$rs4,
-                   GPR:$rs5, GPR:$rs6, GPR:$rs7, GPR:$rs8,
-                   GPR:$rs9, GPR:$rs10, GPR:$rs11, GPR:$rs12)>;
-
-def : Pat<(int_riscv_vx_wmma_i64 GPR:$rs1, GPR:$rs2, GPR:$rs3, GPR:$rs4,
-                                  GPR:$rs5, GPR:$rs6, GPR:$rs7, GPR:$rs8,
-                                  GPR:$rs9, GPR:$rs10, GPR:$rs11, GPR:$rs12),
-          (VX_WMMA GPR:$rs1, GPR:$rs2, GPR:$rs3, GPR:$rs4,
-                   GPR:$rs5, GPR:$rs6, GPR:$rs7, GPR:$rs8,
-                   GPR:$rs9, GPR:$rs10, GPR:$rs11, GPR:$rs12)>;
+// WMMA instruction with adjusted format
+let hasSideEffects = 0, mayStore = 0, mayLoad = 0 in {
+  def VX_WMMA : RVInstR<0, 2, RISCV_CUSTOM1, (outs),
+                       (ins GPR:$rd, GPR:$rs1, GPR:$rs2),
+                       "vx_wmma", "$rd, $rs2">, Sched<[]> {
+  
+  }
+}
+// WMMA intrinsic patterns for simplified instruction
 

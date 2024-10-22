@@ -309,21 +309,18 @@ if (check == 11) { // local_lw
 
         if (check == 9) { // WMMA case
           printColored("yooooooo", "magenta");
-          CallInst *WMMACall = dyn_cast<CallInst>(Instr);
 
-          // Collect all 12 arguments
+
+        CallInst *WMMACall = dyn_cast<CallInst>(Instr);
+
+          // Collect the three arguments
           std::vector<Value *> Args;
-          for (unsigned i = 0; i < 12; ++i) {
+          for (unsigned i = 0; i < 3; ++i) {
             Args.push_back(WMMACall->getArgOperand(i));
           }
 
           // Create a new WMMA instruction using wmma_func_
           CallInst *NewWMMACall = CallInst::Create(wmma_func_, Args, "", Instr);
-
-          // If the original call had a name, give the new call the same name
-          if (!Instr->getName().empty()) {
-            NewWMMACall->setName(Instr->getName());
-          }
 
           // Replace all uses of the old instruction with the new one
           Instr->replaceAllUsesWith(NewWMMACall);
@@ -331,6 +328,7 @@ if (check == 11) { // local_lw
           // Remove the original intrinsic call
           CallToRemove.insert(Instr);
         }
+        
         if (check == 0) {
           vxBarCallToRemove.insert(Instr);
 

@@ -72,9 +72,9 @@ let TargetPrefix = "riscv" in {
   //   ptr addr, ixlen cmpval, ixlen newval, ixlen mask, ixlenimm ordering)
   defm int_riscv_masked_cmpxchg : MaskedAtomicRMWFiveArgIntrinsics;
 
-  // Vortex extension
 
-// Vortex extension
+
+// Vortex_extension
 
 class VortexD1S1ImmIntrinsicsImpl<LLVMType itype>
     : Intrinsic<[itype], [itype, llvm_i32_ty], [IntrReadMem, IntrHasSideEffects, IntrConvergent]>;
@@ -94,21 +94,6 @@ multiclass VortexD0S2ImmIntrinsics {
 
 
 
-class VortexWMMAIntrinsicsImpl<LLVMType itype>
-    : Intrinsic<[], [
-        itype,           // shape (e.g., m16n16k16)
-        itype,           // A layout (row/col)
-        itype,           // B layout (row/col)
-        itype,           // C layout (row/col)
-        itype,           // A element type
-        itype,           // B element type
-        itype,           // C element type
-        itype,           // D element type (result)
-        llvm_ptr_ty,     // destination pointer
-        llvm_ptr_ty,     // A matrix pointer
-        llvm_ptr_ty,     // B matrix pointer
-        llvm_ptr_ty      // C matrix pointer
-    ], [IntrHasSideEffects, IntrConvergent]>;
 
   def int_riscv_vx_uniform : Intrinsic<[llvm_any_ty], [llvm_any_ty], [IntrNoMem]>;
 
@@ -150,6 +135,17 @@ def int_riscv_vx_asyncbulk_st_l2g_i64 : Intrinsic<[],
                                                   [IntrWriteMem, IntrHasSideEffects, IntrWillReturn]>;
 
 
+ // Intrinsic definition for vx_wmma with 3 operands
+def int_riscv_vx_wmma_i32 : Intrinsic<[],
+                                      [llvm_i32_ty, llvm_i32_ty, llvm_i32_ty],
+                                      [IntrHasSideEffects, IntrConvergent]>;
+
+def int_riscv_vx_wmma_i64 : Intrinsic<[],
+                                      [llvm_i64_ty, llvm_i64_ty, llvm_i64_ty],
+                                      [IntrHasSideEffects, IntrConvergent]>;
+                                                 
+
+
   class VortexCSRIntrinsicsImpl<LLVMType itype>
       : Intrinsic<[itype], [], [IntrNoMem, IntrWillReturn]>;
 
@@ -181,10 +177,6 @@ def int_riscv_vx_asyncbulk_st_l2g_i64 : Intrinsic<[],
     def _i32 : VortexD1S1IntrinsicsImpl<llvm_i32_ty>;
     def _i64 : VortexD1S1IntrinsicsImpl<llvm_i64_ty>;
   }
-  multiclass VortexWMMAIntrinsics {
-    def _i32 : VortexWMMAIntrinsicsImpl<llvm_i32_ty>;
-    def _i64 : VortexWMMAIntrinsicsImpl<llvm_i64_ty>;
-  }
 
 
   defm int_riscv_vx_tmask : VortexCSRIntrinsics;
@@ -204,12 +196,12 @@ def int_riscv_vx_asyncbulk_st_l2g_i64 : Intrinsic<[],
   defm int_riscv_vx_mov   : VortexD1S1Intrinsics;
   defm int_riscv_vx_bar  : VortexD0S2Intrinsics;
 
-  // New WMMA intrinsic
-  defm int_riscv_vx_wmma : VortexWMMAIntrinsics;
 
 
 
 
+
+// Vortex_extension
 
 
 

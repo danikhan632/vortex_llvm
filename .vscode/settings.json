@@ -67,5 +67,6 @@
         "stop_token": "cpp",
         "system_error": "cpp",
         "thread": "cpp"
-    }
+    },
+    "cmake.sourceDirectory": "/home/green/code/triton-vortex/llvm/lld"
 }
